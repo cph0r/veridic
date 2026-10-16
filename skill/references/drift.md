@@ -1,6 +1,6 @@
 # Contract drift: what the fields mean
 
-`plumb drift --scope scope.json` (JSON) or `--md` (a section to paste).
+`veridic drift --scope scope.json` (JSON) or `--md` (a section to paste).
 
 - `undocumented_statuses`: the handler returns them, the contract does not
   list them. Each one is an acceptance scenario candidate.

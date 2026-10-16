@@ -46,6 +46,6 @@ function summarize(r) {
     tables: r.schemas.map((t) => t.table ?? t.name),
     contract_ops: r.contract_ops.length,
     services: r.services.length,
-    read_list: `${r.read_list.length} ranges, ${r.read_list.reduce((n, x) => n + x.lines, 0)} lines: print them with \`plumb read\` (same seeds, or --scope <saved file>)`,
+    read_list: `${r.read_list.length} ranges, ${r.read_list.reduce((n, x) => n + x.lines, 0)} lines: print them with \`veridic read\` (same seeds, or --scope <saved file>)`,
   };
 }

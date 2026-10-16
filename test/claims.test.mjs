@@ -12,7 +12,7 @@ after(() => dirs.forEach((d) => fs.rmSync(d, { recursive: true, force: true })))
 
 // A small repo: a handler that uses a constant defined in another file.
 function repo() {
-  const d = fs.mkdtempSync(path.join(os.tmpdir(), "plumb-claims-"));
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), "veridic-claims-"));
   dirs.push(d);
   const files = {
     "src/limits.ts": `export const MAX_QTY = 20;\nexport const WINDOW_MS = 10_000;\nexport const log = makeLogger("x");\n`,

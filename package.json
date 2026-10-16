@@ -1,10 +1,10 @@
 {
-  "name": "plumbcode",
+  "name": "veridic",
   "version": "0.3.1",
   "description": "Know what your code really does, with proof, before you change it. Evidence-backed specs, honest test coverage and an agent-readiness report for existing codebases.",
   "type": "module",
   "bin": {
-    "plumb": "bin/plumb"
+    "veridic": "bin/veridic"
   },
   "files": [
     "bin/",
@@ -37,10 +37,10 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/cph0r/plumb.git"
+    "url": "git+https://github.com/cph0r/veridic.git"
   },
-  "homepage": "https://github.com/cph0r/plumb#readme",
+  "homepage": "https://github.com/cph0r/veridic#readme",
   "bugs": {
-    "url": "https://github.com/cph0r/plumb/issues"
+    "url": "https://github.com/cph0r/veridic/issues"
   }
 }

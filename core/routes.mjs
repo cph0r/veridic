@@ -156,7 +156,7 @@ export function routeInventory(g, { entry } = {}) {
     for (const m of src.matchAll(re)) {
       const line = src.slice(0, m.index).split("\n").length;
       if (known.has(`${f}:${line}`)) continue;
-      const n = { id: `plumb:route:${f}:${line}`, kind: "route", name: `${m[2].toUpperCase()} ${m[3]}`, file: f, start: line, end: line };
+      const n = { id: `veridic:route:${f}:${line}`, kind: "route", name: `${m[2].toUpperCase()} ${m[3]}`, file: f, start: line, end: line };
       routeNodes.push(n);
       g.nodes.set(n.id, n);
     }

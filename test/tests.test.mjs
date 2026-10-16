@@ -11,7 +11,7 @@ const dirs = [];
 after(() => dirs.forEach((d) => fs.rmSync(d, { recursive: true, force: true })));
 
 function repo(extra = {}) {
-  const d = fs.mkdtempSync(path.join(os.tmpdir(), "plumb-tests-"));
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), "veridic-tests-"));
   dirs.push(d);
   const files = {
     "src/order.ts": "export function place(q) {\n  if (q > 20) throw new Error('too many');\n  return q;\n}\n",
@@ -54,8 +54,8 @@ test("testCoverage: covered only when the named test reaches the cited code", ()
   assert.equal(r.summary.tested_pct, 25);
 });
 
-test("a plumb-spec binding keeps a test file to its own spec", () => {
-  const d = repo({ "src/__tests__/bound.test.ts": '// plumb-spec: specs/other/spec.md\nimport { place } from "../order";\nit("FR-004: bound elsewhere", () => { expect(place(1)).toBe(true); });\n' });
+test("a veridic-spec binding keeps a test file to its own spec", () => {
+  const d = repo({ "src/__tests__/bound.test.ts": '// veridic-spec: specs/other/spec.md\nimport { place } from "../order";\nit("FR-004: bound elsewhere", () => { expect(place(1)).toBe(true); });\n' });
   const r = testCoverage(d, SPEC, { specPath: path.join(d, "specs/orders/spec.md") });
   assert.equal(r.requirements.find((q) => q.id === "FR-004").status, "none");
 });
@@ -132,7 +132,7 @@ test("access matrix: plan gates, caller scoping, and mismatches with an intended
   const m = accessMatrix(g, inv);
   assert.deepEqual(m.map((r) => [r.access, r.plan, r.scoped]), [["auth", "free", "yes"], ["auth", "pro", "yes"], ["public", "free", "no"]]);
   assert.deepEqual(m[2].flags, ["id-param-without-caller-scope"]);
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "plumb-access-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "veridic-access-"));
   dirs.push(dir);
   fs.writeFileSync(path.join(dir, "a.csv"), "route,access,plan,scoped\n# pro features\n* /api/vendors*,auth,pro,yes\nGET /api/reports/*,auth,pro,yes\n");
   const c = compareAccess(m, loadIntended(path.join(dir, "a.csv")));
@@ -184,7 +184,7 @@ test("coverage counts only tests that assert; skipped describe blocks don't coun
 });
 
 test("the old specguard-spec binding comment still binds a test file", () => {
-  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "plumb-legacy-"));
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "veridic-legacy-"));
   const w = (f, t) => (fs.mkdirSync(path.dirname(path.join(repo, f)), { recursive: true }), fs.writeFileSync(path.join(repo, f), t));
   w("src/a.ts", "export const a = 1;\n");
   w("src/__tests__/a.test.ts", '// specguard-spec: specs/other/spec.md\nimport { a } from "../a";\nit("FR-001: x", () => { expect(a).toBe(1); });\n');

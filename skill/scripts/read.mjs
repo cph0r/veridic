@@ -31,6 +31,6 @@ run(() => {
   const footer =
     r.next == null
       ? `\n=== end: ${r.printed} ranges, ${r.lines} lines (all ${r.total} read_list entries covered)\n`
-      : `\n=== page ends: ${r.printed} ranges, ${r.lines} lines. Next page: plumb read ${seeds} --from ${r.next}\n`;
+      : `\n=== page ends: ${r.printed} ranges, ${r.lines} lines. Next page: veridic read ${seeds} --from ${r.next}\n`;
   writeAll(r.text + footer);
 }, usage);

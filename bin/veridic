@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// plumb CLI. On the Bash tool's PATH while the plugin is enabled, so Claude
-// (or anyone) runs `plumb metrics` from inside a repo. --repo defaults to the
+// veridic CLI. On the Bash tool's PATH while the plugin is enabled, so Claude
+// (or anyone) runs `veridic metrics` from inside a repo. --repo defaults to the
 // current git repository.
 
 import { spawnSync, execFileSync } from "node:child_process";
@@ -34,7 +34,7 @@ const [cmd, ...rest] = process.argv.slice(2);
 if (!cmd || cmd === "help" || cmd === "--help" || !COMMANDS[cmd]) {
   const width = Math.max(...Object.keys(COMMANDS).map((k) => k.length));
   process.stdout.write(
-    `plumb <command> [--repo <path>] [options]\n\n${Object.entries(COMMANDS)
+    `veridic <command> [--repo <path>] [options]\n\n${Object.entries(COMMANDS)
       .map(([k, [, d]]) => `  ${k.padEnd(width)}  ${d}`)
       .join("\n")}\n\nEach prints JSON and exits 0 (ok), 1 (problems found) or 2 (usage error).\n`,
   );

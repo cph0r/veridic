@@ -23,7 +23,7 @@ run(() => {
   inv.routes = inv.routes.filter((r) => words.every((w) => r.id.toLowerCase().includes(w)));
   const manifest = effectManifest(g, inv);
   if (a.manifest) {
-    if (a.out) fs.writeFileSync(a.out, JSON.stringify({ generated_by: "plumb agent-ready", tools: manifest }, null, 2));
+    if (a.out) fs.writeFileSync(a.out, JSON.stringify({ generated_by: "veridic agent-ready", tools: manifest }, null, 2));
     emit(a.out ? { wrote: a.out, tools: manifest.length } : { tools: manifest }, 0);
   }
   const comparison = a.intended ? compareAccess(accessMatrix(g, inv), loadIntended(a.intended)) : null;

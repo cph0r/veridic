@@ -1,5 +1,5 @@
 // A tiny Express repo with a hand-built CodeGraph index (only the columns
-// plumb reads), so scope and drift can be tested without a real index.
+// veridic reads), so scope and drift can be tested without a real index.
 
 import { DatabaseSync } from "node:sqlite";
 import fs from "node:fs";
@@ -111,7 +111,7 @@ const EDGES = [
 ];
 
 export function makeRepo() {
-  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "plumb-fixture-"));
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "veridic-fixture-"));
   for (const [f, src] of Object.entries(FILES)) {
     fs.mkdirSync(path.join(repo, path.dirname(f)), { recursive: true });
     fs.writeFileSync(path.join(repo, f), src);

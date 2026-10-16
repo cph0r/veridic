@@ -179,7 +179,7 @@ function validate(repo, spec, mutants, n, seed, bases = []) {
   take(outside, Math.ceil(n / 2));
   take(inside, n - sample.length);
 
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "plumb-mutate-"));
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "veridic-mutate-"));
   try {
     execFileSync("git", ["clone", "-q", "--shared", repo, tmp], { stdio: "ignore" });
     const disagreements = [];

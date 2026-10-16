@@ -2,28 +2,28 @@
 description: Write an evidence-backed spec for an existing feature (gathers context first; runs on Sonnet)
 argument-hint: "<feature, route, or file> [output folder]"
 model: claude-sonnet-5-5
-allowed-tools: Bash(plumb:*)
+allowed-tools: Bash(veridic:*)
 ---
 
 Write a spec for: $ARGUMENTS
 
-Follow the plumb skill. This command uses its cheapest proven path: gather
+Follow the veridic skill. This command uses its cheapest proven path: gather
 the feature's context once, before reading anything else.
 
-1. **Pick seeds.** `plumb routes <a word or two from the feature>` lists
+1. **Pick seeds.** `veridic routes <a word or two from the feature>` lists
    matching routes. Choose the feature's entry routes (several is normal: create,
    status, payment, webhook…). If the user named a file or function, seed with
    that instead.
 2. **Gather once** into the output folder (default `specs/<feature>/` in the
    current project, never inside the target repo):
    ```bash
-   plumb prepare --out <folder>/context.md "<METHOD /path>" "<METHOD /path>" …
+   veridic prepare --out <folder>/context.md "<METHOD /path>" "<METHOD /path>" …
    ```
    It prints a one-line summary. Then **read `<folder>/context.md` in full**
    (scope, contract comparison, every relevant code range with real line
    numbers). Read other files only for what it doesn't show; if the feature can
    unlock or limit other parts of the app, check those parts yourself.
 3. Continue from step 3 of the skill's sequence: write `spec.md` once, verify
-   once with `plumb cite` and `plumb claims`, fix, verify again, then
-   `plumb tests --spec <folder>/spec.md --table > <folder>/traceability.md`.
-4. Finish with `plumb metrics --md <folder>/spec.md` and show the table.
+   once with `veridic cite` and `veridic claims`, fix, verify again, then
+   `veridic tests --spec <folder>/spec.md --table > <folder>/traceability.md`.
+4. Finish with `veridic metrics --md <folder>/spec.md` and show the table.

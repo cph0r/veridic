@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Every plumb number in one call: citations resolving, claims supported,
+// Every veridic number in one call: citations resolving, claims supported,
 // anchors, staleness, dependency coverage, and how much of the API is specified.
 // Default: every tracked *spec.md in the repo. --md prints a table instead of JSON.
 

@@ -1,6 +1,6 @@
 {
-  "name": "plumb",
-  "displayName": "Plumb",
+  "name": "veridic",
+  "displayName": "Veridic",
   "version": "0.3.1",
   "description": "Know what your code really does, with proof, before you change it: evidence-backed specs that stay in sync, tests that must really assert, risk and access checks, and an agent-readiness report for exposing your API to AI agents.",
   "keywords": [
@@ -19,6 +19,6 @@
     "name": "Chirag Phor",
     "url": "https://github.com/cph0r"
   },
-  "homepage": "https://github.com/cph0r/plumb",
-  "repository": "https://github.com/cph0r/plumb"
+  "homepage": "https://github.com/cph0r/veridic",
+  "repository": "https://github.com/cph0r/veridic"
 }

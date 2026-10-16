@@ -44,6 +44,6 @@ run(() => {
     ...(cov.summary.criteria ? { criteria: { total: cov.summary.criteria, covered: cov.summary.criteria_covered } } : {}),
     counts: { requirements: spec.requirements.length, invariants: spec.invariants?.length ?? 0, risks: spec.risks?.length ?? 0, stories: spec.stories?.length ?? 0 },
     ...(generated.error ? { generated_error: generated.error } : {}),
-    next: "plumb cite --spec spec.md, then plumb claims --spec spec.md",
+    next: "veridic cite --spec spec.md, then veridic claims --spec spec.md",
   });
 }, usage);

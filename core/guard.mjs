@@ -10,9 +10,9 @@ import { openSymbols } from "./anchors.mjs";
 
 const sh = (cmd, args, cwd) => execFileSync(cmd, args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
 
-/** Specs to guard: PLUMB_SPECS (comma-separated, repo-relative) or every tracked `spec.md`. */
+/** Specs to guard: VERIDIC_SPECS (comma-separated, repo-relative) or every tracked `spec.md`. */
 export function findSpecs(repo, env = process.env) {
-  const list = env.PLUMB_SPECS ?? env.SPECGUARD_SPECS; // SPECGUARD_SPECS: the old name
+  const list = env.VERIDIC_SPECS ?? env.PLUMB_SPECS ?? env.SPECGUARD_SPECS; // PLUMB_/SPECGUARD_: old names
   if (list) return list.split(",").map((s) => s.trim()).filter(Boolean);
   return sh("git", ["ls-files", "--", "*spec.md"], repo).split("\n").filter(Boolean);
 }

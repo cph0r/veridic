@@ -145,7 +145,7 @@ test("guard rewrites moved citations in place and reports edited ones", () => {
   insertTop(repo, "src/services/orders.ts", ["// header"]);
   syncIndex(repo, "src/services/orders.ts", 1);
   fs.writeFileSync(path.join(repo, "src/log.ts"), "export function log(msg) {\n  console.error(msg);\n}\n");
-  const report = guard(repo, { sync: false, env: { PLUMB_SPECS: "spec.md" } });
+  const report = guard(repo, { sync: false, env: { VERIDIC_SPECS: "spec.md" } });
   assert.equal(report.specs[0].fixed, 1);
   assert.equal(report.problems, 1);
   assert.deepEqual(report.specs[0].stale.map((s) => s.fr), ["FR-002"]);
@@ -170,7 +170,7 @@ test("guard on a committed spec is idempotent: a second run changes nothing", ()
   insertTop(repo, "src/services/orders.ts", ["// a", "// b"]);
   syncIndex(repo, "src/services/orders.ts", 2);
   fs.writeFileSync(path.join(repo, "src/log.ts"), "export function log(msg) {\n  console.error(msg);\n}\n");
-  const env = { PLUMB_SPECS: "spec.md" };
+  const env = { VERIDIC_SPECS: "spec.md" };
 
   const first = guard(repo, { sync: false, env });
   const afterFirst = fs.readFileSync(path.join(repo, "spec.md"), "utf8");

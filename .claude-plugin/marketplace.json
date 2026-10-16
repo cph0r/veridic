@@ -1,15 +1,15 @@
 {
-  "name": "plumb",
+  "name": "veridic",
   "owner": {
     "name": "Chirag Phor",
     "url": "https://github.com/cph0r"
   },
   "metadata": {
-    "description": "Plumb: know what your code really does, with proof, before you change it."
+    "description": "Veridic: know what your code really does, with proof, before you change it."
   },
   "plugins": [
     {
-      "name": "plumb",
+      "name": "veridic",
       "description": "Know what your code really does, with proof, before you change it: evidence-backed specs that stay in sync, tests that must really assert, risk and access checks, and an agent-readiness report for exposing your API to AI agents.",
       "source": "./"
     }

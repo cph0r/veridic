@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Install the plumb git pre-commit hook into a repo. Refuses to overwrite an
+// Install the veridic git pre-commit hook into a repo. Refuses to overwrite an
 // existing hook unless --force; prints what it did.
 //
 //   node install.mjs --repo <path> [--force]
@@ -24,5 +24,5 @@ if (fs.existsSync(target) && !args.includes("--force")) {
   process.exit(1);
 }
 fs.mkdirSync(hooksDir, { recursive: true });
-fs.writeFileSync(target, `#!/bin/sh\n# plumb: keep specs in step with the code being committed\nexec node "${script}"\n`, { mode: 0o755 });
+fs.writeFileSync(target, `#!/bin/sh\n# veridic: keep specs in step with the code being committed\nexec node "${script}"\n`, { mode: 0o755 });
 console.log(`installed ${target} -> ${script}`);

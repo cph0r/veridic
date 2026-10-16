@@ -26,7 +26,7 @@ export function prepare(repo, seeds, opts = {}) {
 
   const out = [];
   out.push(`# Feature context`, "");
-  out.push(`Gathered by \`plumb prepare\` for: ${seeds.map((s) => `\`${s}\``).join(", ")}.`);
+  out.push(`Gathered by \`veridic prepare\` for: ${seeds.map((s) => `\`${s}\``).join(", ")}.`);
   out.push(`It is facts and code only. Line numbers are real: cite them as \`[evidence: path:start-end]\`. Read more of the repo only for what this doesn't show (types, tests, config).`, "");
 
   const unit = (u) => `- \`${u.id}\` at \`${u.at}\`${u.seed ? " (seed)" : ""}${u.tier ? ` [${u.tier}]` : ""}${u.shared?.length ? ` via ${u.shared.slice(0, 2).map((s) => `\`${s.symbol}\``).join(", ")}` : ""}${u.shared_literals?.length ? ` shares state ${u.shared_literals.map((l) => `\`${l}\``).join(", ")}` : ""}`;

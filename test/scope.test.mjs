@@ -123,7 +123,7 @@ test("routeInventory finds routes on named routers that CodeGraph doesn't index"
     "src/app.ts": 'import express from "express";\nimport { ordersRouter } from "./orders";\nconst app = express();\napp.use("/api", ordersRouter);\n',
     "src/orders.ts": 'import { Router } from "express";\nexport const ordersRouter = Router();\nordersRouter.get("/orders", (req, res) => {\n  res.json([]);\n});\nordersRouter.post(\n  "/orders/:id/refund", (req, res) => res.end());\n',
   };
-  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "plumb-named-"));
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "veridic-named-"));
   for (const [f, t] of Object.entries(files)) fs.mkdirSync(path.dirname(path.join(repo, f)), { recursive: true }), fs.writeFileSync(path.join(repo, f), t);
   const fake = {
     repo,

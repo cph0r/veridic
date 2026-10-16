@@ -1,4 +1,4 @@
-// Every plumb number in one pass, for one or more specs: are the citations
+// Every veridic number in one pass, for one or more specs: are the citations
 // right (resolve, support their claims), will they survive change (anchored,
 // in step with the code, dependencies cited), and how much of the API is
 // specified at all. Read-only.

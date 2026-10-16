@@ -1,18 +1,18 @@
-# plumb in CI: fail a pull request whose code changes leave a spec stale.
-# Copy to .github/workflows/plumb.yml. It assumes plumb is vendored at
-# tools/plumb (adjust PLUMB). --pr reads each spec as it was on the base
+# veridic in CI: fail a pull request whose code changes leave a spec stale.
+# Copy to .github/workflows/veridic.yml. It assumes veridic is vendored at
+# tools/veridic (adjust VERIDIC). --pr reads each spec as it was on the base
 # branch, finds the requirements this PR's diff affects, and fails unless the
 # PR's version of the spec updated them. Moved-only citations are updated
 # locally by the pre-commit hook or `stale.mjs --fix`. No CodeGraph index needed.
 
-name: plumb
+name: veridic
 on: pull_request
 
 jobs:
   specs:
     runs-on: ubuntu-latest
     env:
-      PLUMB: tools/plumb/skill/scripts
+      VERIDIC: tools/veridic/skill/scripts
     steps:
       - uses: actions/checkout@v4
         with:
@@ -24,7 +24,7 @@ jobs:
         run: |
           status=0
           for spec in $(git ls-files -- '*spec.md'); do
-            node "$PLUMB/stale.mjs" --repo . --spec "$spec" \
+            node "$VERIDIC/stale.mjs" --repo . --spec "$spec" \
               --range "origin/${{ github.base_ref }}...HEAD" --pr > "/tmp/$(basename "$(dirname "$spec")").json" || status=1
           done
           [ $status -eq 0 ] || { cat /tmp/*.json; echo "::error::specs are stale; run stale.mjs --fix locally and update flagged requirements"; }

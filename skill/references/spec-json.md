@@ -1,6 +1,6 @@
 # spec.json (spec v2)
 
-Write the spec as data; `plumb render --spec spec.json` validates it and
+Write the spec as data; `veridic render --spec spec.json` validates it and
 writes `spec.md` (Spec Kit layout) and `traceability.md` next to it. The
 contract and state-machine sections are generated from the code; don't write
 them. Fix every problem `render` reports and run it again.

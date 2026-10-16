@@ -1,13 +1,13 @@
 ---
 description: Check a spec's citations resolve and hold the facts each requirement states
 argument-hint: "<spec.md>"
-allowed-tools: Bash(plumb:*)
+allowed-tools: Bash(veridic:*)
 ---
 
 Check the spec at `$ARGUMENTS`:
 
 ```bash
-plumb check --spec $ARGUMENTS
+veridic check --spec $ARGUMENTS
 ```
 
 This prints two JSON documents: `cite` (does each citation resolve; the cited text) and `claims` (do the cited lines hold the facts the requirement states).

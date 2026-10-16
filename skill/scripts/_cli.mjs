@@ -1,4 +1,4 @@
-// Shared argument parsing and output for the plumb scripts. Every script
+// Shared argument parsing and output for the veridic scripts. Every script
 // prints one JSON document to stdout and exits 0 (ok), 1 (problems found) or
 // 2 (usage or setup error).
 

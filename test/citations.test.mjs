@@ -10,7 +10,7 @@ import { parseDiff, touches, shiftLine, staleness } from "../core/staleness.mjs"
 const tmp = [];
 after(() => tmp.forEach((d) => fs.rmSync(d, { recursive: true, force: true })));
 const mkdir = () => {
-  const d = fs.mkdtempSync(path.join(os.tmpdir(), "plumb-cite-"));
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), "veridic-cite-"));
   tmp.push(d);
   return d;
 };

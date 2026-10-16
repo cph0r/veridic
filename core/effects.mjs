@@ -15,7 +15,7 @@ const EFFECTS = [
   ["moves_money", /\b(?:razorpay|phonepe|stripe|paypal|cashfree|paytm)\b[\w.]*\s*\.|\binitiatePayment\s*\(|\bcheckPaymentStatus\s*\(|\b(?:refund|charge|capture)(?:Payment)?\s*\(|\bconfirm\w*Payment\s*\(|\bactivateSubscription\s*\(|\bpaidAt\s*:(?!\s*\w+Table\.)/i],
   ["external", /\bfetch\s*\(|\baxios\b[\w.]*\(|\bgot\s*\(|\bnew\s+(?:Razorpay|Stripe|OpenAI|Anthropic)\b|\.chat\.completions\.create\s*\(|\bgenerateContent\s*\(/],
   // Calls that tell someone else (email, SMS, WhatsApp, push, a dashboard, a POS): not
-  // logger or internal event plumbing, and not the functions' own declarations.
+  // logger or internal event wiring, and not the functions' own declarations.
   ["notifies", /(?<!function\s)(?<![.\w])(?:send\w*(?:Email|Mail|Sms|SMS|Whatsapp|WhatsApp|Push|Message|Notification)\w*|notify\w*|pushOrderTo\w+|sendTemplate\w*)\s*\(|\bresend\.emails\.send\(|\btwilio\.messages\./],
 ];
 const COMMENT = /^\s*(?:\/\/|\*|\/\*)/;

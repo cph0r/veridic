@@ -117,7 +117,7 @@ export function generatedSections(repo, seeds) {
 
 /** spec.json -> spec.md, in Spec Kit's section order. */
 export function renderMarkdown(spec, generated = {}) {
-  const out = [`# Feature Specification: ${spec.feature}`, "", `**Status**: ${spec.status ?? "Recovered from code"} · **Seeds**: ${spec.seeds.map((s) => `\`${s}\``).join(", ")}`, "", "_Rendered by `plumb render` from spec.json; edit the JSON, not this file._", ""];
+  const out = [`# Feature Specification: ${spec.feature}`, "", `**Status**: ${spec.status ?? "Recovered from code"} · **Seeds**: ${spec.seeds.map((s) => `\`${s}\``).join(", ")}`, "", "_Rendered by `veridic render` from spec.json; edit the JSON, not this file._", ""];
 
   out.push("## User Scenarios & Testing", "");
   for (const s of spec.stories ?? []) {

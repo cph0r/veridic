@@ -2,7 +2,7 @@
 
 ## Anchor the citations
 
-`plumb anchor --spec S --write` turns `path:120-140` into
+`veridic anchor --spec S --write` turns `path:120-140` into
 `path:120-140#createOrder@26`: the smallest enclosing symbol and the line it
 started on. An anchored citation can be moved automatically when code above it
 changes, because CodeGraph knows where `createOrder` starts now. Citations at
@@ -11,8 +11,8 @@ file top level stay plain; that's fine.
 ## On a later change
 
 ```bash
-plumb stale --spec S --fix                                  # local: update what only moved
-plumb stale --spec S --range origin/main...HEAD --pr       # CI
+veridic stale --spec S --fix                                  # local: update what only moved
+veridic stale --spec S --range origin/main...HEAD --pr       # CI
 ```
 
 - `--fix` rewrites citations whose code only moved (by the diff, confirmed by
@@ -29,17 +29,17 @@ plumb stale --spec S --range origin/main...HEAD --pr       # CI
 
 ## Keep it automatic
 
-- **git pre-commit**: `plumb install-hook` (refuses to overwrite an existing
+- **git pre-commit**: `veridic install-hook` (refuses to overwrite an existing
   hook). Updates moved citations and stages the spec; blocks the commit when a
-  cited requirement's code changed. Bypass once with `PLUMB_ALLOW_STALE=1`.
+  cited requirement's code changed. Bypass once with `VERIDIC_ALLOW_STALE=1`.
 - **Claude Code Stop hook**: in the target repo's `.claude/settings.json`,
   `{"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "node <path>/hooks/claude-stop.mjs"}]}]}}`.
 - **CI**: `hooks/github-actions.yml` runs `stale --pr` on every spec.
 
-All three find specs as every tracked `*spec.md`, or `PLUMB_SPECS`.
+All three find specs as every tracked `*spec.md`, or `VERIDIC_SPECS`.
 Installing a hook writes into the target repo: ask the user first.
 
 ## Measuring a spec
 
-`plumb metrics --md`: citations resolving, claims supported, anchors,
+`veridic metrics --md`: citations resolving, claims supported, anchors,
 staleness, dependency coverage, tests, and spec coverage of the API.
