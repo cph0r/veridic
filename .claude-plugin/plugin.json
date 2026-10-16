@@ -1,7 +1,7 @@
 {
   "name": "plumb",
   "displayName": "Plumb",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Know what your code really does, with proof, before you change it: evidence-backed specs that stay in sync, tests that must really assert, risk and access checks, and an agent-readiness report for exposing your API to AI agents.",
   "keywords": [
     "spec-driven-development",
