@@ -16,7 +16,7 @@ run(() => {
   const specPath = a.spec ?? a._[0];
   if (!a.repo || !specPath) fail("need --repo and --spec", usage);
   const symbols = openSymbols(a.repo);
-  if (!symbols) fail(`no CodeGraph index in ${a.repo}; run \`codegraph init\``, usage);
+  if (!symbols) fail(`no CodeGraph index in ${a.repo}; run \`veridic init\``, usage);
   const spec = fs.readFileSync(specPath, "utf8");
   const parsed = parseSpec(spec);
   const resolve = makeResolver(a.repo, { aliases: parsed.aliases, bases: [...(a.base ? [a.base] : []), ...parsed.bases] });

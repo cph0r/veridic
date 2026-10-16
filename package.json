@@ -18,8 +18,11 @@
   "engines": {
     "node": ">=22.5"
   },
+  "dependencies": {
+    "@colbymchenry/codegraph": "1.6.0"
+  },
   "scripts": {
-    "test": "node --test \"test/*.test.mjs\""
+    "test": "VERIDIC_NO_SYNC=1 node --test \"test/*.test.mjs\""
   },
   "keywords": [
     "spec-driven-development",

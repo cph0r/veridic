@@ -4,6 +4,7 @@
 // createOrder starts now; the range moves by the same amount. A text check on
 // the symbol's line catches an index that is older than the working tree.
 
+import { freshIndex } from "./indexer.mjs";
 import { DatabaseSync } from "node:sqlite";
 import fs from "node:fs";
 import path from "node:path";
@@ -14,6 +15,7 @@ const ANCHOR_KINDS = ["function", "method", "class", "constant", "variable", "co
 export function openSymbols(repo) {
   const dbPath = path.join(repo, ".codegraph", "codegraph.db");
   if (!fs.existsSync(dbPath)) return null;
+  freshIndex(repo);
   const db = new DatabaseSync(dbPath, { readOnly: true });
   const rows = db
     .prepare(`select name, kind, file_path file, start_line start, end_line end from nodes where kind in (${ANCHOR_KINDS.map(() => "?").join(",")})`)

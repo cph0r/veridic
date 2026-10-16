@@ -2,6 +2,7 @@
 // source-text helpers the other core modules share. Everything is loaded into
 // memory once: a few thousand nodes and tens of thousands of edges.
 
+import { freshIndex } from "./indexer.mjs";
 import { DatabaseSync } from "node:sqlite";
 import fs from "node:fs";
 import path from "node:path";
@@ -16,7 +17,8 @@ export const isTestFile = (f) => /(^|\/)(e2e|__tests__|tests?)\/|\.(test|spec)\.
 export function openGraph(repo) {
   repo = path.resolve(repo);
   const dbPath = path.join(repo, ".codegraph", "codegraph.db");
-  if (!fs.existsSync(dbPath)) throw new Error(`No CodeGraph index at ${dbPath}. Run \`codegraph init\` in the repo first.`);
+  if (!fs.existsSync(dbPath)) throw new Error(`No code index at ${dbPath}. Run \`veridic init\` in the repo first.`);
+  freshIndex(repo); // line numbers must come from the code as it is now
   const db = new DatabaseSync(dbPath, { readOnly: true });
 
   const nodes = new Map();

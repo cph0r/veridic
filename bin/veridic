@@ -9,6 +9,7 @@ import path from "node:path";
 
 const root = path.resolve(path.dirname(fs.realpathSync(process.argv[1])), "..");
 const COMMANDS = {
+  init: ["skill/scripts/init.mjs", "set a repo up: find codegraph (--install to install it), build or update the code index, check routes"],
   metrics: ["skill/scripts/metrics.mjs", "every number in one call (--md for a table)"],
   check: [null, "cite + claims: are the citations right?"],
   routes: ["skill/scripts/routes.mjs", "list the app's routes, filtered by words (to pick seeds)"],
@@ -24,6 +25,8 @@ const COMMANDS = {
   claims: ["skill/scripts/claims.mjs", "do cited lines hold the facts each requirement states"],
   anchor: ["skill/scripts/anchor.mjs", "add symbol anchors so citations survive code moving"],
   stale: ["skill/scripts/stale.mjs", "requirements a change touched (--fix, --pr)"],
+  done: ["skill/scripts/done.mjs", "is it done: the change stayed in the claimed requirements' seam, and each criterion has an asserting (passing, with --run) test (--card)"],
+  why: ["skill/scripts/why.mjs", "the commits behind a requirement's cited lines, as decision evidence"],
   mutate: ["skill/scripts/mutate.mjs", "would the guard notice the code behind a requirement changing"],
   tests: ["skill/scripts/tests.mjs", "which requirements have a named test that reaches their code (--run: pass/fail)"],
   scaffold: ["skill/scripts/scaffold.mjs", "test skeleton: one placeholder per requirement, named with its id"],

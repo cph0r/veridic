@@ -39,6 +39,9 @@ checking. Nothing in the verdict can be talked into passing.
 | 🔁 **Specs that stay true** | `veridic stale --fix` | When code moves, citations follow it. When cited code *changes*, the requirement is flagged. Runs as a git pre-commit hook, a Claude Code Stop hook, or a GitHub Action. |
 | 🧪 **Honest test coverage** | `veridic tests --run` | A requirement counts as tested only if a test named for it reaches the cited code **and asserts something**. Empty tests, `expect(true).toBe(true)`, `xit` and `describe.skip` don't count; `toBeTruthy`-only tests are called out as weak. |
 | 🤖 **Agent readiness** | `veridic agent-ready` | What each route *really* does (read, write, destructive, moves money, notifies someone), traced through the code it calls. Finds GETs that write and money routes that act on ids the caller doesn't own, before you hand your API to an AI agent. |
+| ✅ **"Done" means done** | `veridic done FR-002` | When an agent says it implemented a requirement, check it: every changed file is inside that requirement's *seam* (the files it cites or declares, plus its tests), and every verification criterion has an asserting, passing test. Stray edits are named. |
+| 🧾 **Decisions with receipts** | `veridic why FR-002` | Finds the commits that wrote a requirement's lines, so the spec can record *why* the code is the way it is, citing the commit. Decisions are append-only and checked against git. |
+| 🔒 **Results tied to the code** | `veridic metrics --card` | Stored results carry a fingerprint of the code they checked. Change the code and the old "passing" is reported outdated, never green. One-screen verdict cards for every check. |
 | 🔎 **Risk finders** | `veridic scope`, `states`, `access`, `drift` | Everything that belongs to a feature (webhooks and timers included), timer races in state machines, routes missing ownership or paywall checks, and where your OpenAPI contract and the code disagree. |
 
 ## See it
@@ -97,13 +100,17 @@ the author. Run it on your code and see.
 
 ## Install
 
-**Requirements:** Node ≥ 22.5 (Veridic reads the index with the built-in `node:sqlite`)
-and a [CodeGraph](https://github.com/colbymchenry/codegraph) index of your repo:
+**Requirements:** Node ≥ 22.5 (Veridic reads its code index with the built-in `node:sqlite`).
+The index comes from [CodeGraph](https://github.com/colbymchenry/codegraph), which installs
+with Veridic from npm and Homebrew. Then, in your repo:
 
 ```bash
-npm i -g @colbymchenry/codegraph
-cd your-repo && codegraph init
+veridic init        # builds the code index and checks routes are found
 ```
+
+After that the index keeps itself up to date: when the code has moved on, the
+next command syncs it first (usually under a second), so line numbers are never
+stale. With the plugin only, `veridic init --install` installs CodeGraph for you.
 
 **As a Claude Code plugin** (recommended: adds the skill, `/veridic:*` commands and the `veridic` CLI):
 
@@ -122,6 +129,7 @@ brew install cph0r/tap/veridic  # or Homebrew
 ## Quick start
 
 ```bash
+veridic init                             # once per repo
 veridic routes payment                 # find the routes for a feature
 veridic scope "POST /api/orders"       # everything that belongs to it, and what to read
 veridic agent-ready --md               # is this API safe to hand to an agent?
@@ -134,7 +142,8 @@ In Claude Code:
 /veridic:spec the checkout flow        # write an evidence-backed spec (gathers context first)
 /veridic:check specs/checkout/spec.md  # do the citations hold?
 /veridic:tests                         # which requirements have real tests
-/veridic:metrics                       # every number in one table
+/veridic:metrics                       # one verdict card per spec
+/veridic:done specs/checkout/spec.md FR-002   # is it really done?
 /veridic:hooks                         # keep specs in sync on every commit
 ```
 
@@ -142,7 +151,8 @@ In Claude Code:
 
 | Command | What it does |
 |---|---|
-| `veridic metrics` | Every number in one call (`--md` for a table) |
+| `veridic init` | Set a repo up: build the code index, check routes (`--install` installs CodeGraph) |
+| `veridic metrics` | Every number in one call (`--card` for a verdict card, `--md` for a table) |
 | `veridic check` | `cite` + `claims`: are the citations right? |
 | `veridic routes` | The app's routes, filtered by words |
 | `veridic scope` | What belongs to a feature, and what to read |
@@ -157,6 +167,8 @@ In Claude Code:
 | `veridic claims` | Do cited lines hold the facts each requirement states |
 | `veridic anchor` | Add symbol anchors so citations survive code moving |
 | `veridic stale` | Requirements a change touched (`--fix`, `--pr`) |
+| `veridic done` | Is it done: the change stayed in the claimed seam and every criterion has an asserting test (`--run`, `--card`) |
+| `veridic why` | The commits behind a requirement's cited lines, as decision evidence |
 | `veridic mutate` | Would the guard notice the code behind a requirement changing |
 | `veridic tests` | Which requirements have a real test (`--run` for pass/fail, `--table`) |
 | `veridic scaffold` | A test skeleton: one placeholder per requirement |
@@ -183,11 +195,13 @@ verify.** Veridic never asks a model whether a spec is right. It checks.
 ## What Veridic runs and touches
 
 Veridic runs locally and sends nothing anywhere: no telemetry, no network calls,
-no model calls from its scripts.
+no model calls from its scripts. It runs CodeGraph with CodeGraph's own anonymous
+telemetry switched off (`CODEGRAPH_TELEMETRY=0`).
 
 - **Reads:** your repo's files, `git` metadata (`git ls-files`, `git diff`, `git show`), and the CodeGraph index at `.codegraph/codegraph.db`.
-- **Runs:** `git`, Node, and, only with `veridic tests --run` / `render --run-tests`, your own tests through `npx --no-install vitest` (never downloads a package). `veridic mutate` works in a temporary `git clone --shared` and deletes it afterwards.
-- **Writes:** only what you ask for: spec files from `render` and `stale --fix`, a test skeleton from `scaffold`, and files named with `--out`. Generated test harnesses call your app on `127.0.0.1` only.
+- **Runs:** `git`, Node, `codegraph init`/`sync` to build and refresh the index in `.codegraph/` (which ignores itself in git), and, only with `veridic tests --run` / `render --run-tests`, your own tests through `npx --no-install vitest` (never downloads a package). `veridic mutate` works in a temporary `git clone --shared` and deletes it afterwards.
+- **Writes:** the index in `.codegraph/`, and otherwise only what you ask for: spec files from `render` and `stale --fix`, a test skeleton from `scaffold`, and files named with `--out`. Generated test harnesses call your app on `127.0.0.1` only.
+- **Installs nothing on its own:** `veridic init --install` runs `npm i -g @colbymchenry/codegraph@1.6.0` only when you pass `--install`.
 - **Hooks are opt-in:** `veridic install-hook` writes `.git/hooks/pre-commit` (it refuses to overwrite an existing one); it updates citations that only moved, stages the spec, and blocks a commit whose cited code changed without the spec. `/veridic:hooks` explains each hook and asks before writing `.claude/settings.json` or a CI workflow.
 
 ## Limits
@@ -195,11 +209,11 @@ no model calls from its scripts.
 - Route discovery understands **Express** (JS/TS). Other frameworks aren't supported yet.
 - `--run` executes tests with **vitest**.
 - Effects (writes, money, notifications) are found by patterns on the code a route reaches; unusual libraries can slip past.
-- Needs a CodeGraph index; re-run `codegraph sync` after big changes.
+- Index freshness is judged by file modification times; set `VERIDIC_NO_SYNC=1` to turn automatic syncing off.
 
 ## Roadmap
 
-- **Spec-aware "done" check:** when an agent says "implemented FR-002", verify the cited code is in the diff and an asserting `FR-002` test passes.
+- Run `veridic done` from the Claude Code Stop hook, so an agent can't finish with a stray edit or an untested requirement.
 - More frameworks (Fastify, Hono, Next.js route handlers).
 - Export the agent-readiness manifest as an MCP tool config with approval flags.
 

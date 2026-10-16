@@ -7,18 +7,19 @@ import fs from "node:fs";
 import path from "node:path";
 import { lineMentions } from "./anchors.mjs";
 
-const LABEL = /\*\*((?:FR|SC|NFR|R|AC|INV)-?\d+[a-z]?)\*\*|^\s*\|\s*((?:FR|SC|NFR|R|AC|INV)-?\d+[a-z]?)\s*\||^\s*(?:-|\d+\.)\s*((?:FR|SC|NFR|R|AC|INV)-?\d+[a-z]?)\s*[:.]/;
+const LABEL = /\*\*((?:FR|SC|NFR|R|AC|INV|D)-?\d+[a-z]?)\*\*|^\s*\|\s*((?:FR|SC|NFR|R|AC|INV|D)-?\d+[a-z]?)\s*\||^\s*(?:-|\d+\.)\s*((?:FR|SC|NFR|R|AC|INV|D)-?\d+[a-z]?)\s*[:.]/;
 const MAX_TEXT_LINES = 40;
 
 /**
  * Parse a spec into citations.
- * @returns {{ aliases: Record<string,string>, bases: string[], citations: { fr, spec_line, cite, file, start, end, bad? }[] }}
+ * @returns {{ aliases: Record<string,string>, bases: string[], citations: { fr, spec_line, cite, file, start, end, bad? }[], seams: { fr, file }[] }}
  */
 export function parseSpec(spec) {
   // Legend: `crud` = `routes/public/orders/crud.ts`; "Paths are relative to `artifacts/api-server/src/`".
   const aliases = Object.fromEntries([...spec.matchAll(/`([\w.-]+)`\s*=\s*`([^`]+)`/g)].map((m) => [m[1], m[2]]));
   const bases = [...spec.matchAll(/relative to\s+`([^`]+)`/gi)].map((m) => m[1].replace(/\/$/, ""));
   const citations = [];
+  const seams = []; // `[seam: path, path]`: files a requirement may touch, before it cites any code
   let section = null; // last FR label seen, for citations in continuation lines
   let heading = null;
   spec.split("\n").forEach((line, i) => {
@@ -30,6 +31,8 @@ export function parseSpec(spec) {
       section = null;
       heading = h[1].trim();
     }
+    for (const sm of line.matchAll(/\[seam:\s*([^\]]+)\]/g))
+      for (const raw of sm[1].split(/[,;]\s*/)) if (raw.trim()) seams.push({ fr: label ?? section, file: raw.trim().replace(/^`|`$/g, "").replace(/:\d+(?:-\d+)?$/, "") });
     for (const ev of line.matchAll(/\[evidence:\s*([^\]]+)\]/g)) {
       for (const raw of ev[1].split(/[,;]\s*/)) {
         const cite = raw.trim();
@@ -51,7 +54,7 @@ export function parseSpec(spec) {
       }
     }
   });
-  return { aliases, bases, citations };
+  return { aliases, bases, citations, seams };
 }
 
 /** Repo files from git (falls back to a directory walk), without node_modules. */

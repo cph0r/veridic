@@ -14,6 +14,7 @@ import { openSymbols } from "./anchors.mjs";
 import { openGraph } from "./graph.mjs";
 import { routeInventory } from "./routes.mjs";
 import { testCoverage } from "./tests.mjs";
+import { recordedBasis } from "./basis.mjs";
 
 const pct = (a, b) => (b ? Math.round((a / b) * 1000) / 10 : null);
 
@@ -69,6 +70,14 @@ export function specMetrics(repo, file, opts = {}) {
     const t = testCoverage(repo, text, { specPath: file, run: !!opts.runTests });
     Object.assign(m, { tested_pct: t.summary.tested_pct, ...(opts.runTests ? { passing_pct: t.summary.passing_pct, failing_tests: t.summary.failing } : {}) });
     m._failing = t.requirements.filter((r) => r.status === "failing").map((r) => r.id);
+    m._tests = t.summary;
+    // Stored results (traceability.md next to the spec) only count for the code they were computed on.
+    const trace = path.join(path.dirname(file), "traceability.md");
+    if (fs.existsSync(trace)) {
+      const rec = recordedBasis(fs.readFileSync(trace, "utf8"));
+      m.results_current = rec ? rec.digest === t.basis.digest : null;
+      m._basis = { now: t.basis.digest, recorded: rec?.digest ?? null, trace: path.relative(process.cwd(), trace) };
+    }
   } catch (e) {
     m.tests_error = e.message;
   }
@@ -134,13 +143,14 @@ export function metrics(repo, files, opts = {}) {
     for (const x of s._misplaced)
       for (const f of x.facts)
         attention.push(`${s.spec}: ${x.fr} states \`${f.fact}\`, which is not in its cited lines (${x.cites.join(", ")}) but appears at ${f.at}: extend the citation to that line, or reword the requirement`);
+    if (s.results_current === false) attention.push(`${s.spec}: traceability.md results were computed on different code (basis ${s._basis.recorded}, now ${s._basis.now}); re-run render --run-tests`);
     if (s._failing?.length) attention.push(`${s.spec}: requirement test(s) failing: ${s._failing.join(", ")}`);
     if (s.stale_requirements) attention.push(`${s.spec}: ${s.stale_requirements} requirement(s) cite code that changed (run stale)`);
     if (s.citations_to_update) attention.push(`${s.spec}: ${s.citations_to_update} citation(s) moved; run stale --fix`);
     for (const x of s._missed_constants ?? []) attention.push(`${s.spec}: ${x.fr} depends on uncited ${x.constants.map((c) => `${c.constant} (${c.at})`).join(", ")}`);
   }
   const clean = (s) => Object.fromEntries(Object.entries(s).filter(([k]) => !k.startsWith("_")));
-  return { repo, specs: specs.map(clean), coverage, attention };
+  return { repo, specs: specs.map(clean), coverage, attention, ...(opts.raw ? { _raw: specs } : {}) };
 }
 
 /** A compact Markdown table for people (and for Claude to paste back). */
@@ -155,6 +165,7 @@ export function toMarkdown(r) {
     ["dependency_score_pct", "Deps cited %"],
     ["tested_pct", "Tested %"],
     ...(r.specs.some((s) => s.passing_pct != null) ? [["passing_pct", "Passing %"]] : []),
+    ...(r.specs.some((s) => s.results_current != null) ? [["results_current", "Results current"]] : []),
   ];
   const fmt = (v) => (v == null ? "—" : String(v));
   const lines = [`| Spec | ${cols.map((c) => c[1]).join(" | ")} |`, `|---|${cols.map(() => "---:").join("|")}|`];

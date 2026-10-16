@@ -8,6 +8,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { validate, renderMarkdown, generatedSections, renderScaffolding } from "../../core/specdata.mjs";
 import { testCoverage, traceabilityTable } from "../../core/tests.mjs";
+import { checkDecisions, committedSpec } from "../../core/decisions.mjs";
 import { parseArgs, emit, fail, run } from "./_cli.mjs";
 
 const usage = "render.mjs --repo <path> --spec <spec.json> [--out-dir <dir>] [--run-tests]";
@@ -22,7 +23,9 @@ run(() => {
   } catch (e) {
     emit({ spec: specPath, rendered: false, problems: [{ at: "spec.json", problem: `not valid JSON: ${e.message}` }] }, 1);
   }
-  const problems = validate(spec);
+  const problems = [...validate(spec)];
+  // Decisions cite commits: they must exist, have touched the cited files, and stay append-only.
+  if (!problems.length && (spec.decisions?.length || committedSpec(a.repo, specPath)?.decisions?.length)) problems.push(...checkDecisions(a.repo, spec, committedSpec(a.repo, specPath)));
   if (problems.length) emit({ spec: specPath, rendered: false, problems }, 1);
 
   const dir = a["out-dir"] ?? path.dirname(specPath);
@@ -42,7 +45,7 @@ run(() => {
     rendered: true,
     wrote,
     ...(cov.summary.criteria ? { criteria: { total: cov.summary.criteria, covered: cov.summary.criteria_covered } } : {}),
-    counts: { requirements: spec.requirements.length, invariants: spec.invariants?.length ?? 0, risks: spec.risks?.length ?? 0, stories: spec.stories?.length ?? 0 },
+    counts: { requirements: spec.requirements.length, invariants: spec.invariants?.length ?? 0, decisions: spec.decisions?.length ?? 0, risks: spec.risks?.length ?? 0, stories: spec.stories?.length ?? 0 },
     ...(generated.error ? { generated_error: generated.error } : {}),
     next: "veridic cite --spec spec.md, then veridic claims --spec spec.md",
   });

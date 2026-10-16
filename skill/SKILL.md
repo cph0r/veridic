@@ -11,8 +11,9 @@ are read-only on the target repo, print compact JSON, and exit 0 (ok), 1
 defaults to it; `veridic help` lists them). Without the plugin they are
 `node scripts/<command>.mjs --repo R …` next to this file.
 
-If `R/.codegraph` is missing, ask the user to run `codegraph init`; don't run it
-yourself. Never write into the target repo. Write the spec where the user points.
+If `R/.codegraph` is missing, ask the user to run `veridic init` (it builds the
+code index); don't run it yourself. Commands keep an existing index up to date
+on their own. Never write into the target repo. Write the spec where the user points.
 
 ## Writing a spec: the sequence
 
@@ -48,6 +49,23 @@ its number of turns. Follow this order and don't repeat steps.
 
 Don't run `metrics`, `anchor`, `mutate` or `stale` while writing a spec; they
 are for maintenance (`references/maintenance.md`).
+
+## Implementing a requirement: is it done?
+
+After changing code for requirements, run `veridic done --spec S FR-002 [FR-003 …] --card`
+(add `--run` to run their tests). It is done only when every changed file is in
+the seam of what you claimed (the files those requirements cite or declare with
+`seam`, plus their named tests) and every verification criterion has an
+asserting test. A stray file means you changed something no claimed requirement
+covers: claim the requirement it belongs to, add it to a seam in spec.json, or
+undo it. Don't say "done" until this prints `VERDICT ● DONE`.
+
+## Why the code is the way it is
+
+`veridic why --spec S FR-002` lists the commits that wrote a requirement's cited
+lines, with their messages. Record a real reason as a decision in spec.json
+(`references/spec-json.md`), citing the lines and the commit. Decisions are
+append-only: never edit one, add a new one that `supersedes` it.
 
 ## Spec rules (Spec Kit format)
 

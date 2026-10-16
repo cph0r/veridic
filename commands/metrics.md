@@ -4,11 +4,13 @@ argument-hint: "[spec.md ...]"
 allowed-tools: Bash(veridic:*)
 ---
 
-Run this and show its output to the user exactly as printed (it is a Markdown table followed by a list):
+Run this and show its output to the user exactly as printed (one card per spec: a measured line per check, a verdict, and what to fix first):
 
 ```bash
-veridic metrics --md $ARGUMENTS
+veridic metrics --card $ARGUMENTS
 ```
+
+For a table across many specs instead, use `veridic metrics --md`.
 
 With no arguments it measures every tracked `*spec.md` in the current repo. Exit code 1 only means the "Needs attention" list is not empty.
 

@@ -49,4 +49,18 @@ them. Fix every problem `render` reports and run it again.
   each holds (`yes`/`no`/`unclear`) and link the risks that break it.
 - **Decision tables** for rules with several input cases: they become tests
   directly.
-- `status: "planned"` is for spec-first work (the code doesn't exist yet).
+- `status: "planned"` is for spec-first work (the code doesn't exist yet). Give it
+  a `"seam": ["src/new-file.ts", …]`: the files it will live in, so `veridic done`
+  knows which changes belong to it before it cites any code.
+- **Decisions**: why the code is the way it is, each checkable against git.
+  ```json
+  "decisions": [
+    {"id": "D-001", "decision": "Cap an order at 20 lines.", "because": "Kitchen printers truncate longer tickets.",
+     "evidence": ["src/orders.ts:40-44", "commit:4f2a9c1"], "for": ["FR-003"]},
+    {"id": "D-002", "decision": "Cap at 30.", "because": "New printers.", "evidence": ["commit:9be01d2"], "supersedes": "D-001"}
+  ]
+  ```
+  Find the commit with `veridic why --spec spec.md FR-003`. Only write a `because`
+  the commit message, a comment or the code supports; otherwise ask. `render`
+  checks every commit exists and changed the cited file, and refuses to render
+  a committed decision that was edited or removed (append-only).

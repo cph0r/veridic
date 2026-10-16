@@ -11,7 +11,8 @@ import { findOpenapi, loadContract, drift } from "./contract.mjs";
 import { stateMachine, stateMachineMarkdown } from "./states.mjs";
 
 const EVIDENCE = /^[^\s:]+:\d+(?:-\d+)?(?:#[^@]+@\d+)?$/;
-const ID = { requirement: /^FR-\d{3}$/, invariant: /^INV-\d+$/, risk: /^R-?\d+$/, story: /^US\d+$/ };
+const ID = { requirement: /^FR-\d{3}$/, invariant: /^INV-\d+$/, risk: /^R-?\d+$/, story: /^US\d+$/, decision: /^D-\d{3}$/ };
+const COMMIT = /^commit:[0-9a-f]{7,40}$/;
 const SEVERITY = new Set(["high", "medium", "low"]);
 const HOLDS = new Set(["yes", "no", "unclear"]);
 
@@ -47,6 +48,9 @@ export function validate(spec) {
     if (!r.rule) bad(at, "missing rule");
     if (r.status && !["implemented", "planned"].includes(r.status)) bad(at, "status must be implemented or planned");
     checkEvidence(at, r.evidence, r.status !== "planned");
+    // Seam: the files this requirement's code lives in, or will (for a planned one).
+    if (r.seam != null && (!Array.isArray(r.seam) || r.seam.some((f) => typeof f !== "string" || !f.trim() || /\s/.test(f.trim()))))
+      bad(at, "seam must be a list of file paths");
     // Verification criteria: each one a single checkable condition, tested on its own.
     const vcs = new Set();
     (r.verification ?? []).forEach((v, j) => {
@@ -74,6 +78,18 @@ export function validate(spec) {
       for (const k of ["given", "when", "then"]) if (!sc[k]) bad(`${at}.scenarios[${j}]`, `missing ${k}`);
     });
   });
+  // Decisions: why the code is the way it is. Evidence is code lines and the commits
+  // that made the call (`commit:<sha>`), so a decision can be checked like a requirement.
+  list("decisions", ID.decision, (d, at) => {
+    if (!d.decision) bad(at, "missing decision");
+    if (!d.because) bad(at, "missing because");
+    if (!Array.isArray(d.evidence) || !d.evidence.length) bad(at, "needs at least one evidence entry (path:line or commit:<sha>)");
+    else for (const e of d.evidence) if (typeof e !== "string" || !(EVIDENCE.test(e) || COMMIT.test(e))) bad(at, `evidence "${e}" is not path:line, path:start-end or commit:<sha>`);
+  });
+  for (const d of spec.decisions ?? []) {
+    if (d.supersedes && !ids.has(d.supersedes)) bad(d.id, `supersedes unknown ${d.supersedes}`);
+    for (const f of d.for ?? []) if (!ids.has(f)) bad(d.id, `for unknown ${f}`);
+  }
   // References must point at things that exist.
   for (const s of spec.stories ?? []) for (const sc of s.scenarios ?? []) for (const p of sc.proves ?? []) if (!ids.has(p)) bad(`${s.id} scenario`, `proves unknown ${p}`);
   for (const inv of spec.invariants ?? []) for (const b of inv.broken_by ?? []) if (!ids.has(b)) bad(inv.id, `broken_by unknown ${b}`);
@@ -134,7 +150,7 @@ export function renderMarkdown(spec, generated = {}) {
 
   out.push("## Requirements", "", "### Functional Requirements", "");
   for (const r of spec.requirements) {
-    out.push(`- **${r.id}**${r.status === "planned" ? " (planned)" : ""}: ${r.rule}${ev(r.evidence)}${r.clarify ? ` [NEEDS CLARIFICATION: ${r.clarify}]` : ""}`);
+    out.push(`- **${r.id}**${r.status === "planned" ? " (planned)" : ""}: ${r.rule}${ev(r.evidence)}${r.seam?.length ? ` [seam: ${r.seam.join(", ")}]` : ""}${r.clarify ? ` [NEEDS CLARIFICATION: ${r.clarify}]` : ""}`);
     for (const v of r.verification ?? []) out.push(`  - ${v.id}. ${v.text}${ev(v.evidence)}`);
   }
   out.push("");
@@ -146,6 +162,17 @@ export function renderMarkdown(spec, generated = {}) {
   for (const t of spec.decision_tables ?? []) {
     out.push(`### Decision table: ${t.title ?? t.for}${t.for ? ` (${t.for})` : ""}`, "", `| ${t.columns.map(cell).join(" | ")} |`, `|${t.columns.map(() => "---").join("|")}|`, ...t.rows.map((r) => `| ${r.map(cell).join(" | ")} |`), "");
     if (t.evidence?.length) out.push(`Evidence:${ev(t.evidence).replace(/^ /, " ")}`, "");
+  }
+  if (spec.decisions?.length) {
+    out.push("### Decisions", "", "_Why the code is the way it is. Append-only: a changed call is a new decision that supersedes the old one._", "");
+    const supersededBy = new Map(spec.decisions.filter((d) => d.supersedes).map((d) => [d.supersedes, d.id]));
+    for (const d of spec.decisions) {
+      const lines = d.evidence.filter((e) => !COMMIT.test(e));
+      const commits = d.evidence.filter((e) => COMMIT.test(e)).map((e) => e.slice(7, 14));
+      const tags = [supersededBy.has(d.id) ? `superseded by ${supersededBy.get(d.id)}` : null, d.for?.length ? `for ${d.for.join(", ")}` : null].filter(Boolean);
+      out.push(`- **${d.id}**${tags.length ? ` (${tags.join("; ")})` : ""}: ${d.decision} Because: ${d.because}${ev(lines)}${commits.length ? ` [commit: ${commits.join(", ")}]` : ""}`);
+    }
+    out.push("");
   }
   if (spec.entities?.length) out.push("### Key Entities", "", ...spec.entities.map((e) => `- **${e.name}**: ${e.description ?? e.fields ?? ""}${ev(e.evidence)}`), "");
 
