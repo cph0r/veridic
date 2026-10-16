@@ -1,0 +1,24 @@
+{
+  "name": "plumb",
+  "displayName": "Plumb",
+  "version": "0.3.0",
+  "description": "Know what your code really does, with proof, before you change it: evidence-backed specs that stay in sync, tests that must really assert, risk and access checks, and an agent-readiness report for exposing your API to AI agents.",
+  "keywords": [
+    "spec-driven-development",
+    "specs",
+    "traceability",
+    "evidence",
+    "agent-readiness",
+    "codegraph"
+  ],
+  "license": "MIT",
+  "skills": [
+    "./skill"
+  ],
+  "author": {
+    "name": "Chirag Phor",
+    "url": "https://github.com/cph0r"
+  },
+  "homepage": "https://github.com/cph0r/plumb",
+  "repository": "https://github.com/cph0r/plumb"
+}

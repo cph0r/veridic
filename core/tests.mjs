@@ -1,0 +1,312 @@
+// Requirement -> test traceability by name: a test whose title carries a
+// requirement id (`it("FR-015: …")`) is that requirement's test. A test only
+// counts as covering it if the test file reaches the code the requirement cites
+// (imports it, directly or through one more relative import). With `run`, the
+// linked test files are executed and each requirement gets passing/failing.
+// A test file can bind itself to one spec with a `plumb-spec: <path>` comment.
+// A named test counts only if it checks something: empty tests, tests with no
+// assertion (or one on a literal, `expect(true).toBe(true)`) and skipped tests
+// (`.skip`, `xit`, inside `describe.skip`) never cover a requirement. Tests whose
+// only checks are loose (`toBeTruthy`, `toBeDefined`, bare `toHaveBeenCalled()`)
+// count but are reported as weak.
+
+import { execFileSync, spawnSync } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { parseSpec, makeResolver } from "./citations.mjs";
+
+const TEST_FILE = /(^|\/)(__tests__|tests?)\/.*\.[cm]?[jt]sx?$|\.(test|spec)\.[cm]?[jt]sx?$/;
+const TITLE = /\b(x?)(?:it|test|describe)(?:\.(todo|skip|only|concurrent))?\s*\(\s*(["'`])((?:(?!\3).)*)\3/g;
+const REQ_ID = /\b((?:FR|SC|NFR|AC|INV)-\d+[a-z]?|R-[A-Z]{2,6}-\d{4})(?:\s*[·.:/-]?\s*(VC\d+))?\b/g;
+// Domain test ids: T-<DOMAIN>-<req>.<vc>.<n>[-API|-UI]
+const T_ID = /\bT-[A-Z]{2,6}-(\d{4})\.(\d+)\.\d+(?:-[A-Z]+)?\b/g;
+// R-ORD-0001 and T-ORD-0001.… name spec requirement FR-001.
+const toFr = (n) => `FR-${String(Number(n)).padStart(3, "0")}`;
+
+const relImports = (repo, file, files) => {
+  let src = "";
+  try {
+    src = fs.readFileSync(path.join(repo, file), "utf8");
+  } catch {
+    return [];
+  }
+  const out = [];
+  for (const m of src.matchAll(/(?:from\s+|import\s*\(\s*|vi\.mock\(\s*)["'](\.{1,2}\/[^"']+)["']/g)) {
+    const base = path.posix.normalize(path.posix.join(path.posix.dirname(file), m[1])).replace(/\.js$/, "");
+    for (const c of [base, `${base}.ts`, `${base}.tsx`, `${base}.js`, `${base}.mjs`, `${base}/index.ts`]) if (files.has(c)) out.push(c);
+  }
+  return out;
+};
+
+/** Files a test file reaches through relative imports, two levels deep. */
+function reach(repo, file, files) {
+  const seen = new Set([file]);
+  let frontier = [file];
+  for (let depth = 0; depth < 2; depth++) {
+    const next = [];
+    for (const f of frontier) for (const g of relImports(repo, f, files)) if (!seen.has(g)) seen.add(g), next.push(g);
+    frontier = next;
+  }
+  seen.delete(file);
+  return seen;
+}
+
+// Assertions, after comments and strings are blanked. An assertion on a literal checks nothing.
+const ASSERT = /\bexpect\s*\(|\bassert\w*\s*[.(]|\.should\b|\bt\.(?:is|not|true|false|deepEqual|throws\w*|regex|like|assert)\s*\(/;
+const LITERAL_EXPECT = /\bexpect\s*\(\s*(?:true|false|null|undefined|-?\d+(?:\.\d+)?|""|''|``)\s*\)/g;
+// Loose: passes for almost any value. `.not.toHaveBeenCalled()` and `toBeUndefined()` are exact, so not loose.
+const LOOSE = /\.(?:toBeTruthy|toBeDefined|toBeFalsy)\s*\(\s*\)|\.not\.(?:toBeNull|toBeUndefined)\s*\(\s*\)|(?<!\.not)\.toHaveBeenCalled\s*\(\s*\)/g;
+
+/** Blank comments and string contents (keeping offsets), so code checks don't see them. */
+export function codeOnly(src) {
+  let out = "";
+  for (let i = 0; i < src.length; i++) {
+    const c = src[i];
+    if (c === "/" && src[i + 1] === "/") {
+      while (i < src.length && src[i] !== "\n") (out += " "), i++;
+      out += src[i] ?? "";
+    } else if (c === "/" && src[i + 1] === "*") {
+      const end = src.indexOf("*/", i + 2);
+      const stop = end < 0 ? src.length : end + 2;
+      out += src.slice(i, stop).replace(/[^\n]/g, " ");
+      i = stop - 1;
+    } else if (c === '"' || c === "'" || c === "`") {
+      out += c;
+      let j = i + 1;
+      while (j < src.length && src[j] !== c) {
+        if (src[j] === "\\") (out += "  "), j += 2;
+        else (out += src[j] === "\n" ? "\n" : " "), j++;
+      }
+      out += src[j] ?? "";
+      i = j;
+    } else out += c;
+  }
+  return out;
+}
+
+/** Index of the paren closing the call whose argument list starts at `from` (just after its `(`), in blanked code. */
+function closeParen(code, from) {
+  let depth = 1;
+  for (let i = from; i < code.length; i++) {
+    if (code[i] === "(") depth++;
+    else if (code[i] === ")" && --depth === 0) return i;
+  }
+  return code.length;
+}
+
+/** How much a test body checks: empty | unasserted | weak | strong. */
+export function testStrength(body) {
+  if (!body.replace(/\basync\b|\bfunction\b|=>|[(){},;\s]|\b(?:done|ctx|t)\b/g, "")) return "empty";
+  const real = body.replace(LITERAL_EXPECT, "literal(");
+  if (!ASSERT.test(real)) return "unasserted";
+  const total = (real.match(new RegExp(ASSERT.source, "g")) ?? []).length;
+  const loose = (real.match(LOOSE) ?? []).length;
+  return loose >= total ? "weak" : "strong";
+}
+
+/** Every test title in the repo that names a requirement id. */
+export function findTaggedTests(repo, files) {
+  const out = [];
+  for (const file of files) {
+    if (!TEST_FILE.test(file) || file.includes("node_modules/")) continue;
+    const src = fs.readFileSync(path.join(repo, file), "utf8");
+    const bound = src.match(/(?:plumb|specguard)-spec:\s*(\S+)/)?.[1] ?? null;
+    const code = codeOnly(src);
+    // Ranges of skipped describe blocks: tests inside them never run.
+    const skipped = [...code.matchAll(/\b(?:xdescribe|describe\.skip)\s*\(/g)].map((m) => [m.index, closeParen(code, m.index + m[0].length)]);
+    const lineOf = (idx) => src.slice(0, idx).split("\n").length;
+    for (const t of src.matchAll(TITLE)) {
+      if (code[t.index] === " ") continue; // inside a comment or string
+      const ids = [
+        ...[...t[4].matchAll(REQ_ID)].map((m) => ({ id: /^R-/.test(m[1]) ? toFr(m[1].split("-").pop()) : m[1], vc: m[2] ?? null })),
+        ...[...t[4].matchAll(T_ID)].map((m) => ({ id: toFr(m[1]), vc: `VC${Number(m[2])}` })),
+      ];
+      if (!ids.length) continue;
+      const open = t.index + t[0].indexOf("(") + 1;
+      const body = code.slice(t.index + t[0].length, closeParen(code, open));
+      const todo = t[2] === "todo" || t[2] === "skip" || t[1] === "x" || skipped.some(([a, b]) => t.index > a && t.index < b);
+      const strength = todo ? null : testStrength(body);
+      for (const { id, vc } of ids) out.push({ id, vc, file, line: lineOf(t.index), title: t[4], todo, strength, spec: bound });
+    }
+  }
+  return out;
+}
+
+/** Run vitest on these files (from their package) and return results by test title. */
+export function runVitest(repo, testFiles) {
+  const byPkg = new Map();
+  for (const f of testFiles) {
+    let dir = path.dirname(path.join(repo, f));
+    while (dir.startsWith(repo) && !fs.existsSync(path.join(dir, "package.json"))) dir = path.dirname(dir);
+    if (!byPkg.has(dir)) byPkg.set(dir, []);
+    byPkg.get(dir).push(path.relative(dir, path.join(repo, f)));
+  }
+  const results = new Map(); // "file\0title" -> status
+  const errors = [];
+  for (const [pkg, files] of byPkg) {
+    const outFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "plumb-vitest-")), "out.json");
+    const r = spawnSync("npx", ["--no-install", "vitest", "run", ...files, "--reporter=json", `--outputFile=${outFile}`], { cwd: pkg, encoding: "utf8", timeout: 600_000 });
+    if (!fs.existsSync(outFile)) {
+      errors.push({ package: path.relative(repo, pkg) || ".", error: (r.stderr || r.stdout || "vitest produced no report").slice(-800) });
+      continue;
+    }
+    const report = JSON.parse(fs.readFileSync(outFile, "utf8"));
+    for (const tf of report.testResults ?? []) {
+      const rel = path.relative(repo, tf.name);
+      for (const a of tf.assertionResults ?? []) results.set(`${rel}\0${a.title}`, a.status); // passed | failed | pending | todo | skipped
+      if (tf.status === "failed" && !(tf.assertionResults ?? []).length) errors.push({ file: rel, error: (tf.message ?? "suite failed to load").slice(0, 800) });
+    }
+  }
+  return { results, errors };
+}
+
+/**
+ * @param opts { specPath (to honor `plumb-spec:` bindings), run: boolean, bases }
+ * @returns {{ summary, requirements: [{ id, tests: [...], status }], errors? }}
+ *   status: passing | failing | covered (not run) | unasserted (named tests check nothing) | tagged_only (test doesn't reach the cited code) | todo | none
+ */
+export function testCoverage(repo, spec, opts = {}) {
+  const files = execFileSync("git", ["ls-files", "--cached", "--others", "--exclude-standard"], { cwd: repo, encoding: "utf8", maxBuffer: 64 << 20 }).split("\n").filter(Boolean);
+  const fileSet = new Set(files);
+  const parsed = parseSpec(spec);
+  const resolve = makeResolver(repo, { aliases: parsed.aliases, bases: [...(opts.bases ?? []), ...parsed.bases], files });
+
+  const cited = new Map(); // requirement id -> Set(files)
+  const cites = new Map(); // requirement id -> ["file:start-end"]
+  const texts = new Map(); // requirement id -> requirement text
+  const specLines = spec.split("\n");
+  for (const c of parsed.citations) {
+    if (!/^(FR|SC|NFR|AC|INV)-?\d+/.test(c.fr)) continue;
+    const f = !c.bad && resolve(c.file).file;
+    if (!cited.has(c.fr)) cited.set(c.fr, new Set());
+    if (!cites.has(c.fr)) cites.set(c.fr, []);
+    if (!texts.has(c.fr)) texts.set(c.fr, requirementText(specLines[c.spec_line - 1]));
+    if (f) {
+      cited.get(c.fr).add(f);
+      cites.get(c.fr).push(`${f}:${c.start}${c.end !== c.start ? `-${c.end}` : ""}`);
+    }
+  }
+  // A file is a test only if it declares test cases (not a helper in __tests__/).
+  // Verification criteria rendered under a requirement: "  - VC1. text".
+  const vcsOf = new Map();
+  let current = null;
+  for (const line of specLines) {
+    const fr = line.match(/^\s*-\s*\*\*((?:FR|SC|NFR|AC|INV)-\d+[a-z]?)\*\*/);
+    if (fr) current = fr[1];
+    else if (current && /^\s+-\s*VC\d+\./.test(line)) (vcsOf.get(current) ?? vcsOf.set(current, []).get(current)).push(line.match(/(VC\d+)/)[1]);
+    else if (/^\S/.test(line) || /^#/.test(line)) current = null;
+  }
+  const testFiles = files.filter((f) => TEST_FILE.test(f) && !f.includes("node_modules/") && /\b(?:it|test)(?:\.\w+)?\s*\(/.test(safeRead(repo, f)));
+
+  const specRel = opts.specPath ? path.relative(repo, path.resolve(opts.specPath)) : null;
+  const tagged = findTaggedTests(repo, files).filter((t) => cited.has(t.id) && (!t.spec || !specRel || t.spec === specRel || path.resolve(repo, t.spec) === path.resolve(opts.specPath)));
+  const checks = (t) => t.strength === "weak" || t.strength === "strong";
+  const reachCache = new Map();
+  const reaches = (testFile, targets) => {
+    if (!reachCache.has(testFile)) reachCache.set(testFile, reach(repo, testFile, fileSet));
+    return [...targets].some((t) => reachCache.get(testFile).has(t));
+  };
+
+  const run = opts.run ? runVitest(repo, [...new Set(tagged.filter((t) => !t.todo).map((t) => t.file))]) : null;
+  const requirements = [...cited.keys()].map((id) => {
+    const tests = tagged
+      .filter((t) => t.id === id)
+      .map((t) => {
+        const result = run?.results.get(`${t.file}\0${t.title}`);
+        return { at: `${t.file}:${t.line}`, title: t.title, todo: t.todo, ...(t.strength ? { strength: t.strength } : {}), reaches_cited_code: reaches(t.file, cited.get(id)), ...(run ? { result: result ?? "not run" } : {}) };
+      });
+    const real = tests.filter((t) => !t.todo && t.reaches_cited_code && checks(t));
+    let status = "none";
+    if (real.length) status = run ? (real.some((t) => t.result === "failed") ? "failing" : real.some((t) => t.result === "passed") ? "passing" : "covered") : "covered";
+    else if (tests.some((t) => !t.todo && t.reaches_cited_code)) status = "unasserted";
+    else if (tests.some((t) => !t.todo)) status = "tagged_only";
+    else if (tests.length) status = "todo";
+    // Tests that reach the cited code without being named for this requirement:
+    // candidates for "covered" once someone checks they assert the behavior.
+    const named = new Set(tests.map((t) => t.at.split(":")[0]));
+    const related_tests = testFiles.filter((f) => !named.has(f) && reaches(f, cited.get(id)));
+    // Per criterion: the named, real tests for it that reach the cited code.
+    const verification = (vcsOf.get(id) ?? []).map((vc) => {
+      const vt = tagged.filter((t) => t.id === id && t.vc === vc && !t.todo && checks(t) && reaches(t.file, cited.get(id)));
+      return { id: vc, covered: vt.length > 0, tests: vt.map((t) => ({ at: `${t.file}:${t.line}`, title: t.title, ...(run ? { result: run.results.get(`${t.file}\0${t.title}`) ?? "not run" } : {}) })) };
+    });
+    return { id, status, tests, related_tests, text: texts.get(id), cites: cites.get(id), ...(verification.length ? { verification, vc_covered: verification.filter((v) => v.covered).length } : {}) };
+  });
+
+  const count = (s) => requirements.filter((r) => r.status === s).length;
+  const n = requirements.length;
+  const pct = (a) => (n ? Math.round((a / n) * 1000) / 10 : null);
+  const covered = count("covered") + count("passing") + count("failing");
+  return {
+    summary: {
+      requirements: n,
+      with_tests: covered,
+      tested_pct: pct(covered),
+      ...(run ? { passing: count("passing"), failing: count("failing"), passing_pct: pct(count("passing")) } : {}),
+      ...(() => {
+        const vcs = requirements.flatMap((r) => r.verification ?? []);
+        return vcs.length ? { criteria: vcs.length, criteria_covered: vcs.filter((v) => v.covered).length, criteria_pct: Math.round((vcs.filter((v) => v.covered).length / vcs.length) * 1000) / 10 } : {};
+      })(),
+      tagged_only: count("tagged_only"),
+      unasserted: count("unasserted"),
+      ...(() => {
+        const live = tagged.filter((t) => !t.todo);
+        const by = (s) => live.filter((t) => t.strength === s).map((t) => `${t.file}:${t.line}`);
+        const weak = [...new Set(by("weak"))], none = [...new Set([...by("empty"), ...by("unasserted")])];
+        return { tests_checked: new Set(live.map((t) => `${t.file}:${t.line}`)).size, ...(none.length ? { tests_asserting_nothing: none } : {}), ...(weak.length ? { weak_tests: weak } : {}) };
+      })(),
+      todo: count("todo"),
+      untested: count("none"),
+    },
+    requirements,
+    ...(run?.errors.length ? { errors: run.errors } : {}),
+  };
+}
+
+const requirementText = (line = "") =>
+  line
+    .replace(/\[evidence:[^\]]*\]/g, "")
+    .replace(/^\s*[-*]\s*/, "")
+    .replace(/\*\*((?:FR|SC|NFR|AC)-?\d+[a-z]?)\*\*:?\s*/, "")
+    .replace(/\s+[—–-]\s*$/, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+/**
+ * The traceability table, generated: one row per requirement with its citations,
+ * linked tests and a status. "related" means a test reaches the cited code
+ * without being named for the requirement; read it, and call it covered only
+ * if it asserts the behavior.
+ */
+export function traceabilityTable(cov) {
+  const cell = (s) => String(s).replace(/\|/g, "\\|");
+  const short = (t, n = 90) => (t.length > n ? `${t.slice(0, n - 1).replace(/\s+\S*$/, "")}…` : t);
+  const statusOf = (r) =>
+    r.status === "passing" ? "covered (passing)" : r.status === "failing" ? "covered (FAILING)" : r.status === "covered" ? "covered" : r.related_tests.length ? "related" : r.status === "unasserted" ? "untested (test asserts nothing)" : r.status === "todo" ? "untested (placeholder)" : "untested";
+  const rows = cov.requirements.map((r) => {
+    const named = r.tests.filter((t) => !t.todo).map((t) => `\`${t.at}\`${t.strength === "weak" ? " (weak)" : t.strength === "empty" || t.strength === "unasserted" ? " (asserts nothing)" : ""}`);
+    const related = r.related_tests.slice(0, 3).map((f) => `\`${f}\` (related)`);
+    const tests = [...named, ...related].join("<br>") + (r.related_tests.length > 3 ? `<br>+${r.related_tests.length - 3} more` : "") || "—";
+    return `| ${r.id} | ${cell(short(r.text ?? ""))} | ${(r.cites ?? []).map((c) => `\`${c}\``).join("<br>") || "—"} | ${tests} | ${statusOf(r)} |`;
+  });
+  const count = (s) => cov.requirements.filter((r) => statusOf(r).startsWith(s)).length;
+  return [
+    "| FR | Requirement | Implementation | Tests | Status |",
+    "|---|---|---|---|---|",
+    ...rows,
+    "",
+    `**Totals:** ${cov.requirements.length} requirements: ${count("covered")} covered, ${count("related")} related, ${count("untested")} untested.`,
+    "",
+    "_Generated by `plumb tests --table`. Covered = a test named with the requirement id reaches the cited code and asserts something (weak = only loose checks such as toBeTruthy). Related = a test reaches the cited code without naming the requirement; it counts as covered only if it asserts the behavior._",
+    "",
+  ].join("\n");
+}
+
+const safeRead = (repo, f) => {
+  try {
+    return fs.readFileSync(path.join(repo, f), "utf8");
+  } catch {
+    return "";
+  }
+};

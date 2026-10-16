@@ -1,0 +1,61 @@
+#!/usr/bin/env node
+// plumb CLI. On the Bash tool's PATH while the plugin is enabled, so Claude
+// (or anyone) runs `plumb metrics` from inside a repo. --repo defaults to the
+// current git repository.
+
+import { spawnSync, execFileSync } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
+
+const root = path.resolve(path.dirname(fs.realpathSync(process.argv[1])), "..");
+const COMMANDS = {
+  metrics: ["skill/scripts/metrics.mjs", "every number in one call (--md for a table)"],
+  check: [null, "cite + claims: are the citations right?"],
+  routes: ["skill/scripts/routes.mjs", "list the app's routes, filtered by words (to pick seeds)"],
+  scope: ["skill/scripts/scope.mjs", "what belongs to a feature, and what to read"],
+  read: ["skill/scripts/read.mjs", "print all the code to read for a feature in one call"],
+  prepare: ["skill/scripts/prepare.mjs", "scope + contract + code for a feature as one document (to start a session with)"],
+  drift: ["skill/scripts/drift.mjs", "where the OpenAPI contract and the code disagree"],
+  states: ["skill/scripts/states.mjs", "the feature's state machine and bug-shaped patterns in it"],
+  access: ["skill/scripts/access.mjs", "who can call each route, plan checks, caller scoping (--intended <csv> to compare)"],
+  "agent-ready": ["skill/scripts/agent-ready.mjs", "is this API safe for AI agents: real effect per route (read/write/destructive, money, notifies), GETs that write, unscoped money routes (--manifest for the tool manifest)"],
+  render: ["skill/scripts/render.mjs", "spec.json -> spec.md + traceability.md (validates first)"],
+  cite: ["skill/scripts/cite.mjs", "do citations resolve; the text they point at"],
+  claims: ["skill/scripts/claims.mjs", "do cited lines hold the facts each requirement states"],
+  anchor: ["skill/scripts/anchor.mjs", "add symbol anchors so citations survive code moving"],
+  stale: ["skill/scripts/stale.mjs", "requirements a change touched (--fix, --pr)"],
+  mutate: ["skill/scripts/mutate.mjs", "would the guard notice the code behind a requirement changing"],
+  tests: ["skill/scripts/tests.mjs", "which requirements have a named test that reaches their code (--run: pass/fail)"],
+  scaffold: ["skill/scripts/scaffold.mjs", "test skeleton: one placeholder per requirement, named with its id"],
+  "install-hook": ["skill/hooks/install.mjs", "install the git pre-commit hook in a repo"],
+};
+
+const [cmd, ...rest] = process.argv.slice(2);
+if (!cmd || cmd === "help" || cmd === "--help" || !COMMANDS[cmd]) {
+  const width = Math.max(...Object.keys(COMMANDS).map((k) => k.length));
+  process.stdout.write(
+    `plumb <command> [--repo <path>] [options]\n\n${Object.entries(COMMANDS)
+      .map(([k, [, d]]) => `  ${k.padEnd(width)}  ${d}`)
+      .join("\n")}\n\nEach prints JSON and exits 0 (ok), 1 (problems found) or 2 (usage error).\n`,
+  );
+  process.exit(cmd && cmd !== "help" && cmd !== "--help" ? 2 : 0);
+}
+
+const args = [...rest];
+if (!args.includes("--repo")) {
+  let repo = process.cwd();
+  try {
+    repo = execFileSync("git", ["rev-parse", "--show-toplevel"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+  } catch {}
+  args.push("--repo", repo);
+}
+
+const runScript = (rel, a) => spawnSync(process.execPath, [path.join(root, rel), ...a], { stdio: "inherit" }).status ?? 2;
+
+if (cmd === "check") {
+  // Two checks, one exit code: citations resolve, and cited lines hold the stated facts.
+  const a = runScript("skill/scripts/cite.mjs", args);
+  const b = runScript("skill/scripts/claims.mjs", args);
+  process.exit(Math.max(a, b));
+}
+process.exit(runScript(COMMANDS[cmd][0], args));

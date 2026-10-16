@@ -1,0 +1,46 @@
+{
+  "name": "plumbcode",
+  "version": "0.3.0",
+  "description": "Know what your code really does, with proof, before you change it. Evidence-backed specs, honest test coverage and an agent-readiness report for existing codebases.",
+  "type": "module",
+  "bin": {
+    "plumb": "bin/plumb"
+  },
+  "files": [
+    "bin/",
+    "core/",
+    "skill/",
+    "commands/",
+    ".claude-plugin/",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22.5"
+  },
+  "scripts": {
+    "test": "node --test \"test/*.test.mjs\""
+  },
+  "keywords": [
+    "spec-driven-development",
+    "specs",
+    "traceability",
+    "evidence",
+    "code-review",
+    "agent-readiness",
+    "claude-code",
+    "claude-code-plugin",
+    "codegraph",
+    "express"
+  ],
+  "author": "Chirag Phor (https://github.com/cph0r)",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cph0r/plumb.git"
+  },
+  "homepage": "https://github.com/cph0r/plumb#readme",
+  "bugs": {
+    "url": "https://github.com/cph0r/plumb/issues"
+  }
+}

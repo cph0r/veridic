@@ -1,0 +1,7 @@
+node_modules/
+.codegraph/
+.DS_Store
+*.log
+*.tgz
+# Acceptance test pinned to a private codebase; kept local.
+test/acceptance.test.mjs
