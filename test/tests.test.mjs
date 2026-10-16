@@ -123,7 +123,7 @@ test("access matrix: plan gates, caller scoping, and mismatches with an intended
     'router.get("/reports/pl", requireAuth, requirePro, async (req, res) => { res.json(await storage.pl(req.userId)); });',
     'router.post("/orders/:id/mark-paid", async (req, res) => { await db.update(o).set({ paid: true }).where(eq(o.id, req.params.id)); });',
   ];
-  const g = { lines: () => src };
+  const g = { lines: () => src, text: () => src.join("\n"), nodes: new Map(), usesInRange: () => [] };
   const inv = { routes: [
     { id: "GET /api/vendors", method: "GET", path: "/api/vendors", file: "r.ts", start: 1, end: 1, guards: [{ name: "requireAuth" }] },
     { id: "GET /api/reports/pl", method: "GET", path: "/api/reports/pl", file: "r.ts", start: 2, end: 2, guards: [{ name: "requireAuth" }, { name: "requirePro" }] },
@@ -191,5 +191,18 @@ test("the old specguard-spec binding comment still binds a test file", () => {
   execFileSync("git", ["init", "-q"], { cwd: repo });
   const cov = testCoverage(repo, "- **FR-001**: x [evidence: src/a.ts:1]", { specPath: path.join(repo, "specs/mine/spec.md") });
   assert.equal(cov.requirements[0].status, "none", "bound to another spec, so it doesn't cover this one");
+  fs.rmSync(repo, { recursive: true, force: true });
+});
+
+test("test finder: method calls named test() aren't tests; supertest .expect(200) and Cypress .and() assert", () => {
+  const s = (src) => testStrength(codeOnly(src));
+  assert.equal(s(", (done) => { request(app).get('/x').expect(200).end(done); }"), "strong");
+  assert.equal(s(", () => { cy.get('a').and('be.visible'); }"), "strong");
+  assert.equal(s(", () => { cy.visit('/x'); cy.get('input'); }"), "weak");
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "veridic-finder-"));
+  fs.mkdirSync(path.join(repo, "t"));
+  fs.writeFileSync(path.join(repo, "t/a.test.js"), 'it("FR-001: real", () => { expect(regex.test(`x`)).toBe(true); });\n');
+  execFileSync("git", ["init", "-q"], { cwd: repo });
+  assert.equal(findTaggedTests(repo, ["t/a.test.js"]).length, 1, "regex.test(`x`) is not a second test");
   fs.rmSync(repo, { recursive: true, force: true });
 });

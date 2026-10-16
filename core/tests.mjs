@@ -18,7 +18,7 @@ import { parseSpec, makeResolver } from "./citations.mjs";
 import { basisOf, basisComment } from "./basis.mjs";
 
 const TEST_FILE = /(^|\/)(__tests__|tests?)\/.*\.[cm]?[jt]sx?$|\.(test|spec)\.[cm]?[jt]sx?$/;
-const TITLE = /\b(x?)(?:it|test|describe)(?:\.(todo|skip|only|concurrent))?\s*\(\s*(["'`])((?:(?!\3).)*)\3/g;
+const TITLE = /(?<![\w$.])(x?)(?:it|test|describe)(?:\.(todo|skip|only|concurrent))?\s*\(\s*(["'`])((?:(?!\3).)*)\3/g;
 const REQ_ID = /\b((?:FR|SC|NFR|AC|INV)-\d+[a-z]?|R-[A-Z]{2,6}-\d{4})(?:\s*[·.:/-]?\s*(VC\d+))?\b/g;
 // Domain test ids: T-<DOMAIN>-<req>.<vc>.<n>[-API|-UI]
 const T_ID = /\bT-[A-Z]{2,6}-(\d{4})\.(\d+)\.\d+(?:-[A-Z]+)?\b/g;
@@ -54,12 +54,25 @@ function reach(repo, file, files) {
 }
 
 // Assertions, after comments and strings are blanked. An assertion on a literal checks nothing.
-const ASSERT = /\bexpect\s*\(|\bassert\w*\s*[.(]|\.should\b|\bt\.(?:is|not|true|false|deepEqual|throws\w*|regex|like|assert)\s*\(/;
-const LITERAL_EXPECT = /\bexpect\s*\(\s*(?:true|false|null|undefined|-?\d+(?:\.\d+)?|""|''|``)\s*\)/g;
+// Custom assertion helpers count (`cy.expectChallengeSolved(…)`, `assertOrderPaid(…)`), and
+// `cy.request(…)`, which fails the test on an error status by default.
+const ASSERT = /\bexpect\s*\(|\bassert\w*\s*[.(]|\.should\b|\bt\.(?:is|not|true|false|deepEqual|throws\w*|regex|like|assert)\s*\(|\b(?:expect|assert|verify|check|should)[A-Z]\w*\s*\(|\bcy\.(?:request|contains|get)\s*\(|\.and\s*\(\s*["'`]/;
+// Only bare `expect(true)`: supertest's `.expect(200)` checks the response status.
+const LITERAL_EXPECT = /(?<![\w$.])expect\s*\(\s*(?:true|false|null|undefined|-?\d+(?:\.\d+)?|""|''|``)\s*\)/g;
 // Loose: passes for almost any value. `.not.toHaveBeenCalled()` and `toBeUndefined()` are exact, so not loose.
-const LOOSE = /\.(?:toBeTruthy|toBeDefined|toBeFalsy)\s*\(\s*\)|\.not\.(?:toBeNull|toBeUndefined)\s*\(\s*\)|(?<!\.not)\.toHaveBeenCalled\s*\(\s*\)/g;
+// `cy.get(…)` with nothing after it only checks the element exists.
+const LOOSE = /\bcy\.get\s*\(|\.(?:toBeTruthy|toBeDefined|toBeFalsy)\s*\(\s*\)|\.not\.(?:toBeNull|toBeUndefined)\s*\(\s*\)|(?<!\.not)\.toHaveBeenCalled\s*\(\s*\)/g;
 
-/** Blank comments and string contents (keeping offsets), so code checks don't see them. */
+// A `/` starts a regex literal (not division) after an operator, an opening
+// bracket, a comma, or a keyword like `return`.
+const regexCanStart = (before) => {
+  const t = before.trimEnd();
+  if (!t) return true;
+  if (/[(,=:[!&|?{};+\-*%~^<>]$/.test(t)) return true;
+  return /\b(?:return|typeof|case|do|else|in|of|void|yield|await|throw|new|delete)$/.test(t);
+};
+
+/** Blank comments, string contents and regex literals (keeping offsets), so code checks don't see them. */
 export function codeOnly(src) {
   let out = "";
   for (let i = 0; i < src.length; i++) {
@@ -72,6 +85,22 @@ export function codeOnly(src) {
       const stop = end < 0 ? src.length : end + 2;
       out += src.slice(i, stop).replace(/[^\n]/g, " ");
       i = stop - 1;
+    } else if (c === "/" && regexCanStart(out)) {
+      // A regex literal (`/a href="([^"]+)"/g`): its quotes aren't strings. Blank its body.
+      let j = i + 1;
+      let inClass = false;
+      while (j < src.length && src[j] !== "\n") {
+        if (src[j] === "\\") j += 2;
+        else if (src[j] === "[") (inClass = true), j++;
+        else if (src[j] === "]") (inClass = false), j++;
+        else if (src[j] === "/" && !inClass) break;
+        else j++;
+      }
+      if (src[j] !== "/") out += c; // not a regex after all (division at line end)
+      else {
+        out += `/${" ".repeat(j - i - 1)}/`;
+        i = j;
+      }
     } else if (c === '"' || c === "'" || c === "`") {
       out += c;
       let j = i + 1;
@@ -132,6 +161,45 @@ export function findTaggedTests(repo, files) {
     }
   }
   return out;
+}
+
+/**
+ * Every test in the repo, classified by what it checks (no spec needed):
+ * strong, weak (only loose checks), unasserted, empty, or skipped.
+ * Parameterized tests (`it.each`) aren't classified.
+ */
+export function auditTests(repo) {
+  const files = execFileSync("git", ["ls-files", "--cached", "--others", "--exclude-standard"], { cwd: repo, encoding: "utf8", maxBuffer: 64 << 20 })
+    .split("\n")
+    .filter((f) => TEST_FILE.test(f) && !f.includes("node_modules/"));
+  const counts = { strong: 0, weak: 0, unasserted: 0, empty: 0, skipped: 0 };
+  const flagged = { weak: [], unasserted: [], empty: [] };
+  let testFiles = 0;
+  for (const file of files) {
+    const src = safeRead(repo, file);
+    const code = codeOnly(src);
+    const skipped = [...code.matchAll(/\b(?:xdescribe|describe\.skip)\s*\(/g)].map((m) => [m.index, closeParen(code, m.index + m[0].length)]);
+    let any = false;
+    for (const t of src.matchAll(TITLE)) {
+      if (code[t.index] === " " || /^x?describe/.test(t[0])) continue;
+      any = true;
+      const skip = t[2] === "todo" || t[2] === "skip" || t[1] === "x" || skipped.some(([x, y]) => t.index > x && t.index < y);
+      if (skip) {
+        counts.skipped++;
+        continue;
+      }
+      const open = t.index + t[0].indexOf("(") + 1;
+      const s = testStrength(code.slice(t.index + t[0].length, closeParen(code, open)));
+      counts[s]++;
+      if (flagged[s]) flagged[s].push({ at: `${file}:${src.slice(0, t.index).split("\n").length}`, title: t[4].slice(0, 100) });
+    }
+    if (any) testFiles++;
+  }
+  const live = counts.strong + counts.weak + counts.unasserted + counts.empty;
+  return {
+    summary: { test_files: testFiles, tests: live + counts.skipped, ...counts, checking_pct: live ? Math.round(((counts.strong + counts.weak) / live) * 1000) / 10 : null },
+    flagged,
+  };
 }
 
 /** Run vitest on these files (from their package) and return results by test title. */

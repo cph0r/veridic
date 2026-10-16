@@ -4,14 +4,15 @@
 // for exposing an API to AI agents (tool manifests, approval policies), where a
 // "read" that writes or an unscoped route that moves money is the dangerous case.
 
-import { SYMBOL_KINDS, isTestFile } from "./graph.mjs";
+import { reached } from "./reach.mjs";
 import { accessMatrix, loadIntended, compareAccess } from "./access.mjs";
 import { handlerFacts } from "./contract.mjs";
 
 // Line patterns, checked on code (comments ignored). Each effect cites the line.
 const EFFECTS = [
-  ["destructive", /\.delete\s*\(\s*\w+Table\b|\bdb\.delete\(|DELETE\s+FROM\b|\bstorage\.(?:delete|remove|purge)\w*\(|\.destroy\s*\(|status:\s*["'](?:cancelled|canceled|deleted|archived|revoked|deactivated)["']/],
-  ["write", /\.insert\s*\(\s*\w+|\.update\s*\(\s*\w+Table\b|\bdb\.update\(|\.upsert\s*\(|INSERT\s+INTO\b|UPDATE\s+\w+\s+SET\b|\bstorage\.(?:create|update|add|set|save|record|upsert|mark|activate|increment|insert)\w*\(|\.set\(\s*\{/],
+  // SQL/Drizzle, a storage layer, and the MongoDB/Mongoose, Sequelize and Prisma calls that delete.
+  ["destructive", /\.delete\s*\(\s*\w+Table\b|\bdb\.delete\(|DELETE\s+FROM\b|\bstorage\.(?:delete|remove|purge)\w*\(|\.destroy\s*\(|status:\s*["'](?:cancelled|canceled|deleted|archived|revoked|deactivated)["']|\.(?:deleteOne|deleteMany|findOneAndDelete|findByIdAndDelete|findOneAndRemove|findByIdAndRemove|bulkDelete)\s*\(|\.\w+\.delete(?:Many)?\s*\(\s*\{\s*where\b|\.remove\s*\(\s*(?:\{|\)|[\w.]+\s*[,)])/],
+  ["write", /\.insert\s*\(\s*\w+|\.update\s*\(\s*\w+Table\b|\bdb\.update\(|\.upsert\s*\(|INSERT\s+INTO\b|UPDATE\s+\w+\s+SET\b|\bstorage\.(?:create|update|add|set|save|record|upsert|mark|activate|increment|insert)\w*\(|(?<!\b(?:res|response|reply|ctx|headers)\s*)\.set\(\s*\{|\.(?:insertOne|insertMany|updateOne|updateMany|replaceOne|findOneAndUpdate|findByIdAndUpdate|findOneAndReplace|bulkWrite|bulkCreate)\s*\(|(?<!\b\w*(?:pdf|Pdf|canvas|ctx|workbook|zip|image|img|sharp|png|jpe?g)\w*)\.save\s*\(\s*\)|\b(?:(?!PDF|Object\b|Promise\b|Buffer\b|Date\b|Array\b|Map\b|Set\b|Symbol\b|Reflect\b|URL\b|Image\b|Canvas\b|Document\b|Readable\b|Stream\b)[A-Z]\w*|prisma\.\w+|\w*[Mm]odels?(?:\.\w+)?|\w+(?:Repository|Repo))\.create\s*\(|\.(?:insert|update)\s*\(\s*\{|\$(?:set|push|pull|inc|addToSet|unset)\b/],
   ["moves_money", /\b(?:razorpay|phonepe|stripe|paypal|cashfree|paytm)\b[\w.]*\s*\.|\binitiatePayment\s*\(|\bcheckPaymentStatus\s*\(|\b(?:refund|charge|capture)(?:Payment)?\s*\(|\bconfirm\w*Payment\s*\(|\bactivateSubscription\s*\(|\bpaidAt\s*:(?!\s*\w+Table\.)/i],
   ["external", /\bfetch\s*\(|\baxios\b[\w.]*\(|\bgot\s*\(|\bnew\s+(?:Razorpay|Stripe|OpenAI|Anthropic)\b|\.chat\.completions\.create\s*\(|\bgenerateContent\s*\(/],
   // Calls that tell someone else (email, SMS, WhatsApp, push, a dashboard, a POS): not
@@ -19,31 +20,6 @@ const EFFECTS = [
   ["notifies", /(?<!function\s)(?<![.\w])(?:send\w*(?:Email|Mail|Sms|SMS|Whatsapp|WhatsApp|Push|Message|Notification)\w*|notify\w*|pushOrderTo\w+|sendTemplate\w*)\s*\(|\bresend\.emails\.send\(|\btwilio\.messages\./],
 ];
 const COMMENT = /^\s*(?:\/\/|\*|\/\*)/;
-const MAX_NODES = 120;
-
-/** The handler range plus every function/method it reaches, up to `depth` calls away. */
-function reached(g, route, depth = 3) {
-  const out = [{ file: route.file, start: route.start, end: route.end, name: route.id, depth: 0 }];
-  const seen = new Set();
-  let frontier = [out[0]];
-  for (let d = 1; d <= depth && frontier.length && out.length < MAX_NODES; d++) {
-    const next = [];
-    for (const r of frontier) {
-      for (const u of g.usesInRange(r.file, r.start, r.end)) {
-        const t = u.target;
-        if (!SYMBOL_KINDS.has(t.kind) || !["function", "method"].includes(t.kind) || isTestFile(t.file) || t.file.includes("node_modules") || seen.has(t.id)) continue;
-        if (t.file === r.file && t.start >= r.start && t.end <= r.end) continue; // nested in the range already scanned
-        seen.add(t.id);
-        const n = { file: t.file, start: t.start, end: t.end, name: t.name, depth: d };
-        out.push(n);
-        next.push(n);
-        if (out.length >= MAX_NODES) break;
-      }
-    }
-    frontier = next;
-  }
-  return out;
-}
 
 /** Effects found along a route's call tree, each with where it happens and how far from the handler. */
 export function routeEffects(g, route) {

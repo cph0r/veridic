@@ -1,0 +1,208 @@
+{
+  "_about": "Hand verdicts on every high and medium agent-readiness issue, read against the source at the pinned commit. true = the code does what the issue says; false = it doesn't (or the id is public by design).",
+  "juice-shop": {
+    "id-param-without-caller-scope POST /rest/basket/:id/checkout": [
+      true,
+      "places an order from any basket id; no owner check (a documented Juice Shop challenge)"
+    ],
+    "id-param-without-caller-scope PUT /rest/basket/:id/coupon/:coupon": [
+      true,
+      "applies a coupon to any basket id"
+    ],
+    "id-param-without-caller-scope GET /rest/track-order/:id": [
+      false,
+      "order ids double as public tracking codes by design"
+    ],
+    "id-param-without-caller-scope PUT /rest/products/:id/reviews": [
+      false,
+      "products are a public catalogue; reviewing any product is intended"
+    ],
+    "get-that-writes GET /rest/user/change-password": [
+      true,
+      "changes the password on a GET (a documented Juice Shop flaw)"
+    ],
+    "get-that-writes GET /rest/saveLoginIp": [
+      true,
+      "updates the user's last login IP"
+    ],
+    "get-that-writes GET /rest/captcha": [
+      true,
+      "stores a new captcha"
+    ],
+    "get-that-writes GET /rest/user/whoami": [
+      true,
+      "records a solved challenge"
+    ],
+    "get-that-writes GET /rest/products/search": [
+      true,
+      "records a solved challenge"
+    ],
+    "get-that-writes GET /rest/basket/:id": [
+      true,
+      "records a solved challenge"
+    ],
+    "get-that-writes GET /rest/track-order/:id": [
+      true,
+      "records a solved challenge"
+    ],
+    "get-that-writes GET /rest/products/:id/reviews": [
+      true,
+      "records a solved challenge"
+    ],
+    "get-that-writes GET /the/devs/are/so/funny/they/hid/an/easter/egg/within/the/easter/egg": [
+      true,
+      "records a solved challenge"
+    ],
+    "get-that-writes GET /this/page/is/hidden/behind/an/incredibly/high/paywall/that/could/only/be/unlocked/by/sending/1btc/to/us": [
+      true,
+      "records a solved challenge"
+    ],
+    "get-that-writes GET /we/may/also/instruct/you/to/refuse/all/reasonably/necessary/responsibility": [
+      true,
+      "records a solved challenge"
+    ],
+    "get-that-writes GET /redirect": [
+      true,
+      "records a solved challenge"
+    ],
+    "get-that-writes GET /promotion": [
+      true,
+      "records a solved challenge"
+    ],
+    "get-that-writes GET /profile": [
+      true,
+      "records a solved challenge"
+    ],
+    "get-that-writes GET /metrics": [
+      true,
+      "records a solved challenge"
+    ]
+  },
+  "NodeGoat": {
+    "get-that-writes GET /logout": [
+      true,
+      "destroys the session on a GET"
+    ]
+  },
+  "hackathon-starter": {
+    "get-that-writes GET /api/paypal": [
+      true,
+      "creates a PayPal order on a GET"
+    ],
+    "get-that-writes GET /api/paypal/success": [
+      true,
+      "captures the PayPal payment on a GET"
+    ],
+    "get-that-writes GET /login/verify/:token": [
+      true,
+      "saves the user on passwordless login"
+    ],
+    "get-that-writes GET /login/2fa": [
+      true,
+      "saves the user's 2FA state"
+    ],
+    "get-that-writes GET /logout": [
+      true,
+      "destroys the session on a GET"
+    ],
+    "get-that-writes GET /account/verify": [
+      true,
+      "saves a verification token and sends an email"
+    ],
+    "get-that-writes GET /account/verify/:token": [
+      true,
+      "marks the email verified"
+    ],
+    "get-that-writes GET /account/unlink/:provider": [
+      true,
+      "unlinks an OAuth account on a GET"
+    ],
+    "get-that-writes GET /api/steam": [
+      true,
+      "isAuthorized refreshes and saves OAuth tokens"
+    ],
+    "get-that-writes GET /api/tumblr": [
+      true,
+      "isAuthorized refreshes and saves OAuth tokens"
+    ],
+    "get-that-writes GET /api/facebook": [
+      true,
+      "isAuthorized refreshes and saves OAuth tokens"
+    ],
+    "get-that-writes GET /api/twitch": [
+      true,
+      "isAuthorized refreshes and saves OAuth tokens"
+    ],
+    "get-that-writes GET /api/google/drive": [
+      true,
+      "isAuthorized refreshes and saves OAuth tokens"
+    ],
+    "get-that-writes GET /api/google/sheets": [
+      true,
+      "isAuthorized refreshes and saves OAuth tokens"
+    ],
+    "get-that-writes GET /api/quickbooks": [
+      true,
+      "isAuthorized refreshes and saves OAuth tokens"
+    ]
+  },
+  "proshop-v2": {
+    "id-param-without-caller-scope PUT /api/orders/:id/pay": [
+      true,
+      "any signed-in user can mark any order paid (it does require a verified PayPal payment of the order total)"
+    ]
+  },
+  "express-mongoose-es6-rest-api": {
+    "id-param-without-caller-scope DELETE /api/users/:userId": [
+      true,
+      "no authentication on the user routes at all"
+    ],
+    "id-param-without-caller-scope PUT /api/users/:userId": [
+      true,
+      "no authentication on the user routes at all"
+    ]
+  },
+  "_tests": {
+    "_about": "Every test the audit says asserts nothing, read by hand: true = it really checks nothing.",
+    "juice-shop": {
+      "test/cypress/e2e/basket.spec.ts:110": [
+        true,
+        "POSTs with fetch and never looks at the response"
+      ],
+      "test/cypress/e2e/deluxe.spec.ts:3": [
+        true,
+        "visits a page; no check"
+      ],
+      "test/cypress/e2e/totpSetup.spec.ts:11": [
+        true,
+        "only visits the page"
+      ],
+      "test/server/webhook.unit.test.ts:37": [
+        true,
+        "calls notify; only fails if it throws"
+      ]
+    },
+    "node-express-mongoose-demo": {
+      "test/test-articles-create.js:23": [
+        true,
+        "a setup or clean-up step registered as a test"
+      ],
+      "test/test-articles-create.js:25": [
+        true,
+        "a setup or clean-up step registered as a test"
+      ],
+      "test/test-articles-create.js:84": [
+        true,
+        "a setup or clean-up step registered as a test"
+      ],
+      "test/test-users-create.js:14": [
+        true,
+        "a setup or clean-up step registered as a test"
+      ],
+      "test/test-users-create.js:72": [
+        true,
+        "a setup or clean-up step registered as a test"
+      ]
+    }
+  }
+}

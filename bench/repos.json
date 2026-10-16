@@ -1,0 +1,22 @@
+{
+  "_about": "Public Express apps Veridic is measured on, pinned to exact commits. `dev` apps were used while improving route discovery and effect tracing; `holdout` apps were first run only after that, and their first-run results are recorded in holdout_first_run.",
+  "repos": [
+    { "name": "juice-shop", "url": "https://github.com/juice-shop/juice-shop", "sha": "399fba76194305a312693eee44f4df64bdf0c3ce", "set": "dev", "about": "OWASP Juice Shop: intentionally insecure shop (TypeScript)" },
+    { "name": "NodeGoat", "url": "https://github.com/OWASP/NodeGoat", "sha": "c5cb68a7084e4ae7dcc60e6a98768720a81841e8", "set": "dev", "about": "OWASP NodeGoat: intentionally insecure app (CommonJS)" },
+    { "name": "hackathon-starter", "url": "https://github.com/sahat/hackathon-starter", "sha": "d7a20cce5e41f45f14eaf400af874f86817aea0d", "set": "dev", "about": "Popular Node starter, Mongoose + Passport" },
+    { "name": "realworld", "url": "https://github.com/gothinkster/node-express-realworld-example-app", "sha": "30b68e1e881462b2f4164ea09ab4c4f5699c7b0b", "set": "dev", "about": "RealWorld Conduit API, TypeScript + Prisma" },
+    { "name": "node-express-boilerplate", "url": "https://github.com/hagopj13/node-express-boilerplate", "sha": "179ae84efec61b14206d0305d941daed6c6d07f9", "set": "dev", "about": "REST boilerplate, Mongoose, route lists mounted in a loop" },
+    { "name": "proshop-v2", "url": "https://github.com/bradtraversy/proshop-v2", "sha": "e23e3a897e5387f39da6c59fd72cdd12e46d0815", "set": "dev", "about": "MERN e-commerce, route() chains, PayPal" },
+    { "name": "node-express-mongoose-demo", "url": "https://github.com/madhums/node-express-mongoose-demo", "sha": "8a134ab5deeef553d6de51d91d4ed8ee378acace", "set": "holdout", "about": "Mongoose demo, routes registered on an app parameter" },
+    { "name": "bulletproof-nodejs", "url": "https://github.com/santiq/bulletproof-nodejs", "sha": "7ce1b4690c4e96659cb1ed0d367b08b3ab35a24b", "set": "holdout", "about": "Layered TypeScript architecture, dependency injection" },
+    { "name": "express-rest-boilerplate", "url": "https://github.com/danielfsousa/express-rest-boilerplate", "sha": "b8bed6d7cfce3cf2ef89ec1b5e47b52dfc50e874", "set": "holdout", "about": "REST boilerplate, Mongoose, role middleware" },
+    { "name": "express-mongoose-es6-rest-api", "url": "https://github.com/kunalkapadia/express-mongoose-es6-rest-api", "sha": "247fedde56e380fae720ce65ff65a7d0b034b3e2", "set": "holdout", "about": "Small ES6 REST API, Mongoose" }
+  ],
+  "holdout_first_run": {
+    "_about": "Route discovery on the holdout apps the first time Veridic saw them, before the fixes they prompted (an app handed into a function).",
+    "node-express-mongoose-demo": { "found": 0, "independent": 26 },
+    "bulletproof-nodejs": { "found": 4, "independent": 6 },
+    "express-rest-boilerplate": { "found": 15, "independent": 15 },
+    "express-mongoose-es6-rest-api": { "found": 8, "independent": 8 }
+  }
+}

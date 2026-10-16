@@ -1,0 +1,511 @@
+{
+  "generated": "2026-10-16",
+  "results": [
+    {
+      "name": "juice-shop",
+      "set": "dev",
+      "url": "https://github.com/juice-shop/juice-shop",
+      "sha": "399fba76194305a312693eee44f4df64bdf0c3ce",
+      "files": 1467,
+      "routes": {
+        "found": 116,
+        "independent": 116,
+        "files_mismatched": []
+      },
+      "agent_ready": {
+        "tools": 116,
+        "reads": 62,
+        "writes": 51,
+        "destructive": 3,
+        "move_money": 0,
+        "gets_that_write": 16,
+        "issues": {
+          "high": 1,
+          "medium": 19,
+          "low": 11
+        },
+        "agent_ready_pct": 84.5,
+        "graded_issues": 20,
+        "judged_true": 18,
+        "judged_false": 2,
+        "unjudged": 0
+      },
+      "tests": {
+        "test_files": 246,
+        "tests": 2436,
+        "strong": 2156,
+        "weak": 263,
+        "unasserted": 4,
+        "empty": 0,
+        "skipped": 13,
+        "checking_pct": 99.8,
+        "nothing_judged_true": 4,
+        "nothing_judged_false": 0,
+        "nothing_unjudged": 0
+      },
+      "ms": {
+        "index": 3127,
+        "routes": 258,
+        "agent_ready": 430,
+        "test_audit": 97
+      }
+    },
+    {
+      "name": "NodeGoat",
+      "set": "dev",
+      "url": "https://github.com/OWASP/NodeGoat",
+      "sha": "c5cb68a7084e4ae7dcc60e6a98768720a81841e8",
+      "files": 111,
+      "routes": {
+        "found": 20,
+        "independent": 20,
+        "files_mismatched": []
+      },
+      "agent_ready": {
+        "tools": 20,
+        "reads": 15,
+        "writes": 4,
+        "destructive": 1,
+        "move_money": 0,
+        "gets_that_write": 1,
+        "issues": {
+          "high": 0,
+          "medium": 1,
+          "low": 0
+        },
+        "agent_ready_pct": 95,
+        "graded_issues": 1,
+        "judged_true": 1,
+        "judged_false": 0,
+        "unjudged": 0
+      },
+      "tests": {
+        "test_files": 13,
+        "tests": 64,
+        "strong": 60,
+        "weak": 4,
+        "unasserted": 0,
+        "empty": 0,
+        "skipped": 0,
+        "checking_pct": 100,
+        "nothing_judged_true": 0,
+        "nothing_judged_false": 0,
+        "nothing_unjudged": 0
+      },
+      "ms": {
+        "index": 777,
+        "routes": 31,
+        "agent_ready": 17,
+        "test_audit": 12
+      }
+    },
+    {
+      "name": "hackathon-starter",
+      "set": "dev",
+      "url": "https://github.com/sahat/hackathon-starter",
+      "sha": "d7a20cce5e41f45f14eaf400af874f86817aea0d",
+      "files": 160,
+      "routes": {
+        "found": 101,
+        "independent": 101,
+        "files_mismatched": []
+      },
+      "agent_ready": {
+        "tools": 101,
+        "reads": 65,
+        "writes": 32,
+        "destructive": 4,
+        "move_money": 3,
+        "gets_that_write": 15,
+        "issues": {
+          "high": 2,
+          "medium": 13,
+          "low": 0
+        },
+        "agent_ready_pct": 85.1,
+        "graded_issues": 15,
+        "judged_true": 15,
+        "judged_false": 0,
+        "unjudged": 0
+      },
+      "tests": {
+        "test_files": 31,
+        "tests": 377,
+        "strong": 376,
+        "weak": 1,
+        "unasserted": 0,
+        "empty": 0,
+        "skipped": 0,
+        "checking_pct": 100,
+        "nothing_judged_true": 0,
+        "nothing_judged_false": 0,
+        "nothing_unjudged": 0
+      },
+      "ms": {
+        "index": 990,
+        "routes": 39,
+        "agent_ready": 116,
+        "test_audit": 22
+      }
+    },
+    {
+      "name": "realworld",
+      "set": "dev",
+      "url": "https://github.com/gothinkster/node-express-realworld-example-app",
+      "sha": "30b68e1e881462b2f4164ea09ab4c4f5699c7b0b",
+      "files": 67,
+      "routes": {
+        "found": 20,
+        "independent": 20,
+        "files_mismatched": []
+      },
+      "agent_ready": {
+        "tools": 20,
+        "reads": 11,
+        "writes": 9,
+        "destructive": 0,
+        "move_money": 0,
+        "gets_that_write": 0,
+        "issues": {
+          "high": 0,
+          "medium": 0,
+          "low": 0
+        },
+        "agent_ready_pct": 100,
+        "graded_issues": 0,
+        "judged_true": 0,
+        "judged_false": 0,
+        "unjudged": 0
+      },
+      "tests": {
+        "test_files": 6,
+        "tests": 28,
+        "strong": 27,
+        "weak": 0,
+        "unasserted": 0,
+        "empty": 0,
+        "skipped": 1,
+        "checking_pct": 100,
+        "nothing_judged_true": 0,
+        "nothing_judged_false": 0,
+        "nothing_unjudged": 0
+      },
+      "ms": {
+        "index": 838,
+        "routes": 25,
+        "agent_ready": 11,
+        "test_audit": 11
+      }
+    },
+    {
+      "name": "node-express-boilerplate",
+      "set": "dev",
+      "url": "https://github.com/hagopj13/node-express-boilerplate",
+      "sha": "179ae84efec61b14206d0305d941daed6c6d07f9",
+      "files": 78,
+      "routes": {
+        "found": 15,
+        "independent": 15,
+        "files_mismatched": []
+      },
+      "agent_ready": {
+        "tools": 15,
+        "reads": 4,
+        "writes": 6,
+        "destructive": 5,
+        "move_money": 0,
+        "gets_that_write": 0,
+        "issues": {
+          "high": 0,
+          "medium": 0,
+          "low": 1
+        },
+        "agent_ready_pct": 100,
+        "graded_issues": 0,
+        "judged_true": 0,
+        "judged_false": 0,
+        "unjudged": 0
+      },
+      "tests": {
+        "test_files": 7,
+        "tests": 113,
+        "strong": 113,
+        "weak": 0,
+        "unasserted": 0,
+        "empty": 0,
+        "skipped": 0,
+        "checking_pct": 100,
+        "nothing_judged_true": 0,
+        "nothing_judged_false": 0,
+        "nothing_unjudged": 0
+      },
+      "ms": {
+        "index": 747,
+        "routes": 27,
+        "agent_ready": 16,
+        "test_audit": 12
+      }
+    },
+    {
+      "name": "proshop-v2",
+      "set": "dev",
+      "url": "https://github.com/bradtraversy/proshop-v2",
+      "sha": "e23e3a897e5387f39da6c59fd72cdd12e46d0815",
+      "files": 92,
+      "routes": {
+        "found": 26,
+        "independent": 26,
+        "files_mismatched": []
+      },
+      "agent_ready": {
+        "tools": 26,
+        "reads": 15,
+        "writes": 9,
+        "destructive": 2,
+        "move_money": 0,
+        "gets_that_write": 0,
+        "issues": {
+          "high": 0,
+          "medium": 1,
+          "low": 1
+        },
+        "agent_ready_pct": 96.2,
+        "graded_issues": 1,
+        "judged_true": 1,
+        "judged_false": 0,
+        "unjudged": 0
+      },
+      "tests": {
+        "test_files": 0,
+        "tests": 0,
+        "strong": 0,
+        "weak": 0,
+        "unasserted": 0,
+        "empty": 0,
+        "skipped": 0,
+        "checking_pct": null,
+        "nothing_judged_true": 0,
+        "nothing_judged_false": 0,
+        "nothing_unjudged": 0
+      },
+      "ms": {
+        "index": 762,
+        "routes": 25,
+        "agent_ready": 16,
+        "test_audit": 9
+      }
+    },
+    {
+      "name": "node-express-mongoose-demo",
+      "set": "holdout",
+      "url": "https://github.com/madhums/node-express-mongoose-demo",
+      "sha": "8a134ab5deeef553d6de51d91d4ed8ee378acace",
+      "files": 82,
+      "routes": {
+        "found": 26,
+        "independent": 26,
+        "files_mismatched": []
+      },
+      "holdout_first_run": {
+        "found": 0,
+        "independent": 26
+      },
+      "agent_ready": {
+        "tools": 26,
+        "reads": 24,
+        "writes": 1,
+        "destructive": 1,
+        "move_money": 0,
+        "gets_that_write": 0,
+        "issues": {
+          "high": 0,
+          "medium": 0,
+          "low": 0
+        },
+        "agent_ready_pct": 100,
+        "graded_issues": 0,
+        "judged_true": 0,
+        "judged_false": 0,
+        "unjudged": 0
+      },
+      "tests": {
+        "test_files": 2,
+        "tests": 12,
+        "strong": 7,
+        "weak": 0,
+        "unasserted": 5,
+        "empty": 0,
+        "skipped": 0,
+        "checking_pct": 58.3,
+        "nothing_judged_true": 5,
+        "nothing_judged_false": 0,
+        "nothing_unjudged": 0
+      },
+      "ms": {
+        "index": 837,
+        "routes": 26,
+        "agent_ready": 8,
+        "test_audit": 10
+      }
+    },
+    {
+      "name": "bulletproof-nodejs",
+      "set": "holdout",
+      "url": "https://github.com/santiq/bulletproof-nodejs",
+      "sha": "7ce1b4690c4e96659cb1ed0d367b08b3ab35a24b",
+      "files": 50,
+      "routes": {
+        "found": 6,
+        "independent": 6,
+        "files_mismatched": []
+      },
+      "holdout_first_run": {
+        "found": 4,
+        "independent": 6
+      },
+      "agent_ready": {
+        "tools": 6,
+        "reads": 5,
+        "writes": 1,
+        "destructive": 0,
+        "move_money": 0,
+        "gets_that_write": 0,
+        "issues": {
+          "high": 0,
+          "medium": 0,
+          "low": 0
+        },
+        "agent_ready_pct": 100,
+        "graded_issues": 0,
+        "judged_true": 0,
+        "judged_false": 0,
+        "unjudged": 0
+      },
+      "tests": {
+        "test_files": 1,
+        "tests": 1,
+        "strong": 1,
+        "weak": 0,
+        "unasserted": 0,
+        "empty": 0,
+        "skipped": 0,
+        "checking_pct": 100,
+        "nothing_judged_true": 0,
+        "nothing_judged_false": 0,
+        "nothing_unjudged": 0
+      },
+      "ms": {
+        "index": 701,
+        "routes": 25,
+        "agent_ready": 5,
+        "test_audit": 9
+      }
+    },
+    {
+      "name": "express-rest-boilerplate",
+      "set": "holdout",
+      "url": "https://github.com/danielfsousa/express-rest-boilerplate",
+      "sha": "b8bed6d7cfce3cf2ef89ec1b5e47b52dfc50e874",
+      "files": 56,
+      "routes": {
+        "found": 15,
+        "independent": 15,
+        "files_mismatched": []
+      },
+      "holdout_first_run": {
+        "found": 15,
+        "independent": 15
+      },
+      "agent_ready": {
+        "tools": 15,
+        "reads": 4,
+        "writes": 8,
+        "destructive": 3,
+        "move_money": 0,
+        "gets_that_write": 0,
+        "issues": {
+          "high": 0,
+          "medium": 0,
+          "low": 0
+        },
+        "agent_ready_pct": 100,
+        "graded_issues": 0,
+        "judged_true": 0,
+        "judged_false": 0,
+        "unjudged": 0
+      },
+      "tests": {
+        "test_files": 2,
+        "tests": 58,
+        "strong": 58,
+        "weak": 0,
+        "unasserted": 0,
+        "empty": 0,
+        "skipped": 0,
+        "checking_pct": 100,
+        "nothing_judged_true": 0,
+        "nothing_judged_false": 0,
+        "nothing_unjudged": 0
+      },
+      "ms": {
+        "index": 735,
+        "routes": 26,
+        "agent_ready": 21,
+        "test_audit": 11
+      }
+    },
+    {
+      "name": "express-mongoose-es6-rest-api",
+      "set": "holdout",
+      "url": "https://github.com/kunalkapadia/express-mongoose-es6-rest-api",
+      "sha": "247fedde56e380fae720ce65ff65a7d0b034b3e2",
+      "files": 35,
+      "routes": {
+        "found": 8,
+        "independent": 8,
+        "files_mismatched": []
+      },
+      "holdout_first_run": {
+        "found": 8,
+        "independent": 8
+      },
+      "agent_ready": {
+        "tools": 8,
+        "reads": 5,
+        "writes": 2,
+        "destructive": 1,
+        "move_money": 0,
+        "gets_that_write": 0,
+        "issues": {
+          "high": 1,
+          "medium": 1,
+          "low": 1
+        },
+        "agent_ready_pct": 75,
+        "graded_issues": 2,
+        "judged_true": 2,
+        "judged_false": 0,
+        "unjudged": 0
+      },
+      "tests": {
+        "test_files": 3,
+        "tests": 16,
+        "strong": 16,
+        "weak": 0,
+        "unasserted": 0,
+        "empty": 0,
+        "skipped": 0,
+        "checking_pct": 100,
+        "nothing_judged_true": 0,
+        "nothing_judged_false": 0,
+        "nothing_unjudged": 0
+      },
+      "ms": {
+        "index": 766,
+        "routes": 22,
+        "agent_ready": 4,
+        "test_audit": 10
+      }
+    }
+  ]
+}

@@ -76,12 +76,32 @@ manifest (effect, money, notifications, auth, body fields, responses) as JSON.
 
 ## Measured, not vibes
 
-Veridic was built against two production Express codebases and compared with a
-plain Claude Code session (Opus, no Veridic) writing the same feature spec.
+### On 10 public Express apps (reproducible)
+
+OWASP Juice Shop, OWASP NodeGoat, hackathon-starter, RealWorld and six more, pinned
+to exact commits. Four were *holdouts*, first run only after development was done.
+Full table: [bench/RESULTS.md](bench/RESULTS.md). Reproduce with `node bench/run.mjs`.
+
+| Measure | Result |
+|---|---|
+| **Routes found** | **353 of 353** counted by an independent scanner, matching file by file in all 10 apps |
+| Holdout apps, first run | 27 of 55 routes before the one fix they prompted; 55 of 55 after |
+| **Agent-readiness issues** (high + medium) | **37 of 39 confirmed by hand (95% precision)**, every verdict and reason in [bench/verdicts.json](bench/verdicts.json) |
+| **Tests that assert nothing** | 9 found in 3,105 tests; **9 of 9 confirmed** |
+| Speed | under 4 s per app, indexing included |
+
+What it caught, for example: Juice Shop changes passwords on a `GET`; hackathon-starter
+**captures PayPal payments on a `GET`** and unlinks accounts on one; ProShop lets any
+signed-in user mark any order paid; a REST starter deletes users with no authentication.
+
+### Writing specs, against plain Claude Code
+
+On two private production Express apps, compared with a plain Claude Code session
+(Opus, no Veridic) writing the same feature spec:
 
 | | Baseline | Veridic (`/veridic:spec`, Sonnet) |
 |---|---|---|
-| **App A** (152 routes, payments): cost per spec | $2.46 | **$0.94** |
+| **App A** (153 routes, payments): cost per spec | $2.46 | **$0.94** |
 | time | 6.6 min | **4.3 min** |
 | requirement facts actually in the cited lines | 89% | **100%** |
 | known money-losing bugs surfaced | 2 of 2 | **2 of 2, every run** |
@@ -89,13 +109,8 @@ plain Claude Code session (Opus, no Veridic) writing the same feature spec.
 | time | 3.0 min | **1.8 min** |
 | requirement facts actually in the cited lines | 79% | **100%** |
 
-Its own checks are held to the same bar:
-
-- **Test honesty:** across 1,780 existing tests it flagged 7 (6 weak, 1 asserting nothing); all 7 were right. It caught 8 of 8 planted fake tests.
-- **Agent readiness:** every high and medium issue on both codebases was confirmed by hand.
-- **Claim checking:** the first version's flags were 0 for 14 useful; after tuning, three specs produced 3 flags (1 real off-by-one, 2 borderline). Each fix ships with a regression test.
-
-Small samples (two runs per method on App A, one or two on App B), hand-verified by
+Also hand-checked there: all 12 high and medium agent-readiness issues are real, and 8 of 8
+planted fake tests were caught. Small samples (one or two runs per method), verified by
 the author. Run it on your code and see.
 
 ## Install
@@ -208,7 +223,9 @@ telemetry switched off (`CODEGRAPH_TELEMETRY=0`).
 
 - Route discovery understands **Express** (JS/TS). Other frameworks aren't supported yet.
 - `--run` executes tests with **vitest**.
-- Effects (writes, money, notifications) are found by patterns on the code a route reaches; unusual libraries can slip past.
+- Effects (writes, money, notifications) are found by patterns on the code a route reaches: SQL, Drizzle, MongoDB/Mongoose, Sequelize and Prisma. Other data layers can slip past.
+- Who-can-call checks read middleware by name (`protect`, `admin`, `authorize(…)`, `isAccounting()`); a guard with an unusual name, or one that sets data the handler then ignores, can be misread. See the known misses in [bench/RESULTS.md](bench/RESULTS.md).
+- A mount prefix computed at run time (`app.use(config.prefix, routes)`) is left out of the route path.
 - Index freshness is judged by file modification times; set `VERIDIC_NO_SYNC=1` to turn automatic syncing off.
 
 ## Roadmap

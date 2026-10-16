@@ -9,6 +9,8 @@ const files = {
 };
 const save = { id: "save", kind: "function", name: "save", file: "svc.ts", start: 1, end: 5 };
 const g = {
+  nodes: new Map([["save", save]]),
+  text: (f) => files[f]?.join("\n") ?? null,
   lines: (f) => files[f],
   usesInRange: (f, s, e) => (f === "routes.ts" && s <= 3 && e >= 3 ? [{ target: save }] : []),
 };
