@@ -114,7 +114,8 @@ cd your-repo && codegraph init
 **As a CLI only:**
 
 ```bash
-npm i -g plumbcode     # installs the `plumb` command
+npm i -g plumbcode            # npm: installs the `plumb` command
+brew install cph0r/tap/plumb  # or Homebrew
 ```
 
 ## Quick start
@@ -177,6 +178,16 @@ In Claude Code:
 
 The rule that shaped every part: **models read and reason; scripts gather facts and
 verify.** Plumb never asks a model whether a spec is right. It checks.
+
+## What Plumb runs and touches
+
+Plumb runs locally and sends nothing anywhere: no telemetry, no network calls,
+no model calls from its scripts.
+
+- **Reads:** your repo's files, `git` metadata (`git ls-files`, `git diff`, `git show`), and the CodeGraph index at `.codegraph/codegraph.db`.
+- **Runs:** `git`, Node, and, only with `plumb tests --run` / `render --run-tests`, your own tests through `npx --no-install vitest` (never downloads a package). `plumb mutate` works in a temporary `git clone --shared` and deletes it afterwards.
+- **Writes:** only what you ask for: spec files from `render` and `stale --fix`, a test skeleton from `scaffold`, and files named with `--out`. Generated test harnesses call your app on `127.0.0.1` only.
+- **Hooks are opt-in:** `plumb install-hook` writes `.git/hooks/pre-commit` (it refuses to overwrite an existing one); it updates citations that only moved, stages the spec, and blocks a commit whose cited code changed without the spec. `/plumb:hooks` explains each hook and asks before writing `.claude/settings.json` or a CI workflow.
 
 ## Limits
 
