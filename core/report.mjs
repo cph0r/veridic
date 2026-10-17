@@ -15,6 +15,8 @@ import { metrics, defaultSpecs } from "./metrics.mjs";
 import { checkCitations } from "./citations.mjs";
 import { staleness } from "./staleness.mjs";
 import { doneWithoutSpec, loadClaim } from "./seam.mjs";
+import { findModules } from "./modules.mjs";
+import { testsReaching } from "./tests.mjs";
 
 const MAX_SNIPPET = 40; // lines of cited code shown per citation
 
@@ -201,9 +203,10 @@ export async function collectReport(repo, { specs: specFiles } = {}) {
   const note = (where, e) => out.errors.push(`${where}: ${e.message ?? e}`);
 
   // Routes: effect, access, evidence.
+  let g, inv;
   try {
-    const g = openGraph(repo);
-    const inv = routeInventory(g);
+    g = openGraph(repo);
+    inv = routeInventory(g);
     const manifest = effectManifest(g, inv);
     const r = readiness(manifest);
     out.routes = manifest.map((t) => ({ id: t.tool, method: t.method, path: t.path, effect: t.effect, moves_money: t.moves_money, external: t.external, notifies: t.notifies, access: t.requires.access, scoped: t.requires.scoped_to_caller, handler: t.handler, evidence: t.evidence.map((e) => ({ kind: e.kind, at: e.at, via: e.via ?? null })), flags: t.access_flags }));
@@ -256,21 +259,100 @@ export async function collectReport(repo, { specs: specFiles } = {}) {
     }
   }
 
-  // What the app is, and its areas: what each does, its issues, and whether a spec covers it.
+  // What the app is, and its modules: the features found from the code (see modules.mjs),
+  // each with what it does, its risks, its spec, its tests and its neighbours.
   out.app = appOverview(repo);
-  const areas = new Map();
-  for (const r of out.routes) {
-    const k = (r.area = areaOf(r.path));
-    const a = areas.get(k) ?? areas.set(k, { area: k, routes: 0, writes: 0, destructive: 0, money: 0, issues: 0, specified: 0, specs: [] }).get(k);
-    a.routes++;
-    if (r.effect !== "read") a.writes++;
-    if (r.effect === "destructive") a.destructive++;
-    if (r.moves_money) a.money++;
-    a.issues += out.findings.filter((f) => f.area === "API" && f.where === r.id && f.severity !== "low").length;
-    if (r.specs?.length) a.specified++;
-    for (const s of r.specs ?? []) if (!a.specs.includes(s)) a.specs.push(s);
+  out.modules = [];
+  if (g && inv?.routes.length) {
+    try {
+      const mods = findModules(g, inv);
+      const routeById = new Map(out.routes.map((r) => [r.id, r]));
+      const invById = new Map(inv.routes.map((r) => [r.id, r]));
+      const targets = [...new Set(mods.flatMap((m) => [...m.files, ...m.code]))];
+      let reaching = new Map();
+      try {
+        reaching = testsReaching(repo, targets);
+      } catch (e) {
+        note("module tests", e);
+      }
+      // Asserting tests anywhere that call a route by URL (supertest, e2e): `/api/orders/${id}`.
+      let urlTests = [];
+      try {
+        urlTests = (await import("./tests.mjs")).testFilesOf(repo).map((f) => (g.text(f) ?? "")).filter((t) => /['"`]\/[\w-]+\//.test(t));
+      } catch {}
+      const callsUrl = (p) => {
+        const parts = p.split("/").filter(Boolean);
+        if (!parts.some((x) => !/^[:{*]/.test(x))) return false;
+        const re = new RegExp(`["'\`]/${parts.map((x) => (/^[:{*]/.test(x) ? "(?:[^/\\s'\"\`]+|\\$\\{[^}]+\\})" : x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))).join("/")}(?:[?'"\`]|$)`);
+        return urlTests.some((t) => re.test(t));
+      };
+      const testText = new Map();
+      const textOf = (f) => (testText.has(f) ? testText.get(f) : testText.set(f, (g.text(f) ?? "").toLowerCase()).get(f));
+      for (const m of mods) {
+        const rs = m.routes.map((id) => routeById.get(id)).filter(Boolean);
+        for (const r of rs) r.module = m.id;
+        const tests = new Map();
+        for (const f of [...m.files, ...m.code]) for (const t of reaching.get(f) ?? []) tests.set(t.file, t);
+        const asserting = [...tests.values()].filter((t) => t.asserting > 0);
+        // A route counts as tested when an asserting test calls its URL, or reaches its
+        // handler and names the URL's last word.
+        const untested = rs.filter((r) => {
+          const last = r.path.split("/").filter((x) => x && !/^[:{*]/.test(x)).pop()?.toLowerCase();
+          const reachingHandler = (reaching.get(invById.get(r.id)?.file) ?? []).filter((t) => t.asserting > 0);
+          if (last && reachingHandler.some((t) => textOf(t.file).includes(last))) return false;
+          return !callsUrl(r.path);
+        });
+        const issues = out.findings.filter((f) => f.area === "API" && m.routes.includes(f.where));
+        for (const f of issues) f.module = m.id;
+        // What it does, in a few verb phrases from its routes: writes first, then reads.
+        const sing = (w) => (w.length > 4 ? w.replace(/ies$/, "y").replace(/(?<![sui])s$/, "") : w);
+        const phrase = (r) => {
+          const segs = r.path.split("/").filter((x) => x && !/^[:{*]/.test(x) && !/^(?:api|v\d+|admin|public|owner|internal|private)$/i.test(x)).map((x) => x.replace(/[-_.]+/g, " ").toLowerCase());
+          const last = segs.at(-1) ?? "", prev = segs.length > 1 ? sing(segs.at(-2)) : "";
+          const plural = !/\s/.test(last) && /[^su]s$/.test(last);
+          const withPrev = (x) => (prev && !/\s/.test(x) && !x.includes(prev) ? `${prev} ${x}` : x);
+          if (/webhook|callback/.test(last + prev)) return `receive ${withPrev(last)}`;
+          if (r.method === "GET" || r.method === "HEAD") return plural ? `list ${last}` : `view ${withPrev(last)}`;
+          if (r.method === "DELETE") return `delete ${plural ? sing(last) : withPrev(last)}`;
+          if (r.method === "PUT" || r.method === "PATCH") return `update ${plural ? sing(last) : withPrev(last)}`;
+          return plural ? `create ${sing(last)}` : /\s/.test(last) ? last : `${last} ${prev}`.trim();
+        };
+        const order = (r) => (r.moves_money ? 0 : r.effect === "destructive" ? 1 : r.effect === "write" ? 2 : 3);
+        const actions = [...new Set([...rs].sort((a, b) => order(a) - order(b)).map(phrase).filter(Boolean))].slice(0, 6);
+        out.modules.push({
+          ...m,
+          does: actions,
+          stats: {
+            routes: rs.length,
+            reads: rs.filter((r) => r.effect === "read").length,
+            writes: rs.filter((r) => r.effect === "write").length,
+            destructive: rs.filter((r) => r.effect === "destructive").length,
+            money: rs.filter((r) => r.moves_money).length,
+            public: rs.filter((r) => r.access === "public").length,
+            high: issues.filter((f) => f.severity === "high").length,
+            medium: issues.filter((f) => f.severity === "medium").length,
+          },
+          specs: [...new Set(rs.flatMap((r) => r.specs ?? []))],
+          specified: rs.filter((r) => r.specs?.length).length,
+          tests: { files: [...tests.values()].map((t) => ({ file: t.file, tests: t.tests, asserting: t.asserting })).sort((a, b) => b.tests - a.tests), asserting: asserting.length, untested: untested.map((r) => r.id) },
+        });
+      }
+      // Riskiest first: open high issues, money, deletes, then size.
+      const risk = (m) => m.stats.high * 100 + m.stats.medium * 20 + m.stats.money * 10 + m.stats.destructive * 4 + m.stats.writes + (m.specified ? 0 : 5);
+      out.modules.sort((a, b) => risk(b) - risk(a) || b.stats.routes - a.stats.routes);
+      for (const m of out.modules) m.risk = risk(m);
+    } catch (e) {
+      note("modules", e);
+    }
   }
-  out.areas = [...areas.values()].sort((a, b) => (a.specified === a.routes) - (b.specified === b.routes) || b.money - a.money || b.issues - a.issues || b.writes - a.writes || b.routes - a.routes);
+  // Findings that name a test or spec file belong to the module whose code they're about, when there is one.
+  const fileModule = new Map(out.modules.flatMap((m) => [...m.files, ...m.code].map((f) => [f, m.id])));
+  for (const m of out.modules) for (const t of m.tests.files) if (!fileModule.has(t.file)) fileModule.set(t.file, m.id);
+  for (const f of out.findings)
+    if (!f.module) {
+      const file = [String(f.where), ...(f.evidence ?? [])].map((x) => String(x).split(":")[0].split(" ")[0]).find((x) => fileModule.has(x));
+      if (file) f.module = fileModule.get(file);
+    }
 
   // The change in progress: what the working tree changes against HEAD, checked against the claim.
   try {

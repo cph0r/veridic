@@ -51,6 +51,7 @@
     changed: '<path d="M3.05 11a9 9 0 1 1 .5 4M3 4v5h5"/><path d="M12 8v4l2 2"/>',
     file: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/>',
     table: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18M9 10v10M15 10v10"/>',
+    grid: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
     logo: '<path d="m5 12.5 4.5 4.5L19 7.5"/>',
   };
   const ic = (n, cls) => '<svg class="i ' + (cls || "") + '" viewBox="0 0 24 24" aria-hidden="true">' + (P[n] || "") + "</svg>";
@@ -196,30 +197,32 @@
 
   // ---- state ----
   const NAV = [
-    ...(SPECS.length ? [{ k: "spec", t: "Specs", i: "spec", n: SPECS.length }] : []),
-    { k: "health", t: "Health", i: "health" },
-    { k: "findings", t: "Findings", i: "alert", n: F.filter((f) => f.severity !== "low").length, hot: F.some((f) => f.severity === "high") },
-    { k: "routes", t: "Routes", i: "route", n: ROUTES.length },
-    { k: "tests", t: "Tests", i: "flask", n: T ? T.tests : null },
-    ...(SPECS.length ? [] : [{ k: "spec", t: "Specs", i: "spec", n: 0 }]),
-    ...(D.change ? [{ k: "change", t: "Current change", i: "branch", n: D.change.problems.length || null, hot: !D.change.done }] : []),
+    { k: "modules", t: "Modules", i: "grid", n: (D.modules || []).length || null },
+    { k: "spec", t: "Specs", i: "spec", n: SPECS.length || null },
+    ...(D.change ? [{ k: "change", t: "Current task", i: "branch", n: D.change.problems.length || null, hot: !D.change.done }] : []),
+    { k: "overview", t: "App overview", i: "health", n: F.filter((f) => f.severity !== "low").length || null, hot: F.some((f) => f.severity === "high") },
   ];
+  const fromHash = () => { const h = location.hash.slice(1).split("/"); return h[0] === "module" && h[1] ? { view: "module", mod: decodeURIComponent(h[1]), jump: h[2] } : NAV.some((n) => n.k === h[0]) ? { view: h[0] } : { view: "modules" }; };
   const state = {
-    view: NAV.some((n) => n.k === location.hash.slice(1)) ? location.hash.slice(1) : NAV[0].k,
+    ...fromHash(),
+    sub: "summary",
     q: "",
     sev: ["high", "medium"],
     area: "all",
     rf: "all",
-    sel: SPECS.length ? "spec:0" : "app",
-    aboutOpen: false,
+    spec: 0,
     sf: "all",
+    aboutOpen: false,
     openGroup: null,
     pages: {},
   };
 
+
   // ---- views ----
-  // ---- Specs: what the app is, a tree to pick a spec or an area, and the pick ----
-  const AREAS = D.areas || [];
+  // ---- Modules: the app's features, found from its code; each one a page that is
+  // everything a newcomer needs to work on it without learning the rest ----
+  const MODS = D.modules || [];
+  const MOD = new Map(MODS.map((m) => [m.id, m]));
   const specTitle = (s) => (s.doc && s.doc.title) || specName(s);
   // Markdown, the little the specs and READMEs use: `code` (file:line becomes a link), **bold**, lists.
   const md = (t) => String(t ?? "").split(/`([^`]+)`/).map((p, i) => (i % 2 ? (LOC.test(p) ? loc(p) : "<code>" + esc(p) + "</code>") : esc(p).replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>"))).join("");
@@ -228,75 +231,141 @@
     if (ls.every((l) => /^\s*([-*]|\d+\.)\s/.test(l))) { const ol = /^\s*\d+\./.test(ls[0]); return "<" + (ol ? "ol" : "ul") + ' class="mdlist">' + ls.map((l) => "<li>" + md(l.replace(/^\s*([-*]|\d+\.)\s+/, "")) + "</li>").join("") + "</" + (ol ? "ol" : "ul") + ">"; }
     return "<p>" + md(b) + "</p>";
   }).join("");
-  const areaIcon = (a) => (a.money ? "coins" : a.destructive ? "trash" : a.writes ? "pencil" : "eye");
-  const areaTone = (a) => (a.specified === a.routes ? "ok" : a.money || a.issues ? "high" : a.specified ? "med" : "low");
-  const promptArea = (a) => "Use veridic to write a spec for the " + a.area + " area of " + D.name + ". Its routes:\n" + ROUTES.filter((r) => r.area === a.area).map((r) => "- " + r.id + " (" + (EFF[r.effect] || EFF.read).t.toLowerCase() + (r.moves_money ? ", moves money" : "") + ") " + r.handler).join("\n") +
-    "\n\nStart with the riskiest behavior (money, deletes, writes). Write user stories with Given/When/Then scenarios, requirements backed by [evidence: file:line] citations to the code that does them, and the invariants that must always hold. Save it as specs/" + a.area.replace(/[^\w]+/g, "-") + "/spec.md, then run `veridic check` and `veridic tests`.";
+  // High risk: open high issues. Needs care: medium issues or money. Needs tests: changes data, no route tested.
+  const riskOf = (m) => m.stats.high ? { t: "High risk", c: "high", i: "alert" } : m.stats.medium || m.stats.money ? { t: "Needs care", c: "med", i: "shield" }
+    : m.stats.writes + m.stats.destructive && m.tests.untested.length === m.stats.routes ? { t: "Needs tests", c: "med", i: "flask" } : { t: "Low risk", c: "ok", i: "check" };
+  const modRoutes = (m) => ROUTES.filter((r) => r.module === m.id);
+  const modFindings = (m) => F.filter((f) => f.module === m.id);
+  const modLink = (id, cls) => { const m = MOD.get(id); return m ? '<button class="linkbtn ' + (cls || "") + '" data-mod="' + esc(id) + '">' + esc(m.name) + "</button>" : esc(id); };
+  const filesOf = (m) => [...m.files, ...m.code.filter((f) => !m.files.includes(f))];
+  const promptModuleSpec = (m) => "Use veridic to write a spec for the " + m.name + " module of " + D.name + ". It does: " + m.does.join(", ") + ".\nIts routes:\n" + modRoutes(m).map((r) => "- " + r.id + " (" + (EFF[r.effect] || EFF.read).t.toLowerCase() + (r.moves_money ? ", moves money" : "") + ") " + r.handler).join("\n") + "\nIts code: " + filesOf(m).join(", ") +
+    "\n\nStart with the riskiest behavior (money, deletes, writes). Write user stories with Given/When/Then scenarios, requirements backed by [evidence: file:line] citations to the code that does them, and the invariants that must always hold. Save it as specs/" + m.id + "/spec.md, then run `veridic check` and `veridic tests`.";
+  const promptModuleTests = (m) => { const ids = m.tests.untested; return "In " + D.name + ", these routes of the " + m.name + " module have no test that calls them or names them:\n" + ids.map((x) => "- " + x).join("\n") + "\n\nRun `veridic claim " + ids.slice(0, 8).map((x) => JSON.stringify(x)).join(" ") + "` first. Then, starting with the routes that move money or change data, write tests that call each route and assert its real effect (status, body, and what changed in the data). Make each test fail if the behavior broke. Run them, then `veridic done`."; };
+  const promptTask = (m) => "I'm going to work on the " + m.name + " module of " + D.name + " (it does: " + m.does.join(", ") + ").\n\nFirst run `veridic claim " + m.routes.map((x) => JSON.stringify(x)).join(" ") + "` so stray edits outside it get caught. Read its code before changing anything: " + filesOf(m).join(", ") + ".\n" +
+    (m.usedBy.length ? "Other modules depend on it, so re-check them after the change: " + m.usedBy.map((u) => (MOD.get(u.module) || { name: u.module }).name + " (through " + u.via.join(", ") + ")").join("; ") + ".\n" : "") +
+    "When the change is done, run `veridic done` and keep going until it says DONE.\n\nThe task: <describe what you want to change here>";
 
-  function vSpec() {
-    return appHeader() + '<div class="split"><aside class="tree card in" aria-label="Specs and areas">' + tree() + '</aside><section class="pane">' + pane() + "</section></div>";
-  }
   function appHeader() {
     const A = D.app;
-    const covered = ROUTES.filter((r) => r.specs && r.specs.length).length, p = pctOf(covered, ROUTES.length);
+    const covered = ROUTES.filter((r) => r.specs && r.specs.length).length;
     const stat = (v, k, icon, tone) => '<div class="astat"><span class="ic bg-' + tone + '">' + ic(icon) + '</span><div><div class="v">' + num(v) + '</div><div class="k">' + k + "</div></div></div>";
-    return '<div class="card apphead in"><div class="appmain"><div class="eyebrow">' + ic("spec", "sm") + "Specs · " + esc(D.name) + "</div><h1>" + esc((A && A.title) || D.name) + "</h1>" +
-      (A ? '<div class="about' + (state.aboutOpen ? "" : " clamp") + '">' + mdBlock(A.about) + '</div><div class="row-flex small muted">' + (A.about.length > 200 ? '<button class="btn ghost" data-more>' + ic("chev", "sm" + (state.aboutOpen ? " up" : " down")) + (state.aboutOpen ? "Less" : "More") + "</button>" : "") + "From <span class=\"mono\">" + esc(A.source) + "</span></div>"
+    return '<div class="card apphead in"><div class="appmain"><div class="eyebrow">' + ic("health", "sm") + "About this app</div><h1>" + esc((A && A.title) || D.name) + "</h1>" +
+      (A ? '<div class="about' + (state.aboutOpen ? "" : " clamp") + '">' + mdBlock(A.about) + '</div><div class="row-flex small muted">' + (A.about.length > 160 ? '<button class="btn ghost" data-more>' + ic("chev", "sm" + (state.aboutOpen ? " up" : " down")) + (state.aboutOpen ? "Show less" : "Read more") + "</button>" : "") + "From <span class=\"mono\">" + esc(A.source) + "</span></div>"
         : '<p class="muted">No README describes this app yet. A short one helps people and agents alike.</p>') +
-      '</div><div class="appstats">' + stat(ROUTES.length, "routes", "route", "info") + stat(AREAS.length, "areas", "branch", "violet") + stat(SPECS.length, SPECS.length === 1 ? "spec" : "specs", "spec", "ok") +
-      '<div class="covring">' + ring(p, toneOf(p), 64) + '<div><div class="v">' + num(p, "%") + '</div><div class="k">of routes have a spec</div></div></div></div></div>';
-  }
-  const node = (key, icon, label, meta, extra, tone) => '<button class="node' + (state.sel === key ? " on" : "") + '" data-sel="' + esc(key) + '"><span class="nico">' + ic(icon) + '</span><span class="nbody"><span class="nlabel">' + esc(label) + '</span><span class="nmeta">' + esc(meta) + "</span>" + (extra || "") + "</span>" + (tone ? '<span class="dot tone-' + tone + '"></span>' : "") + "</button>";
-  function tree() {
-    let h = node("app", "health", "About this app", plural(AREAS.length, "area") + " · " + plural(SPECS.length, "spec"));
-    h += '<div class="tree-g">' + ic("spec", "sm") + 'Specs<span class="n">' + SPECS.length + "</span></div>";
-    h += SPECS.length ? SPECS.map((s, i) => {
-      const rs = specReqs(s), t = rs.filter(tested).length, st = rs.filter((r) => r.stale).length;
-      return node("spec:" + i, "file", specTitle(s), plural(rs.length, "requirement") + " · " + pctOf(t, rs.length) + "% tested" + (st ? " · " + st + " changed" : ""), bar([{ c: "var(--ok)", p: pctOf(t, rs.length) }], true), st || t < rs.length ? "med" : "ok");
-    }).join("") : '<div class="tree-empty">None yet. Pick an area below to write one.</div>';
-    const list = AREAS.filter((a) => match(a.area));
-    h += '<div class="tree-g">' + ic("branch", "sm") + 'Areas<span class="n">' + AREAS.length + '</span><span class="legend-mini"><i class="dot tone-ok"></i>spec <i class="dot tone-high"></i>risky, none</span></div>';
-    h += list.map((a) => node("area:" + a.area, areaIcon(a), a.area, plural(a.routes, "route") + (a.specified ? " · " + pctOf(a.specified, a.routes) + "% specified" : " · no spec"), "", areaTone(a))).join("");
-    return h;
-  }
-  function pane() {
-    const sel = state.sel;
-    if (sel.startsWith("spec:") && SPECS[+sel.slice(5)]) return specPane(SPECS[+sel.slice(5)], +sel.slice(5));
-    if (sel.startsWith("area:")) { const a = AREAS.find((x) => "area:" + x.area === sel); if (a) return areaPane(a); }
-    return appPane();
+      '</div><div class="appstats">' + stat(MODS.length, "modules", "grid", "violet") + stat(ROUTES.length, "routes", "route", "info") + stat(SPECS.length, SPECS.length === 1 ? "spec" : "specs", "spec", "ok") + stat(covered, "routes with a spec", "check", covered ? "ok" : "low") + "</div></div>";
   }
 
-  function appPane() {
-    const missing = AREAS.filter((a) => a.specified < a.routes);
-    let h = '<div class="pane-h in"><div><h2>' + ic("branch", "sm") + "Spec coverage by area</h2><p>Each area of the API, what it does, and whether a spec says what it must do. Areas that move money, delete or have open issues come first.</p></div>" +
-      (missing.length ? btn("Copy prompt: spec the riskiest area", promptArea(missing[0]), "primary", "sparkle") : "") + "</div>";
-    if (!AREAS.length) return h + empty("route", "No routes found", "Run <code>veridic init</code> so Veridic can index the code.");
-    const pg = paginate("areas", AREAS.filter((a) => match(a.area)));
-    h += '<div class="card in"><div class="tablewrap"><table class="t"><thead><tr><th>Area</th><th>Routes</th><th>Does</th><th>Issues</th><th>Spec</th></tr></thead><tbody>' +
-      pg.items.map((a) => '<tr class="row" data-sel="area:' + esc(a.area) + '"><td><span class="lbl">' + icoBox(areaIcon(a), areaTone(a) === "ok" ? "ok" : "low") + '<span class="mono" style="font-weight:600">' + esc(a.area) + "</span></span></td><td class=\"num\">" + a.routes + "</td><td>" + doesIcons(a) + "</td><td>" +
-        (a.issues ? '<span class="pill bg-high">' + ic("alert", "sm") + a.issues + "</span>" : '<span class="tone-ok">' + ic("check2", "sm") + "</span>") + "</td><td>" + coverCell(a) + "</td></tr>").join("") + "</tbody></table></div>" + pg.html + "</div>";
+  function vModules() {
+    let h = appHeader();
+    h += head(ic("grid", "lg") + "Modules", "The app split into the features it's made of, found from its code. Pick one to see what it does, the rules it must follow, its tests, its risks, and what else it touches, so you can work on it without learning the rest. Riskiest first.");
+    if (!MODS.length) return h + empty("route", "No modules found", "Veridic finds modules from the app's routes. Run <code>veridic init</code> in the repo so it can index the code.");
+    const list = MODS.filter((m) => match(m.name + " " + m.does.join(" ") + " " + m.files.join(" ")));
+    const pg = paginate("modules", list);
+    h += '<div class="modgrid">' + pg.items.map(modCard).join("") + "</div>" + (pg.html ? '<div class="card mt">' + pg.html + "</div>" : "");
     return h;
   }
-  const doesIcons = (a) => '<span class="cellicons">' + (a.money ? '<span class="pill bg-high" data-tip="Move money">' + ic("coins", "sm") + a.money + "</span>" : "") + (a.destructive ? '<span class="pill bg-high" data-tip="Delete">' + ic("trash", "sm") + a.destructive + "</span>" : "") + (a.writes - a.destructive > 0 ? '<span class="pill bg-med" data-tip="Change data">' + ic("pencil", "sm") + (a.writes - a.destructive) + "</span>" : "") + (a.routes - a.writes > 0 ? '<span class="pill bg-info" data-tip="Read">' + ic("eye", "sm") + (a.routes - a.writes) + "</span>" : "") + "</span>";
-  const coverCell = (a) => { const p = pctOf(a.specified, a.routes); return a.specified ? '<div class="row-flex" style="flex-wrap:nowrap;min-width:150px"><div style="flex:1">' + bar([{ c: "var(--" + (p === 100 ? "ok" : "med") + ")", p }], true) + '</div><span class="small">' + a.specified + "/" + a.routes + "</span></div>" : '<span class="pill bg-low">' + ic("minus", "sm") + "No spec</span>"; };
+  function modCard(m) {
+    const r = riskOf(m), s = m.stats;
+    const tested = s.routes - m.tests.untested.length;
+    return '<button class="card modcard in" data-mod="' + esc(m.id) + '"><div class="row-flex" style="flex-wrap:nowrap"><span class="ic bg-' + r.c + '">' + ic(r.i) + '</span><div style="min-width:0;flex:1"><div class="mname">' + esc(m.name) + '</div><div class="mmeta">' + plural(s.routes, "route") + " · " + plural(filesOf(m).length, "file") + "</div></div>" + pill(null, r.t, r.c) + "</div>" +
+      '<div class="mdoes">' + esc(m.does.slice(0, 4).join(" · ")) + "</div>" +
+      '<div class="mfacts">' +
+      fact("coins", s.money, "move money", "high") + fact("trash", s.destructive, "delete", "high") + fact("pencil", s.writes, "change data", "med") + fact("eye", s.reads, "read", "info") + "</div>" +
+      '<div class="mfoot"><span data-tip="' + (s.high + s.medium ? plural(s.high + s.medium, "open issue") : "No open issues") + '" class="mf ' + (s.high ? "tone-high" : s.medium ? "tone-med" : "tone-ok") + '">' + ic(s.high + s.medium ? "alert" : "check2", "sm") + (s.high + s.medium || 0) + " issues</span>" +
+      '<span class="mf ' + (m.specified ? "tone-ok" : "tone-low") + '" data-tip="' + (m.specified ? m.specified + " of " + s.routes + " routes have a spec" : "No spec yet") + '">' + ic("spec", "sm") + (m.specified ? Math.round((m.specified / s.routes) * 100) + "% spec" : "no spec") + "</span>" +
+      '<span class="mf ' + (tested === s.routes ? "tone-ok" : tested ? "tone-med" : "tone-high") + '" data-tip="Routes a test calls or names">' + ic("flask", "sm") + tested + "/" + s.routes + " tested</span>" +
+      (m.usedBy.length ? '<span class="mf tone-info" data-tip="Modules that depend on this one">' + ic("branch", "sm") + "used by " + m.usedBy.length + "</span>" : "") + "</div></button>";
+  }
+  const fact = (icon, n, label, tone) => (n ? '<span class="mfact bg-' + tone + '" data-tip="' + plural(n, "route") + " " + label + '">' + ic(icon, "sm") + n + "</span>" : "");
 
-  function areaPane(a) {
-    const rs = ROUTES.filter((r) => r.area === a.area && match(r.id));
-    const specs = SPECS.map((s, i) => [s, i]).filter(([s]) => a.specs.includes(s.path));
-    let h = '<div class="pane-h in"><div><div class="eyebrow">' + ic("branch", "sm") + "Area</div><h2 class=\"mono\">" + esc(a.area) + "</h2><p>" + plural(a.routes, "route") + " · " + doesIcons(a) + "</p></div>" + (a.specified ? btn("Copy prompt: spec the rest", promptArea(a), "primary", "sparkle") : "") + "</div>";
-    h += a.specified
-      ? '<div class="callout ok in">' + ic("check", "sm") + "<div><b>" + pctOf(a.specified, a.routes) + "% of this area is specified</b> by " + specs.map(([s, i]) => '<button class="linkbtn" data-sel="spec:' + i + '">' + esc(specTitle(s)) + "</button>").join(", ") + ". " + (a.specified < a.routes ? plural(a.routes - a.specified, "route") + " still have no spec." : "") + "</div></div>"
-      : '<div class="callout warn in">' + ic("alert", "sm") + '<div style="flex:1"><b>No spec for this area yet.</b> A spec writes down the rules these routes must follow, like <i>“an order can\'t be cancelled once it\'s paid”</i>, each tied to the code that does it. Without one, nobody can tell a bug from an intended change here.' + (a.money ? " <b>It moves money, so it\'s a good one to start with.</b>" : "") +
-        '<div class="row-flex" style="margin-top:10px">' + btn("Draft a spec from the code", promptArea(a), "primary", "sparkle") + '<span class="muted small">Copies a prompt. Paste it into Claude Code; it reads these ' + plural(a.routes, "route") + " and writes the spec.</span></div></div></div>";
-    const pg = paginate("area:" + a.area, rs);
-    h += table(["Method", "Path", "Does", "Who can call", "Issues", "Spec"], pg.items.map((rt) => {
+  // A module's page, in the order a newcomer needs it.
+  function vModule() {
+    const m = MOD.get(state.mod);
+    if (!m) { state.view = "modules"; return vModules(); }
+    const r = riskOf(m), s = m.stats, rs = modRoutes(m), fs = modFindings(m);
+    const tested = s.routes - m.tests.untested.length;
+    const sections = [["does", "What it does", "route"], ["rules", "Rules", "spec"], ["tests", "Tests", "flask"], ["risks", "Risks", "alert"], ["neighbours", "Neighbours", "branch"], ["work", "Work on it", "wrench"]];
+    let h = '<div class="crumbs in"><button class="linkbtn" data-nav="modules">' + ic("grid", "sm") + "Modules</button>" + ic("chev", "sm") + "<span>" + esc(m.name) + "</span></div>";
+    h += '<div class="card modhead in"><div style="flex:1;min-width:260px"><div class="row-flex"><h1>' + esc(m.name) + "</h1>" + pill(r.i, r.t, r.c) + (m.pinned ? pill("lock", "Set in .veridic.json", "low") : "") + "</div>" +
+      '<p class="purpose">' + (m.does.length ? "Lets callers <b>" + m.does.map(esc).join("</b>, <b>") + "</b>." : "") + "</p>" +
+      '<div class="mfoot" style="margin-top:10px">' + fact("coins", s.money, "move money", "high") + fact("trash", s.destructive, "delete", "high") + fact("pencil", s.writes, "change data", "med") + fact("eye", s.reads, "read", "info") +
+      '<span class="mf muted">' + plural(s.routes, "route") + " in " + plural(m.files.length, "file") + "</span></div></div>" +
+      '<div class="modactions">' + btn("Start a task here", promptTask(m), "primary", "sparkle") + '<div class="muted small">Copies a prompt that claims this module, lists what to read, and ends with <code>veridic done</code>.</div></div></div>';
+    h += '<nav class="secnav in">' + sections.map(([k, t, i]) => '<a href="#module/' + esc(m.id) + "/" + k + '" data-jump="' + k + '">' + ic(i, "sm") + t + (k === "risks" && fs.filter((f) => f.severity !== "low").length ? ' <span class="n hot">' + fs.filter((f) => f.severity !== "low").length + "</span>" : k === "tests" && m.tests.untested.length ? ' <span class="n">' + m.tests.untested.length + " untested</span>" : "") + "</a>").join("") + "</nav>";
+
+    // 1. What it does.
+    h += secHead("does", "route", "What it does", "Every route in this module: what it really does (traced through the code it calls), who can call it, and whether it checks the data is the caller's.");
+    const pg = paginate("mod-routes", rs.filter((rt) => match(rt.id)));
+    h += table(["Method", "Path", "Does", "Who can call", "Whose data", "Spec", "Test"], pg.items.map((rt) => {
       const iss = issuesByRoute.get(rt.id) || [], e = EFF[rt.effect] || EFF.read;
-      return row(['<span class="method m-' + esc(rt.method) + '">' + esc(rt.method) + "</span>", '<span class="path">' + esc(rt.path) + "</span>",
-        '<span class="cellicons">' + icoBox(e.i, e.c, e.t) + (rt.moves_money ? icoBox("coins", "high", "Moves money") : "") + "</span>",
-        ACC[rt.access] ? icoBox(ACC[rt.access].i, ACC[rt.access].c, ACC[rt.access].t) : esc(rt.access),
-        iss.length ? '<span class="pill bg-high">' + ic("alert", "sm") + iss.length + "</span>" : '<span class="tone-ok">' + ic("check2", "sm") + "</span>",
-        rt.specs && rt.specs.length ? '<span class="pill bg-ok">' + ic("check2", "sm") + "Specified</span>" : '<span class="pill bg-low">' + ic("minus", "sm") + "None</span>"], routeDetail(rt, iss));
+      const own = rt.access === "public" && rt.effect === "read" ? null : OWN[rt.scoped];
+      return row(['<span class="method m-' + esc(rt.method) + '">' + esc(rt.method) + "</span>", '<span class="path">' + esc(rt.path) + "</span>" + (iss.length ? ' <span class="pill bg-' + SEV[iss[0].severity].c + '" data-tip="' + esc(iss[0].title) + '">' + ic("alert", "sm") + iss.length + "</span>" : ""),
+        '<span class="lbl">' + icoBox(e.i, e.c) + '<span class="small">' + e.t + "</span>" + (rt.moves_money ? icoBox("coins", "high", "Moves money") : "") + "</span>",
+        ACC[rt.access] ? '<span class="lbl">' + icoBox(ACC[rt.access].i, ACC[rt.access].c) + '<span class="small">' + ACC[rt.access].t + "</span></span>" : esc(rt.access),
+        own ? '<span class="lbl">' + icoBox(own.i, own.c) + '<span class="small">' + (rt.scoped === "yes" ? "Checked" : rt.scoped === "weak" ? "Client values" : "Not checked") + "</span></span>" : '<span class="muted">—</span>',
+        rt.specs && rt.specs.length ? '<span class="tone-ok" data-tip="Covered by a spec">' + ic("check2", "sm") + "</span>" : '<span class="muted" data-tip="No spec">—</span>',
+        m.tests.untested.includes(rt.id) ? '<span class="tone-high" data-tip="No test calls or names it">' + ic("x", "sm") + "</span>" : '<span class="tone-ok" data-tip="A test calls or names it">' + ic("check2", "sm") + "</span>"], routeDetail(rt, iss));
     }), pg.html);
+
+    // 2. The rules it must follow.
+    const specs = SPECS.map((sp, i) => [sp, i]).filter(([sp]) => m.specs.includes(sp.path));
+    h += secHead("rules", "spec", "Rules it must follow", "What this module must always do, from its spec, each rule tied to the code that does it.");
+    if (!specs.length) h += '<div class="callout warn in">' + ic("spec", "sm") + '<div style="flex:1"><b>No spec for this module yet.</b> A spec writes down the rules these routes must follow, like <i>“an order can\'t be cancelled once it\'s paid”</i>, each tied to the code that does it. Without one, nobody can tell a bug from an intended change here.' +
+      (s.money ? " <b>It moves money, so it's a good one to start with.</b>" : "") + '<div class="row-flex" style="margin-top:10px">' + btn("Draft a spec from the code", promptModuleSpec(m), "primary", "sparkle") + '<span class="muted small">Copies a prompt. Paste it into Claude Code; it reads this module\'s ' + plural(s.routes, "route") + " and writes the spec.</span></div></div></div>";
+    for (const [sp, si] of specs) {
+      const mine = new Set(filesOf(m));
+      const reqs = specReqs(sp).filter((q) => q.cites.some((c) => mine.has(c.file)));
+      const shown = reqs.length ? reqs : specReqs(sp);
+      h += '<div class="card in" style="margin-bottom:12px"><div class="panel-h">' + ic("file", "sm") + esc(specTitle(sp)) + '<span class="sub">' + (m.specified < s.routes ? m.specified + " of " + s.routes + " routes covered" : "covers every route") + '</span><span class="right"><button class="btn" data-spec="' + si + '">' + ic("spec", "sm") + "Open the full spec</button></span></div>" +
+        '<table class="t"><tbody>' + shown.map((q) => { const st = REQ[q.status] || REQ.none; return '<tr><td style="width:84px"><span class="mono" style="font-weight:700">' + esc(q.id) + '</span></td><td><div class="reqtext">' + md(q.text) + "</div></td><td>" + pill(st.i, st.t, st.c) + "</td><td>" + (q.stale ? pill("changed", "Code changed", "med") : pill("check2", "Up to date", "ok")) + "</td></tr>"; }).join("") + "</tbody></table></div>";
+      if (m.specified < s.routes) h += '<div class="row-flex in" style="margin-bottom:12px">' + btn("Draft rules for the other " + plural(s.routes - m.specified, "route"), promptModuleSpec(m), "", "sparkle") + "</div>";
+    }
+
+    // 3. Tests.
+    h += secHead("tests", "flask", "Tests", "Which of these routes a test actually calls or names, and the tests that reach this module's code.");
+    h += '<div class="grid two"><div class="card in"><div class="panel-b"><div class="donutwrap">' + donut([{ v: tested, c: "var(--ok)" }, { v: s.routes - tested, c: "var(--high)" }], 120, tested + "/" + s.routes, "routes tested") +
+      '<div style="flex:1;min-width:180px"><div class="title">' + (tested === s.routes ? "Every route has a test" : plural(s.routes - tested, "route") + " with no test") + '</div><div class="muted small" style="margin:4px 0 10px">A route counts as tested when a test calls its URL, or reaches its handler and names it.</div>' +
+      (m.tests.untested.length ? btn("Copy prompt: write the missing tests", promptModuleTests(m), "primary", "sparkle") : "") + "</div></div></div></div>" +
+      '<div class="card in"><div class="panel-h">' + ic("flask", "sm") + "Tests that reach this code<span class=\"sub\">" + m.tests.files.length + "</span></div>" + (m.tests.files.length ? '<table class="t"><tbody>' + m.tests.files.slice(0, 8).map((t) => "<tr><td>" + loc(t.file + ":1") + '</td><td class="num small">' + plural(t.tests, "test") + "</td></tr>").join("") + "</tbody></table>" + (m.tests.files.length > 8 ? '<div class="more">+' + (m.tests.files.length - 8) + " more</div>" : "") : '<div class="panel-b muted">No test reaches this module\'s code.</div>') + "</div></div>";
+    if (m.tests.untested.length) h += '<div class="card in mt"><div class="panel-h">' + ic("x", "sm tone-high") + "Routes with no test</div><div class=\"panel-b\" style=\"display:flex;gap:6px;flex-wrap:wrap\">" + m.tests.untested.map((x) => { const [mm, ...p] = x.split(" "); return '<span class="chiplet"><span class="method m-' + esc(mm) + '">' + esc(mm) + '</span><span class="mono small">' + esc(p.join(" ")) + "</span></span>"; }).join("") + "</div></div>";
+
+    // 4. Risks.
+    h += secHead("risks", "alert", "Risks", "What Veridic found in this module, each with a suggested fix and a prompt to hand to Claude.");
+    const groups = GROUPS.map((g2) => ({ ...g2, items: g2.items.filter((f) => f.module === m.id) })).filter((g2) => g2.items.length);
+    h += groups.length ? table(["Severity", "Problem", "Where"], groups.map((g2) => row([sevPill(g2.severity), '<div class="title">' + esc(g2.title) + '</div><div class="why">' + esc(g2.why) + "</div>", '<span class="pill bg-' + SEV[g2.severity].c + '">' + plural(g2.items.length, "place") + "</span>"], groupDetail(g2))))
+      : '<div class="callout ok in">' + ic("check", "sm") + "<div><b>Nothing found.</b> No route here deletes or moves money without checking whose data it is, and no GET changes data.</div></div>";
+
+    // 5. Neighbours: what it calls, what calls it.
+    h += secHead("neighbours", "branch", "Neighbours", "The other modules this one depends on, and those that depend on it. Changing this module can break the ones that use it.");
+    const nb = (list, empty0) => list.length ? '<table class="t"><tbody>' + list.map((u) => '<tr><td style="width:40%">' + ic("grid", "sm") + " " + modLink(u.module) + '</td><td class="small">' + u.via.slice(0, 3).map((f) => loc(f + ":1")).join("<br>") + (u.via.length > 3 ? '<div class="muted">+' + (u.via.length - 3) + " more</div>" : "") + "</td></tr>").join("") + "</tbody></table>" : '<div class="panel-b muted">' + empty0 + "</div>";
+    h += '<div class="grid two"><div class="card in"><div class="panel-h">' + ic("ext", "sm") + "Uses<span class=\"sub\">code it calls in other modules</span></div>" + nb(m.uses, "Self-contained: it calls no other module's code.") + "</div>" +
+      '<div class="card in"><div class="panel-h">' + ic("alert", "sm") + "Used by<span class=\"sub\">re-check these after a change</span></div>" + nb(m.usedBy, "No other module calls its code.") + "</div></div>";
+    if (m.shared.length) h += '<details class="card in mt shared"><summary class="panel-h">' + ic("code", "sm") + "Shared code it relies on<span class=\"sub\">" + m.shared.length + " files most of the app uses (logging, auth, database)</span></summary><div class=\"panel-b small\" style=\"display:grid;gap:4px\">" + m.shared.map((f) => loc(f + ":1")).join("") + "</div></details>";
+
+    // 6. Work on it.
+    h += secHead("work", "wrench", "Work on it", "Three steps, so the change stays inside this module and is checked before it's called done.");
+    const claimCmd = "veridic claim " + m.routes.map((x) => JSON.stringify(x)).join(" ");
+    h += '<div class="steps in">' +
+      step(1, "Claim it", "Tell Veridic what this task will change, so edits that leak into other modules get caught.", '<pre class="cmd">' + esc(claimCmd.length > 160 ? claimCmd.slice(0, 157) + "…" : claimCmd) + "</pre>" + btn("Copy command", claimCmd, "", "copy")) +
+      step(2, "Read, then edit", "The code this module owns. Shared code is used across the app: change it only if you must.", '<div class="small" style="display:grid;gap:3px">' + filesOf(m).slice(0, 8).map((f) => loc(f + ":1")).join("") + (filesOf(m).length > 8 ? '<span class="muted">+' + (filesOf(m).length - 8) + " more</span>" : "") + "</div>") +
+      step(3, "Check it's done", "Veridic checks the change stayed in the claim and every changed route has a test that asserts something.", '<pre class="cmd">veridic done</pre>' + btn("Copy command", "veridic done", "", "copy")) + "</div>" +
+      '<div class="row-flex in mt">' + btn("Or copy all three as one prompt for Claude", promptTask(m), "primary", "sparkle") + "</div>";
+    return h;
+  }
+  const secHead = (id, icon, t, sub) => '<div class="sechead in" id="sec-' + id + '"><h2>' + ic(icon, "sm") + t + "</h2><p>" + sub + "</p></div>";
+  const step = (n, t, sub, body) => '<div class="card step"><div class="stepn">' + n + '</div><div style="min-width:0;flex:1"><div class="title">' + t + '</div><div class="muted small" style="margin:2px 0 10px">' + sub + "</div>" + body + "</div></div>";
+
+  // ---- Specs: the spec documents, and the modules still without one ----
+  function vSpec() {
+    const sel = SPECS[state.spec] ? state.spec : 0;
+    let h = head(ic("spec", "lg") + "Specs", "The written rules the code must follow, each tied to the lines that do it and the tests that check it.");
+    const without = MODS.filter((m) => !m.specified);
+    h += '<div class="split"><aside class="tree card in" aria-label="Specs">' +
+      '<div class="tree-g">' + ic("spec", "sm") + 'Specs<span class="n">' + SPECS.length + "</span></div>" +
+      (SPECS.length ? SPECS.map((s, i) => { const rs = specReqs(s), t = rs.filter(tested).length, st = rs.filter((r) => r.stale).length; return '<button class="node' + (i === sel ? " on" : "") + '" data-spec="' + i + '"><span class="nico">' + ic("file") + '</span><span class="nbody"><span class="nlabel">' + esc(specTitle(s)) + '</span><span class="nmeta">' + plural(rs.length, "rule") + " · " + pctOf(t, rs.length) + "% tested" + (st ? " · " + st + " changed" : "") + "</span>" + bar([{ c: "var(--ok)", p: pctOf(t, rs.length) }], true) + "</span></button>"; }).join("") : '<div class="tree-empty">None yet.</div>') +
+      '<div class="tree-g">' + ic("grid", "sm") + 'Modules with no spec<span class="n">' + without.length + "</span></div>" +
+      without.slice(0, 40).map((m) => { const r = riskOf(m); return '<button class="node" data-mod="' + esc(m.id) + '"><span class="nico">' + ic(r.i) + '</span><span class="nbody"><span class="nlabel">' + esc(m.name) + '</span><span class="nmeta">' + plural(m.stats.routes, "route") + (m.stats.money ? " · moves money" : "") + '</span></span><span class="dot tone-' + r.c + '"></span></button>'; }).join("") +
+      '</aside><section class="pane">' + (SPECS.length ? specPane(SPECS[sel], sel) : empty("spec", "No spec yet", "A spec lists what a module must do, each rule tied to the code that does it. Open a module and use <b>Draft a spec from the code</b>; the riskiest modules are listed on the left.")) + "</section></div>";
     return h;
   }
 
@@ -367,7 +436,7 @@
     let h = head(ic("health", "lg") + "Health", "The state of " + esc(D.name) + " at a glance: what its API does, how much is safe for agents, and how much the tests really check.");
     h += '<div class="verdict in tone-' + tone + '"><div class="big bg-' + tone + (hi.length ? " pulse" : "") + '">' + ic(hi.length ? "alert" : me.length ? "shield" : "check") + "</div><div><h2>" + title + "</h2><p>" +
       ["API", "Tests", "Spec", "Change"].map((a) => [a, F.filter((f) => f.area === a && f.severity !== "low").length]).filter((x) => x[1]).map((x) => plural(x[1], x[0] === "API" ? "API finding" : x[0].toLowerCase() + " finding")).join(" · ") +
-      '</p></div><div class="right">' + (top.length ? btn("Copy prompt: fix all " + top.length, promptAll(top), "primary", "sparkle") : "") + '<button class="btn" data-nav="findings">' + ic("alert", "sm") + "See findings</button></div></div>";
+      '</p></div><div class="right">' + (top.length ? btn("Copy prompt: fix all " + top.length, promptAll(top), "primary", "sparkle") : "") + '<button class="btn" data-chip="sub" data-v="findings">' + ic("alert", "sm") + "See all findings</button></div></div>";
     const writes = (r.writes || 0) + (r.destructive || 0);
     h += '<div class="grid kpis">' + kpi("route", "info", ROUTES.length, "routes · " + writes + " change data, " + (r.destructive || 0) + " delete") + kpi("coins", (r.move_money ? "high" : "ok"), r.move_money || 0, "routes move money") +
       kpiRing(ROUTES.length - new Set(top.filter((f) => f.area === "API").map((f) => f.where)).size, ROUTES.length, "routes safe for AI agents", "shield") +
@@ -499,22 +568,35 @@
     return h;
   }
 
-  const VIEWS = { spec: vSpec, health: vHealth, findings: vFindings, routes: vRoutes, tests: vTests, change: vChange };
+  // App overview: the app-wide numbers, and everything across all modules for power users.
+  function vOverview() {
+    const subs = [{ k: "summary", t: "Summary", i: "health" }, { k: "findings", t: "All findings", i: "alert", n: F.filter((f) => f.severity !== "low").length }, { k: "routes", t: "All routes", i: "route", n: ROUTES.length }, { k: "tests", t: "All tests", i: "flask", n: T ? T.tests : null }];
+    const body = { summary: vHealth, findings: vFindings, routes: vRoutes, tests: vTests }[state.sub] || vHealth;
+    return chipRow("sub", subs, state.sub) + body();
+  }
+  const VIEWS = { modules: vModules, module: vModule, spec: vSpec, overview: vOverview, change: vChange };
 
   // ---- shell and rendering ----
   const ago = (iso) => { const s = (Date.now() - new Date(iso)) / 1000; return s < 60 ? "just now" : s < 3600 ? Math.round(s / 60) + " min ago" : s < 86400 ? Math.round(s / 3600) + " h ago" : Math.round(s / 86400) + " days ago"; };
   function shell() {
-    $("#app").innerHTML = '<div class="shell"><aside class="side"><div class="logo"><div class="mark">' + ic("logo") + "</div><span>Veridic</span></div><nav id=\"nav\"></nav>" +
+    $("#app").innerHTML = '<div class="shell"><aside class="side"><div class="logo"><div class="mark">' + ic("logo") + "</div><span>Veridic</span></div><nav id=\"nav\"></nav><div class=\"modlist\" id=\"modlist\"></div>" +
       '<div class="foot"><div><kbd>1</kbd>–<kbd>' + NAV.length + "</kbd> switch view</div><div><kbd>/</kbd> search · <kbd>t</kbd> theme</div><div>" + ic("lock", "sm") + " Local file · nothing uploaded</div></div></aside>" +
       '<div class="content"><div class="top"><div class="crumb"><span class="repo">' + esc(D.name) + '</span><span class="when" title="' + esc(new Date(D.generated).toLocaleString()) + '">' + ic("clock", "sm") + esc(ago(D.generated)) + "</span></div>" +
-      '<label class="search">' + ic("search", "sm") + '<input id="q" placeholder="Search this view" autocomplete="off" spellcheck="false"><kbd>/</kbd></label>' +
+      '<label class="search">' + ic("search", "sm") + '<input id="q" placeholder="Search modules, routes, rules…" autocomplete="off" spellcheck="false"><kbd>/</kbd></label>' +
       '<select class="pick hide-sm" id="editor" title="Where file links open"><option value="vscode">VS Code</option><option value="cursor">Cursor</option><option value="none">No editor links</option></select>' +
       '<button class="iconbtn" id="refresh" data-tip="Copy the command that refreshes this report"></button><button class="iconbtn" id="theme" aria-label="Toggle light or dark"></button></div><main id="main"></main></div></div>';
     $("#editor").value = ED;
     $("#refresh").innerHTML = ic("refresh");
   }
   function nav() {
-    $("#nav").innerHTML = NAV.map((n, i) => '<button class="navbtn" data-nav="' + n.k + '" title="' + n.t + " (" + (i + 1) + ')"' + (n.k === state.view ? ' aria-current="page"' : "") + ">" + ic(n.i) + "<span>" + n.t + "</span>" + (n.n ? '<span class="count' + (n.hot ? " hot" : "") + '">' + n.n.toLocaleString() + "</span>" : "") + "</button>").join("");
+    const cur = state.view === "module" ? "modules" : state.view;
+    $("#nav").innerHTML = NAV.map((n, i) => '<button class="navbtn" data-nav="' + n.k + '" title="' + n.t + " (" + (i + 1) + ')"' + (n.k === cur ? ' aria-current="page"' : "") + ">" + ic(n.i) + "<span>" + n.t + "</span>" + (n.n ? '<span class="count' + (n.hot ? " hot" : "") + '">' + n.n.toLocaleString() + "</span>" : "") + "</button>").join("");
+    // Every module, one click away from anywhere.
+    const ms = D.modules || [];
+    $("#modlist").innerHTML = ms.length ? '<div class="tree-g">' + ic("grid", "sm") + "Modules</div>" + ms.map((m) => {
+      const r = riskOf(m).c;
+      return '<button class="modlink' + (state.view === "module" && state.mod === m.id ? " on" : "") + '" data-mod="' + esc(m.id) + '"><span class="dot tone-' + r + '"></span><span class="ml">' + esc(m.name) + '</span><span class="mc">' + m.stats.routes + "</span></button>";
+    }).join("") : "";
   }
   function render(keepScroll) {
     CLIP.length = 0;
@@ -524,12 +606,16 @@
     animate();
     if (state.openGroup) {
       const r = $("#main tr.grp-" + cssId(state.openGroup));
-      if (!r && state.view === "findings") {
+      if (!r && state.view === "overview") {
         const i = GROUPS.findIndex((g) => g.key === state.openGroup);
         if (i >= 0 && state.pages.findings !== Math.floor(i / PAGE)) { state.pages.findings = Math.floor(i / PAGE); return render(keepScroll); }
       }
       if (r) { toggle(r); r.scrollIntoView({ block: "center" }); }
       state.openGroup = null;
+    } else if (state.jump) {
+      const el = document.getElementById("sec-" + state.jump);
+      state.jump = null;
+      if (el) el.scrollIntoView({ block: "start" });
     } else if (!keepScroll) window.scrollTo(0, 0);
   }
   function setView(k) {
@@ -539,10 +625,12 @@
     state.q = "";
     state.pages = {};
     $("#q").value = "";
-    try { history.replaceState(null, "", "#" + k); } catch {}
+    try { history.pushState(null, "", "#" + (k === "module" ? "module/" + encodeURIComponent(state.mod) : k)); } catch {}
     nav();
     render();
   }
+  const openModule = (id, jump) => { state.mod = id; state.jump = jump || null; setView("module"); };
+  window.addEventListener("popstate", () => { Object.assign(state, { view: "modules", mod: null, jump: null }, fromHash()); state.q = ""; state.pages = {}; $("#q").value = ""; nav(); render(); });
   function animate() {
     requestAnimationFrame(() => {
       $$("#main [data-w]").forEach((el) => (el.style.width = el.dataset.w + "%"));
@@ -588,8 +676,12 @@
     const t = e.target;
     const c = t.closest("[data-copy]");
     if (c) { e.preventDefault(); e.stopPropagation(); copy(CLIP[+c.dataset.copy]); return; }
-    const sl = t.closest("[data-sel]");
-    if (sl && !t.closest("a, [data-copy]")) { state.sel = sl.dataset.sel; state.sf = "all"; state.pages = {}; render(); const pn = $(".pane"); if (pn && innerWidth < 900) pn.scrollIntoView({ block: "start" }); return; }
+    const md0 = t.closest("[data-mod]");
+    if (md0) { openModule(md0.dataset.mod); return; }
+    const sp = t.closest("[data-spec]");
+    if (sp) { state.spec = +sp.dataset.spec; state.sf = "all"; if (state.view !== "spec") setView("spec"); else { state.pages = {}; render(); } return; }
+    const jp = t.closest("[data-jump]");
+    if (jp) { e.preventDefault(); const el = document.getElementById("sec-" + jp.dataset.jump); if (el) el.scrollIntoView({ block: "start", behavior: "smooth" }); return; }
     if (t.closest("[data-more]")) { state.aboutOpen = !state.aboutOpen; render(true); return; }
     const rq = t.closest("[data-req]");
     if (rq) { state.sf = "all"; state.q = ""; $("#q").value = ""; render(true); const r = $("#main tr.req-" + cssId(rq.dataset.req)); if (r) { if (r.classList.contains("open") === false) toggle(r); r.scrollIntoView({ block: "center", behavior: "smooth" }); r.classList.add("flash"); setTimeout(() => r.classList.remove("flash"), 1400); } return; }
@@ -608,7 +700,7 @@
       return;
     }
     const g = t.closest("[data-group]");
-    if (g) { state.openGroup = g.dataset.group; state.sev = ["high", "medium", "low"]; state.area = "all"; setView("findings"); return; }
+    if (g) { state.openGroup = g.dataset.group; state.sev = ["high", "medium", "low"]; state.area = "all"; state.sub = "findings"; setView("overview"); return; }
     if (t.closest("a, button, select, input, label, pre")) return;
     const tr = t.closest("tr.row[data-d]");
     if (tr) toggle(tr);

@@ -206,3 +206,23 @@ test("reach: a member call isn't linked by name to a function elsewhere, nor a b
   assert.deepEqual(names, []);
   done();
 });
+
+test("modules: same feature across files joins, a file of many features splits by URL, .veridic.json pins", async () => {
+  const { findModules } = await import("../core/modules.mjs");
+  const r = (method, p, file, line) => ({ id: `${method} ${p}`, method, path: p, file, start: line, end: line });
+  const big = ["users", "products", "baskets"].flatMap((w, i) => [1, 2, 3, 4].map((k) => r(k % 2 ? "GET" : "POST", `/api/${w}/${k}`, "server.js", i * 10 + k)));
+  const routes = [r("GET", "/api/admin/orders", "src/routes/orders.ts", 1), r("POST", "/api/public/orders", "src/routes/public/orders/crud.ts", 1), r("GET", "/api/menu", "src/routes/menu.ts", 1), r("GET", "/api/healthz", "src/routes/health.ts", 1), ...big];
+  const files = Object.fromEntries([...new Set(routes.map((x) => x.file))].map((f) => [f, "x\n".repeat(40)]));
+  const { g, done } = fakeRepo(files);
+  const name = (ms, id) => ms.find((m) => m.routes.includes(id))?.name;
+  let ms = findModules(g, { routes });
+  assert.equal(name(ms, "GET /api/admin/orders"), name(ms, "POST /api/public/orders"), "orders.ts and public/orders/crud.ts are one module");
+  assert.notEqual(name(ms, "GET /api/menu"), name(ms, "GET /api/admin/orders"));
+  assert.notEqual(name(ms, "GET /api/users/1"), name(ms, "GET /api/products/1"), "a file serving several features splits by URL");
+  fs.writeFileSync(path.join(g.repo, ".veridic.json"), JSON.stringify({ modules: { Platform: ["src/routes/health.ts", "/api/menu"] } }));
+  ms = findModules(g, { routes });
+  assert.equal(name(ms, "GET /api/healthz"), "Platform");
+  assert.equal(name(ms, "GET /api/menu"), "Platform");
+  assert.ok(ms.find((m) => m.name === "Platform").pinned);
+  done();
+});
