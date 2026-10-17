@@ -17,6 +17,7 @@ import { staleness } from "./staleness.mjs";
 import { doneWithoutSpec, loadClaim } from "./seam.mjs";
 import { findModules } from "./modules.mjs";
 import { linkUi } from "./ui.mjs";
+import { findTables, routeData, dataByModule } from "./data.mjs";
 import { testsReaching } from "./tests.mjs";
 
 const MAX_SNIPPET = 40; // lines of cited code shown per citation
@@ -275,6 +276,19 @@ export async function collectReport(repo, { specs: specFiles } = {}) {
         note("ui", e);
       }
       out.ui = { scanned: ui.scanned ?? 0, linked: ui.files.length, shared: ui.files.filter((f) => !f.module).map((f) => ({ file: f.file, kind: f.kind, routes: f.routes.length, modules: f.modules })) };
+      // The data: which tables each module owns and which it only uses (see data.mjs).
+      let data = null;
+      try {
+        const tables = findTables(repo, g);
+        if (tables.length) {
+          const uses = routeData(g, inv.routes, tables);
+          data = dataByModule(mods, uses, tables);
+          for (const r of out.routes) if (uses.get(r.id)?.length) r.tables = uses.get(r.id).map((u) => ({ table: u.table, op: u.op }));
+          out.data = { tables: tables.length, kinds: [...new Set(tables.map((t) => t.kind))], shared: data.shared, unused: data.unused, at: Object.fromEntries(tables.map((t) => [t.name, t.at])) };
+        }
+      } catch (e) {
+        note("data", e);
+      }
       const routeById = new Map(out.routes.map((r) => [r.id, r]));
       const invById = new Map(inv.routes.map((r) => [r.id, r]));
       const uiOf = (id) => ui.files.filter((f) => f.module === id);
@@ -349,6 +363,7 @@ export async function collectReport(repo, { specs: specFiles } = {}) {
           specified: rs.filter((r) => r.specs?.length).length,
           tests: { files: [...tests.values()].map((t) => ({ file: t.file, tests: t.tests, asserting: t.asserting })).sort((a, b) => b.tests - a.tests), ui: [...uiTests.values()].map((t) => ({ file: t.file, tests: t.tests, asserting: t.asserting })), asserting: asserting.length, untested: untested.map((r) => r.id) },
           // Screens: the UI files whose calls are mostly this module's; and other screens calling it.
+          data: data?.byModule.get(m.id) ?? { owns: [], uses: [] },
           screens: screens.map((f) => ({ file: f.file, kind: f.kind, routes: f.routes.filter((id) => m.routes.includes(id)), other: f.routes.filter((id) => !m.routes.includes(id)).length })),
           calledFrom: ui.files.filter((f) => f.module !== m.id && f.routes.some((id) => m.routes.includes(id))).map((f) => ({ file: f.file, kind: f.kind, module: f.module, routes: f.routes.filter((id) => m.routes.includes(id)) })),
         });

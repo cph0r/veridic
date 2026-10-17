@@ -263,3 +263,61 @@ test("ui: screens link to routes through generated clients, API objects and wrap
   assert.ok(!ui.files.some((x) => x.file.startsWith("server/")), "backend files aren't screens");
   fs.rmSync(repo, { recursive: true, force: true });
 });
+
+test("data: tables from each kind of schema, and which module owns each", async () => {
+  const { findTables, routeData, dataByModule } = await import("../core/data.mjs");
+  const { execFileSync } = await import("node:child_process");
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "veridic-data-"));
+  const files = {
+    "db/schema.ts": 'export const ordersTable = pgTable(\n  "orders", { id: serial("id") });\nexport const menuItemsTable = pgTable("menu_items", {});\n',
+    "models/user.js": 'const UserSchema = new mongoose.Schema({});\nmodule.exports = mongoose.model("User", UserSchema);\n',
+    "models/basket.ts": "class Basket extends Model {}\nBasket.init({}, { tableName: 'Baskets', sequelize });\nexport { Basket as BasketModel }\n",
+    "prisma/schema.prisma": "model Article {\n  id Int @id\n  @@map(\"articles\")\n}\n",
+    "migrations/001.sql": "CREATE TABLE IF NOT EXISTS audit_log (id int);\n",
+    "routes/orders.ts": [
+      "const a = await db.insert(ordersTable).values(x);",
+      "const b = await db.select().from(ordersTable).innerJoin(menuItemsTable, on);",
+      "await db.delete(menuItemsTable).where(eq(menuItemsTable.id, id));",
+      "const u = await User.findByIdAndDelete(id);",
+      "const k = await BasketModel.findOne({ where: { id } });",
+      "await prisma.article.update({ where: { id } });",
+      'await knex("audit_log").insert(row);',
+      'const s = await sql`SELECT * FROM audit_log`;',
+      "// await db.delete(ordersTable)",
+      "const t = new User(body);",
+      "await db.update(menuItemsTable).set(v);",
+    ].join("\n"),
+  };
+  for (const [f, t] of Object.entries(files)) fs.mkdirSync(path.dirname(path.join(repo, f)), { recursive: true }), fs.writeFileSync(path.join(repo, f), t);
+  execFileSync("git", ["init", "-q"], { cwd: repo });
+  const tables = findTables(repo);
+  assert.deepEqual(tables.map((t) => t.name).sort(), ["Baskets", "User", "articles", "audit_log", "menu_items", "orders"]);
+  const text = (f) => fs.readFileSync(path.join(repo, f), "utf8");
+  const g = { repo, text, lines: (f) => text(f).split("\n"), usesInRange: () => [] };
+  const line = (n) => ({ id: `R${n}`, file: "routes/orders.ts", start: n, end: n });
+  const uses = routeData(g, Array.from({ length: 11 }, (_, i) => line(i + 1)), tables);
+  const at = (n) => uses.get(`R${n}`).map((u) => `${u.op}:${u.table}`).sort();
+  assert.deepEqual(at(1), ["write:orders"], "drizzle insert");
+  assert.deepEqual(at(2), ["read:menu_items", "read:orders"], "select and join");
+  assert.deepEqual(at(3), ["delete:menu_items"], "delete; a column in the where clause isn't a read");
+  assert.deepEqual(at(4), ["delete:User"], "mongoose: findByIdAndDelete deletes");
+  assert.deepEqual(at(5), ["read:Baskets"], "sequelize model exported under another name");
+  assert.deepEqual(at(6), ["write:articles"], "prisma accessor, mapped table name");
+  assert.deepEqual(at(7), ["write:audit_log"], "knex");
+  assert.deepEqual(at(8), ["read:audit_log"], "raw SQL");
+  assert.deepEqual(at(9), [], "comments ignored");
+  assert.deepEqual(at(10), ["write:User"], "new Model(…) is a write");
+
+  // Ownership: the module that writes a table most owns it; a module named after a table owns it if it writes it.
+  const mods = [
+    { id: "orders", name: "Orders", routes: ["R1", "R2"] },
+    { id: "menu", name: "Menu", routes: ["R3", "R11"] },
+    { id: "kitchen", name: "Kitchen", routes: ["R2"] },
+  ];
+  const d = dataByModule(mods, uses, tables);
+  assert.deepEqual(d.byModule.get("orders").owns.map((r) => r.table), ["orders"]);
+  assert.deepEqual(d.byModule.get("menu").owns.map((r) => r.table), ["menu_items"]);
+  assert.deepEqual(d.byModule.get("orders").uses.map((r) => [r.table, r.owner]), [["menu_items", "menu"]]);
+  assert.deepEqual(d.byModule.get("kitchen").owns, []);
+  fs.rmSync(repo, { recursive: true, force: true });
+});

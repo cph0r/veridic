@@ -187,7 +187,16 @@ function domOnly(text, name) {
   return all > 0 && all === dom;
 }
 
+// Effects, data and impact all walk the same routes: walk each once per index.
+const walks = new WeakMap();
 export function reached(g, route, depth = 3) {
+  const m = walks.get(g) ?? walks.set(g, new Map()).get(g);
+  const key = `${route.id}\0${route.file}:${route.start}-${route.end}\0${depth}\0${route.handlerText ?? ""}`;
+  if (!m.has(key)) m.set(key, walk(g, route, depth));
+  return m.get(key);
+}
+
+function walk(g, route, depth) {
   const out = [{ file: route.file, start: route.start, end: route.end, name: route.id, depth: 0 }];
   const seen = new Set();
   let frontier = [out[0]];
