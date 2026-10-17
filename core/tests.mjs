@@ -33,18 +33,18 @@ const relImports = (repo, file, files) => {
     return [];
   }
   const out = [];
-  for (const m of src.matchAll(/(?:from\s+|import\s*\(\s*|vi\.mock\(\s*)["'](\.{1,2}\/[^"']+)["']/g)) {
-    const base = path.posix.normalize(path.posix.join(path.posix.dirname(file), m[1])).replace(/\.js$/, "");
-    for (const c of [base, `${base}.ts`, `${base}.tsx`, `${base}.js`, `${base}.mjs`, `${base}/index.ts`]) if (files.has(c)) out.push(c);
+  for (const m of src.matchAll(/(?:from\s+|import\s*\(\s*|vi\.mock\(\s*|jest\.mock\(\s*|require\(\s*)["'](\.{1,2}\/[^"']+)["']/g)) {
+    const base = path.posix.normalize(path.posix.join(path.posix.dirname(file), m[1])).replace(/\.[cm]?js$/, "");
+    for (const c of [base, `${base}.ts`, `${base}.tsx`, `${base}.js`, `${base}.mjs`, `${base}.cjs`, `${base}/index.ts`, `${base}/index.js`]) if (files.has(c)) out.push(c);
   }
   return out;
 };
 
-/** Files a test file reaches through relative imports, two levels deep. */
-function reach(repo, file, files) {
+/** Files a test file reaches through relative imports, `levels` deep (two by default). */
+function reach(repo, file, files, levels = 2) {
   const seen = new Set([file]);
   let frontier = [file];
-  for (let depth = 0; depth < 2; depth++) {
+  for (let depth = 0; depth < levels; depth++) {
     const next = [];
     for (const f of frontier) for (const g of relImports(repo, f, files)) if (!seen.has(g)) seen.add(g), next.push(g);
     frontier = next;
@@ -176,13 +176,30 @@ export function auditTests(repo) {
   const flagged = { weak: [], unasserted: [], empty: [] };
   let testFiles = 0;
   for (const file of files) {
+    const a = auditFile(repo, file);
+    for (const k of Object.keys(counts)) counts[k] += a.counts[k];
+    for (const k of Object.keys(flagged)) flagged[k].push(...a.flagged[k]);
+    if (a.tests) testFiles++;
+  }
+  const live = counts.strong + counts.weak + counts.unasserted + counts.empty;
+  return {
+    summary: { test_files: testFiles, tests: live + counts.skipped, ...counts, checking_pct: live ? Math.round(((counts.strong + counts.weak) / live) * 1000) / 10 : null },
+    flagged,
+  };
+}
+
+/** One test file's tests, by what they check. */
+export function auditFile(repo, file) {
+  const counts = { strong: 0, weak: 0, unasserted: 0, empty: 0, skipped: 0 };
+  const flagged = { weak: [], unasserted: [], empty: [] };
+  let tests = 0;
+  {
     const src = safeRead(repo, file);
     const code = codeOnly(src);
     const skipped = [...code.matchAll(/\b(?:xdescribe|describe\.skip)\s*\(/g)].map((m) => [m.index, closeParen(code, m.index + m[0].length)]);
-    let any = false;
     for (const t of src.matchAll(TITLE)) {
       if (code[t.index] === " " || /^x?describe/.test(t[0])) continue;
-      any = true;
+      tests++;
       const skip = t[2] === "todo" || t[2] === "skip" || t[1] === "x" || skipped.some(([x, y]) => t.index > x && t.index < y);
       if (skip) {
         counts.skipped++;
@@ -193,13 +210,34 @@ export function auditTests(repo) {
       counts[s]++;
       if (flagged[s]) flagged[s].push({ at: `${file}:${src.slice(0, t.index).split("\n").length}`, title: t[4].slice(0, 100) });
     }
-    if (any) testFiles++;
   }
-  const live = counts.strong + counts.weak + counts.unasserted + counts.empty;
-  return {
-    summary: { test_files: testFiles, tests: live + counts.skipped, ...counts, checking_pct: live ? Math.round(((counts.strong + counts.weak) / live) * 1000) / 10 : null },
-    flagged,
-  };
+  return { file, tests, counts, flagged, asserting: counts.strong + counts.weak };
+}
+
+/** Every test file in the repo. */
+export function testFilesOf(repo) {
+  return execFileSync("git", ["ls-files", "--cached", "--others", "--exclude-standard"], { cwd: repo, encoding: "utf8", maxBuffer: 64 << 20 })
+    .split("\n")
+    .filter((f) => f && TEST_FILE.test(f) && !f.includes("node_modules/"));
+}
+
+/**
+ * Test files that reach any of `targets` through relative imports (`levels` deep),
+ * each with how many of its tests assert. Map target -> [{ file, asserting, tests }].
+ */
+export function testsReaching(repo, targets, { levels = 4 } = {}) {
+  const all = execFileSync("git", ["ls-files", "--cached", "--others", "--exclude-standard"], { cwd: repo, encoding: "utf8", maxBuffer: 64 << 20 }).split("\n").filter(Boolean);
+  const files = new Set(all);
+  const out = new Map(targets.map((t) => [t, []]));
+  for (const tf of all.filter((f) => TEST_FILE.test(f) && !f.includes("node_modules/"))) {
+    const reached = reach(repo, tf, files, levels);
+    const hits = targets.filter((t) => reached.has(t) || t === tf);
+    if (!hits.length) continue;
+    const a = auditFile(repo, tf);
+    if (!a.tests) continue; // a helper inside __tests__/, not a test
+    for (const t of hits) out.get(t).push({ file: tf, asserting: a.asserting, tests: a.tests });
+  }
+  return out;
 }
 
 /** Run vitest on these files (from their package) and return results by test title. */

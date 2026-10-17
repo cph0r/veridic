@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 // Set a repo up for Veridic: check Node and git, find codegraph (or install it
 // with --install), build the code index (or bring it up to date), and check that
-// routes are found. Prints a card; --json for JSON.
+// routes are found. --enforce opts the repo in to the Stop hook (.veridic.json):
+// Claude can't finish while `veridic done` says NOT DONE. Prints a card; --json for JSON.
 
 import { execFileSync, spawnSync } from "node:child_process";
+import fs from "node:fs";
 import path from "node:path";
 import { findCodegraph, ensureIndex, CODEGRAPH_PACKAGE } from "../../core/indexer.mjs";
 import { openGraph } from "../../core/graph.mjs";
@@ -12,10 +14,10 @@ import { defaultSpecs } from "../../core/metrics.mjs";
 import { renderCard } from "../../core/card.mjs";
 import { parseArgs, emit, fail, run, writeAll } from "./_cli.mjs";
 
-const usage = "init.mjs --repo <path> [--install] [--json]";
+const usage = "init.mjs --repo <path> [--install] [--enforce] [--json]";
 
 run(() => {
-  const a = parseArgs(process.argv.slice(2), { flags: ["repo"], bools: ["install", "json"] });
+  const a = parseArgs(process.argv.slice(2), { flags: ["repo"], bools: ["install", "json", "enforce"] });
   if (!a.repo) fail("need --repo", usage);
   const rows = [];
   const next = [];
@@ -49,6 +51,17 @@ run(() => {
       rows.push(["routes", inv.routes.length ? `${inv.routes.length} found (entry ${inv.entry})` : "none found: Veridic's route checks need an Express app", inv.routes.length ? true : null]);
     } catch (e) {
       rows.push(["routes", e.message, false]);
+    }
+    if (a.enforce) {
+      const file = path.join(repo, ".veridic.json");
+      let cfg = {};
+      try {
+        cfg = JSON.parse(fs.readFileSync(file, "utf8"));
+      } catch {}
+      cfg.stop = [...new Set([...(cfg.stop ?? []), "done", "stale"])];
+      fs.writeFileSync(file, JSON.stringify(cfg, null, 2) + "\n");
+      result.enforce = cfg.stop;
+      rows.push(["enforce", "on: Claude can't finish while `veridic done` says NOT DONE (.veridic.json; commit it to share)", true]);
     }
     const specs = defaultSpecs(repo);
     result.specs = specs.length;

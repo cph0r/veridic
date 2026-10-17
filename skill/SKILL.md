@@ -17,12 +17,23 @@ on their own. Never write into the target repo. Write the spec where the user po
 
 ## Changing existing code
 
-Before editing a feature, get its facts once: `veridic routes <word>` to find
-its entry routes, then `veridic prepare "<METHOD /path>" …` for everything
-involved (routes, webhooks, timers, callers, tables) with numbered code. Read
-it before you edit; the code a route list doesn't show is where changes break.
-After editing, if the repo has a spec, run `veridic done` (below) before you
-say you're finished.
+Every change, with or without a spec, follows three steps:
+
+1. **Claim before you edit.** `veridic claim "<METHOD /path>" [file …]` records
+   what this task will change and prints its impact: every route that runs that
+   code, what each one really does (money and deletes first), and which tests
+   cover it. Not sure what a file touches? `veridic impact <file | file:12-40>`.
+   For a whole feature's code, `veridic prepare "<METHOD /path>" …` (find routes
+   with `veridic routes <word>`).
+2. **Edit.** Stay inside the claim. If the work needs more, claim it again.
+3. **Check before you say done.** `veridic done --card` (it uses the claim). It is
+   DONE only when every changed line is in the code the claimed routes run, and
+   every changed route has an asserting test that names it or the changed
+   function. A *stray* is a change outside the claim: undo it, or claim it if it
+   belongs. *Untested* means add a test that asserts what that route does. Don't
+   say you're finished until it prints `VERDICT ● DONE`.
+
+If the repo has a spec, use the spec form below instead (`done --spec`).
 
 ## Writing a spec: the sequence
 

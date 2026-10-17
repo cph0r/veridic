@@ -107,3 +107,67 @@ test("card: fixed layout with a mark per row and a verdict", () => {
   assert.match(c, /VERDICT ✖ 1 TO FIX/);
   assert.match(renderCard({ title: "t", rows: [], verdict: { ok: true, text: "DONE" } }), /VERDICT ● DONE/);
 });
+
+// --- done without a spec, claims, and the Stop hook -------------------------
+import { makeRepo, FILES } from "./fixture.mjs";
+import { doneWithoutSpec, saveClaim, loadClaim } from "../core/seam.mjs";
+import { spawnSync } from "node:child_process";
+
+function fixtureGit() {
+  const repo = makeRepo();
+  fs.writeFileSync(path.join(repo, "src/app.ts"), `import express from "express";\nconst app = express();\n${FILES["src/app.ts"]}app.listen(1);\n`);
+  const g = (...a) => execFileSync("git", a, { cwd: repo, encoding: "utf8" }).trim();
+  fs.writeFileSync(path.join(repo, ".gitignore"), ".codegraph/\n");
+  g("init", "-q", "-b", "main");
+  g("add", "-A");
+  g("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "base");
+  const edit = (f, from, to) => fs.writeFileSync(path.join(repo, f), fs.readFileSync(path.join(repo, f), "utf8").replace(from, to));
+  const write = (f, t) => (fs.mkdirSync(path.dirname(path.join(repo, f)), { recursive: true }), fs.writeFileSync(path.join(repo, f), t));
+  return { repo, g, edit, write, done: () => fs.rmSync(repo, { recursive: true, force: true }) };
+}
+const ORDERS_TEST = 'import { router } from "../orders";\nit("POST /orders places it", async () => { expect(await post(router, "/orders")).toBe(201); });\n';
+
+test("done without a spec: claimed change with a test about it is DONE; a stray edit and a missing test are not", async () => {
+  const r = fixtureGit();
+  r.edit("src/services/orders.ts", 'status: "awaiting_payment"', 'status: "awaiting_payment", channel: "qr"');
+  r.write("src/routes/__tests__/orders.test.ts", ORDERS_TEST);
+  let d = await doneWithoutSpec(r.repo, { claims: ["POST /api/orders"] });
+  assert.equal(d.done, true, JSON.stringify(d.problems));
+  // kitchen.ts is run by the claimed route too (placeOrder calls notifyKitchen): in the claim.
+  // A change only the webhook's handler runs is outside it.
+  r.edit("src/routes/hooks.ts", 'res.json({ ok: true });', 'res.json({ ok: true, at: Date.now() });');
+  d = await doneWithoutSpec(r.repo, { claims: ["POST /api/orders"] });
+  assert.equal(d.done, false);
+  assert.match(d.problems.join("\n"), /stray: src\/routes\/hooks\.ts:\d+ \(behind POST \/api\/payment\/webhook\)/);
+  r.edit("src/routes/hooks.ts", 'res.json({ ok: true, at: Date.now() });', 'res.json({ ok: true });');
+  // No test about the changed route.
+  fs.rmSync(path.join(r.repo, "src/routes/__tests__/orders.test.ts"));
+  d = await doneWithoutSpec(r.repo, { claims: ["POST /api/orders"] });
+  assert.match(d.problems.join("\n"), /untested: src\/services\/orders\.ts changes code behind POST \/api\/orders/);
+  r.done();
+});
+
+test("claims are kept per task: a claim made before the last commit is ignored", () => {
+  const r = fixtureGit();
+  saveClaim(r.repo, ["POST /api/orders"]);
+  assert.deepEqual(loadClaim(r.repo), ["POST /api/orders"]);
+  r.write("x.txt", "1\n");
+  r.g("add", "-A");
+  r.g("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "next task");
+  assert.deepEqual(loadClaim(r.repo), []);
+  r.done();
+});
+
+test("Stop hook: silent unless the repo opted in; then sends the agent back once with what's missing", () => {
+  const r = fixtureGit();
+  const hook = (active = false) => spawnSync(process.execPath, [path.resolve(import.meta.dirname, "../skill/hooks/claude-stop.mjs")], { input: JSON.stringify({ cwd: r.repo, stop_hook_active: active }), encoding: "utf8", env: { ...process.env, VERIDIC_NO_SYNC: "1" } });
+  r.edit("src/routes/hooks.ts", 'res.json({ ok: true });', 'res.json({ ok: true, at: Date.now() });');
+  assert.equal(hook().status, 0, "not opted in");
+  fs.writeFileSync(path.join(r.repo, ".veridic.json"), JSON.stringify({ stop: ["done"] }));
+  saveClaim(r.repo, ["POST /api/orders"]);
+  const h = hook();
+  assert.equal(h.status, 2);
+  assert.match(h.stderr, /NOT DONE[\s\S]*stray: src\/routes\/hooks\.ts/);
+  assert.equal(hook(true).status, 0, "never loops");
+  r.done();
+});

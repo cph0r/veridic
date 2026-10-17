@@ -90,7 +90,7 @@ Writing a feature spec with Veridic, against plain Claude Code on two production
 /plugin install veridic@veridic
 ```
 
-Then, once per repo: `veridic init` (or ask Claude to set it up). That's it.
+Then, once per repo: `veridic init` (or ask Claude to set it up). To make it binding, `veridic init --enforce`: Claude can't finish while `veridic done` says NOT DONE.
 
 Needs Node 22.5 or newer. Works on Express apps (JavaScript and TypeScript). Without Claude Code: `npm i -g veridic` or `brew install cph0r/tap/veridic`.
 
@@ -100,7 +100,8 @@ Needs Node 22.5 or newer. Works on Express apps (JavaScript and TypeScript). Wit
 |---|---|---|
 | Starting on a feature | `veridic prepare <routes>` | Everything that belongs to the feature, with code and line numbers |
 | Writing a spec | `/veridic:spec <feature>` | Requirements that each cite the code, checked by `veridic check` |
-| Finishing a change | `veridic done FR-002` | **DONE**, or exactly which file or test is wrong |
+| About to edit | `veridic claim "POST /api/refund"` | Every route that code reaches and what it does (money and deletes first), and the tests that cover it |
+| Finishing a change | `veridic done --card` | **DONE**, or exactly which change strayed outside the claim or which changed route has no real test. No spec needed |
 | Asked "is this API safe for agents?" | `veridic agent-ready` | What every route really does: reads, writes, deletes, moves money |
 | Keeping specs in step | `veridic stale --fix` (or the git hook) | Citations follow moved code; changed code flags its requirement |
 | Asked "why is it like this?" | `veridic why FR-002` | The commits that wrote that code |
@@ -109,7 +110,7 @@ Commands print compact JSON for the agent; `done`, `metrics` and `init` also pri
 
 ## Safety
 
-Veridic runs locally and sends nothing anywhere: no telemetry, no network calls, no model calls. It reads your code, git history and a local code index (`.codegraph/`, built by [CodeGraph](https://github.com/colbymchenry/codegraph), which it runs with telemetry off). It writes only the index and the spec files you ask for, and runs your tests only when asked (`--run`). Git and Claude hooks are opt-in.
+Veridic runs locally and sends nothing anywhere: no telemetry, no network calls, no model calls. It reads your code, git history and a local code index (`.codegraph/`, built by [CodeGraph](https://github.com/colbymchenry/codegraph), which it runs with telemetry off). It writes only the index (and the current task's claim, inside it) and the spec files you ask for, and runs your tests only when asked (`--run`). Its Stop hook does nothing unless a repo opts in with `veridic init --enforce`; the git hook is opt-in too.
 
 ## Limits
 

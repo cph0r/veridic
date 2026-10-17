@@ -28,8 +28,23 @@ export function changedFiles(repo, range) {
     label = r;
   }
   const names = git(repo, ["diff", "--name-only", base, ...(head ? [head] : [])]).split("\n").filter(Boolean);
-  if (!head) names.push(...git(repo, ["ls-files", "--others", "--exclude-standard"]).split("\n").filter(Boolean));
-  return { range: label, files: [...new Set(names)] };
+  const untracked = head ? [] : git(repo, ["ls-files", "--others", "--exclude-standard"]).split("\n").filter(Boolean);
+  names.push(...untracked);
+  // Changed line ranges per file (new side), so a change counts only for the code it touched.
+  const hunks = {};
+  let cur = null;
+  for (const line of git(repo, ["diff", "-U0", "--no-color", base, ...(head ? [head] : [])]).split("\n")) {
+    const f = line.match(/^\+\+\+ b\/(.+)$/);
+    if (f) (cur = f[1]), (hunks[cur] ??= []);
+    const h = line.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/);
+    if (h && cur) {
+      const start = Number(h[1]);
+      const n = h[2] == null ? 1 : Number(h[2]);
+      hunks[cur].push(n ? [start, start + n - 1] : [Math.max(1, start), Math.max(1, start)]); // a pure deletion touches the line it sat beside
+    }
+  }
+  for (const f of untracked) hunks[f] = null; // a new file: all of it
+  return { range: label, files: [...new Set(names)], hunks };
 }
 
 /**
@@ -88,4 +103,95 @@ export function doneCheck(repo, specPath, opts = {}) {
     files,
     done: !blocking,
   };
+}
+
+/**
+ * `done` without a spec. With claims (routes or files the agent says it changed),
+ * the seam is the code those routes run plus the tests that reach it, and a
+ * change outside it is a stray. Either way, every changed file a route depends on
+ * needs a test that reaches it and asserts, and changed tests must assert.
+ */
+export async function doneWithoutSpec(repo, { claims = [], range } = {}) {
+  const { openGraph } = await import("./graph.mjs");
+  const { routeInventory } = await import("./routes.mjs");
+  const { parseTargets, affectedRoutes, footprintOf } = await import("./impact.mjs");
+  const { testsReaching, auditFile } = await import("./tests.mjs");
+  const g = openGraph(repo);
+  const inv = routeInventory(g);
+  const changed = changedFiles(repo, range);
+  const SOURCE = /\.[cm]?[jt]sx?$/;
+  const source = changed.files.filter((f) => SOURCE.test(f) && !TEST_FILE.test(f) && !IGNORED.test(f) && !/\.d\.ts$/.test(f));
+  const tests = changed.files.filter((f) => TEST_FILE.test(f) && !IGNORED.test(f));
+
+  // The seam: claimed files (all of them), and the exact code the claimed routes run.
+  const { targets, unknown } = parseTargets(inv, claims);
+  const claimedFiles = new Set(targets.filter((t) => !t.route && t.start == null).map((t) => t.file));
+  const seamRanges = targets.filter((t) => !t.route && t.start != null).map((t) => ({ file: t.file, start: t.start, end: t.end }));
+  for (const t of targets.filter((x) => x.route)) for (const r of inv.routes.filter((x) => x.id === t.route)) seamRanges.push(...footprintOf(g, r).map((n) => ({ file: n.file, start: n.start, end: n.end })));
+  const seamFiles = new Set([...claimedFiles, ...seamRanges.map((x) => x.file)]);
+  const inSeam = (file, [a, b]) => claimedFiles.has(file) || seamRanges.some((x) => x.file === file && x.start <= b && x.end >= a);
+  const reachSeam = testsReaching(repo, [...seamFiles]);
+  const seamTests = new Set([...reachSeam.values()].flat().map((t) => t.file));
+
+  // What each changed hunk reaches, and whether a test that reaches it is about it:
+  // a test counts for a route only if it names the route's path or the changed function.
+  const reachChanged = testsReaching(repo, source);
+  const testText = new Map();
+  const textOf = (f) => (testText.has(f) ? testText.get(f) : testText.set(f, (g.text(f) ?? "").toLowerCase()).get(f));
+  // The route's most specific literal part: /api/orders/:id/payment-status -> payment-status.
+  const pathWords = (route) => route.split(" ")[1].split("/").filter((w) => w && !w.startsWith(":") && w !== "*").slice(-1);
+  const strayHunks = [];
+  const files = source.map((f) => {
+    const h = changed.hunks?.[f] ?? null;
+    const ranges = h ?? [[1, Number.MAX_SAFE_INTEGER]];
+    const routes = affectedRoutes(g, inv, ranges.map(([start, end]) => ({ file: f, start, end })));
+    if (claims.length) for (const r of ranges) if (!inSeam(f, r) && (h || !seamFiles.has(f))) strayHunks.push({ file: f, range: r, routes: affectedRoutes(g, inv, [{ file: f, start: r[0], end: r[1] }]).map((x) => x.route) });
+    // Names of the functions the change sits in, for matching tests by name.
+    const fns = h ? [...new Set(h.flatMap(([a, b]) => [...g.nodes.values()].filter((n) => n.file === f && (n.kind === "function" || n.kind === "method") && n.start <= b && n.end >= a).map((n) => n.name)))] : [];
+    const reaching = (reachChanged.get(f) ?? []).filter((t) => t.asserting > 0);
+    const untestedRoutes = routes.filter((r) => !reaching.some((t) => pathWords(r.route).some((w) => textOf(t.file).includes(w.toLowerCase())) || fns.some((n) => textOf(t.file).includes(n.toLowerCase()))));
+    return { file: f, in_seam: !claims.length || !strayHunks.some((x) => x.file === f), routes: routes.map((r) => r.route), risky: routes.filter((r) => r.moves_money || r.effect === "destructive").map((r) => r.route), tests: reaching.map((t) => t.file), untested_routes: untestedRoutes.map((r) => r.route) };
+  });
+  const testAudit = tests.map((f) => auditFile(repo, f)).filter((a) => a.tests);
+  const strays = claims.length ? [...strayHunks.map((x) => `${x.file}:${x.range[0]}${x.range[1] !== x.range[0] && x.range[1] < Number.MAX_SAFE_INTEGER ? `-${x.range[1]}` : ""}${x.routes.length ? ` (behind ${x.routes.slice(0, 2).join(", ")})` : ""}`), ...tests.filter((t) => !seamTests.has(t) && !seamFiles.has(t))] : [];
+  const untested = files.filter((f) => f.untested_routes.length);
+  const nothing = testAudit.flatMap((a) => [...a.flagged.unasserted, ...a.flagged.empty].map((x) => x.at));
+  const problems = [
+    ...unknown.map((u) => `${u} isn't a route or file in this repo`),
+    ...strays.map((s) => `stray: ${s} is outside what was claimed`),
+    ...untested.map((f) => `untested: ${f.file} changes code behind ${f.untested_routes.slice(0, 3).join(", ")}${f.untested_routes.length > 3 ? ` and ${f.untested_routes.length - 3} more` : ""}, and no asserting test that reaches it names the route or the changed function`),
+    ...nothing.map((at) => `a changed test asserts nothing: ${at}`),
+  ];
+  const affected = [...new Set(files.flatMap((f) => f.routes))];
+  return {
+    mode: "no spec",
+    range: changed.range,
+    claimed: claims,
+    changed: { source: source.length, tests: tests.length },
+    ...(claims.length ? { seam: { files: seamFiles.size, strays } } : {}),
+    affected_routes: affected.length,
+    risky_routes: [...new Set(files.flatMap((f) => f.risky))],
+    files,
+    problems,
+    done: !problems.length && (source.length > 0 || tests.length > 0),
+  };
+}
+
+// The agent's claim of what it is about to change, kept between commands (and for
+// the Stop hook) in .codegraph/, which git ignores. Tied to HEAD: a claim made
+// before the last commit belongs to an earlier task and is ignored.
+const claimPath = (repo) => path.join(repo, ".codegraph", "veridic-claim.json");
+export function saveClaim(repo, claims) {
+  const head = git(repo, ["rev-parse", "HEAD"]).trim();
+  fs.mkdirSync(path.dirname(claimPath(repo)), { recursive: true });
+  fs.writeFileSync(claimPath(repo), JSON.stringify({ claims, head, at: new Date().toISOString() }, null, 2) + "\n");
+  return { claims, head };
+}
+export function loadClaim(repo) {
+  try {
+    const c = JSON.parse(fs.readFileSync(claimPath(repo), "utf8"));
+    return c.head === git(repo, ["rev-parse", "HEAD"]).trim() ? c.claims : [];
+  } catch {
+    return [];
+  }
 }
