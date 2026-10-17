@@ -29,7 +29,17 @@
     refresh: '<path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5"/>',
     menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
     check: '<path d="m5 12 5 5L20 7"/>',
+    shield: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>',
+    flask: '<path d="M9 3h6M10 3v6L4.5 18.5A2 2 0 0 0 6.2 21h11.6a2 2 0 0 0 1.7-2.5L14 9V3"/><path d="M7 15h10"/>',
+    doc: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/>',
+    branch: '<circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="8" r="3"/><path d="M6 9v6M18 11a6 6 0 0 1-6 6H9"/>',
+    sparkle: '<path d="M12 3l1.9 5.6L19.5 10l-5.6 1.9L12 17.5l-1.9-5.6L4.5 10l5.6-1.4z"/>',
+    route: '<circle cx="6" cy="19" r="3"/><path d="M9 19h8.5a3.5 3.5 0 0 0 0-7h-11a3.5 3.5 0 0 1 0-7H15"/><circle cx="18" cy="5" r="3"/>',
+    db: '<ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/>',
+    monitor: '<rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8M12 17v4"/>',
   };
+  // A ring gauge: the share done, in the status colour.
+  const ring = (p, c, size, label) => { const w = 5, r = (size - w) / 2, C = 2 * Math.PI * r, len = (Math.max(0, Math.min(100, p)) / 100) * C; return '<svg class="ring" width="' + size + '" height="' + size + '" viewBox="0 0 ' + size + " " + size + '" aria-hidden="true"><circle cx="' + size / 2 + '" cy="' + size / 2 + '" r="' + r + '" fill="none" stroke="var(--line)" stroke-width="' + w + '"/><circle class="arc" cx="' + size / 2 + '" cy="' + size / 2 + '" r="' + r + '" fill="none" stroke="var(--' + (c || "faint") + ')" stroke-width="' + w + '" stroke-linecap="round" stroke-dasharray="0 ' + C + '" data-dash="' + len + " " + C + '" transform="rotate(-90 ' + size / 2 + " " + size / 2 + ')"/>' + (label != null ? '<text x="50%" y="52%" text-anchor="middle" dominant-baseline="middle">' + label + "</text>" : "") + "</svg>"; };
   const ic = (n, cls) => '<svg class="i ' + (cls || "") + '" viewBox="0 0 24 24" aria-hidden="true">' + (P[n] || "") + "</svg>";
 
   // ---- vocabulary: plain words for every state ----
@@ -85,7 +95,7 @@
   const loc = (t, label, cls) => { const h = hrefOf(t); return h ? '<a class="loc ' + (cls || "") + '" href="' + h + '">' + esc(label || t) + "</a>" : '<span class="mono">' + esc(label || t) + "</span>"; };
   const CLIP = [];
   const clip = (text) => CLIP.push(text) - 1;
-  const btn = (label, text, cls) => '<button class="btn ' + (cls || "") + '" data-copy="' + clip(text) + '">' + esc(label) + "</button>";
+  const btn = (label, text, cls) => '<button class="btn ' + (cls || "") + '" data-copy="' + clip(text) + '">' + (/Claude/.test(label) ? ic("sparkle", "sm") : "") + esc(label) + "</button>";
   const textBtn = (label, text, cls) => '<button class="text-btn ' + (cls || "") + '" data-copy="' + clip(text) + '">' + esc(label) + "</button>";
   const fileLine = (f) => { const i = f.lastIndexOf("/"); return '<div class="fname">' + loc(f + ":1", f.slice(i + 1)) + '</div><div class="fdir">' + esc(f.slice(0, i + 1)) + "</div>"; };
   const modLink = (id) => { const m = MOD.get(id); return m ? '<button class="link" data-mod="' + esc(id) + '">' + esc(m.name) + "</button>" : esc(id); };
@@ -148,15 +158,42 @@
   const modFindings = (m) => F.filter((f) => f.module === m.id);
   const screensOf = (m) => (m.screens || []).map((x) => x.file);
   const filesOf = (m) => [...m.files, ...m.code.filter((f) => !m.files.includes(f)), ...screensOf(m)];
-  const promptModuleSpec = (m) => "Use veridic to write a spec for the " + m.name + " module of " + D.name + ". It does: " + m.does.join(", ") + ".\nIts routes:\n" + modRoutes(m).map((r) => "- " + r.id + " (" + (EFF[r.effect] || EFF.read) + (r.moves_money ? ", moves money" : "") + ") " + r.handler).join("\n") + "\nIts code: " + filesOf(m).join(", ") +
-    ((m.data && m.data.owns.length) ? "\nThe tables it owns: " + m.data.owns.map((t) => t.table).join(", ") + "." : "") +
-    "\n\nStart with the riskiest behavior (money, deletes, writes). Write user stories with Given/When/Then scenarios, requirements backed by [evidence: file:line] citations to the code that does them, and the invariants that must always hold. Save it as specs/" + m.id + "/spec.md, then run `veridic check` and `veridic tests`.";
-  const promptModuleTests = (m) => { const ids = m.tests.untested; return "In " + D.name + ", these routes of the " + m.name + " module have no test that calls them or names them:\n" + ids.map((x) => "- " + x).join("\n") + "\n\nRun `veridic claim " + ids.slice(0, 8).map((x) => JSON.stringify(x)).join(" ") + "` first. Then, starting with the routes that move money or change data, write tests that call each route and assert its real effect (status, body, and what changed in the data). Make each test fail if the behavior broke. Run them, then `veridic done`."; };
+  // Everything the agent needs to know about a module: what it does, its routes and what each
+  // really does, its tables, screens, tests, rules, issues and neighbours. The page stays brief; this doesn't.
+  const nameOf = (id) => (MOD.get(id) || { name: id }).name;
+  function ctx(m) {
+    const d = m.data || { owns: [], uses: [] };
+    const L = ["## Context: the " + m.name + " module of " + D.name, "It lets callers " + m.does.join(", ") + "."];
+    L.push("", "Routes (what each really does, traced through the code it calls):");
+    for (const r of modRoutes(m)) L.push("- " + r.id + ": " + [EFF[r.effect] || EFF.read, r.moves_money && "moves money", r.notifies && "notifies", r.external && "calls an outside service"].filter(Boolean).join(", ") + "; callable by " + (ACC[r.access] || r.access).toLowerCase() + (r.scoped && r.access !== "public" ? "; " + (OWN[r.scoped] || "").toLowerCase() : "") + ((r.tables || []).length ? "; tables: " + r.tables.map((t) => t.op + " " + t.table).join(", ") : "") + (m.tests.untested.includes(r.id) ? "; NO TEST" : "") + ". Code: " + r.handler);
+    if (d.owns.length) L.push("", "Tables it owns: " + d.owns.map((t) => t.table + " (" + t.at + ")" + (t.alsoWrittenBy.length ? ", also changed by " + t.alsoWrittenBy.map(nameOf).join(", ") : "")).join("; ") + ".");
+    if (d.uses.length) L.push("Tables it only reads (owned by other modules; change them there): " + d.uses.map((t) => t.table + (t.owner ? " (" + nameOf(t.owner) + ")" : "")).join(", ") + ".");
+    if ((m.screens || []).length) L.push("", "Screens that call it: " + m.screens.map((x) => x.file + " (" + x.kind + ")").join(", ") + ".");
+    L.push("", "Backend code: " + [...m.files, ...m.code.filter((f) => !m.files.includes(f))].join(", ") + ".");
+    if (m.shared.length) L.push("Shared code it relies on (used app-wide; change only if you must): " + m.shared.slice(0, 12).join(", ") + ".");
+    if (m.tests.files.length) L.push("Tests that reach it: " + m.tests.files.map((t) => t.file).join(", ") + ".");
+    for (const sp of specsOf(m)) L.push("", "Its rules (" + sp.path + "):", ...specReqs(sp).map((r) => "- " + r.id + ": " + r.text + (r.stale ? " [code changed since written]" : "") + (tested(r) ? "" : " [no test]")));
+    if (!m.specified) L.push("", "It has no spec yet: nothing written says what these routes must do.");
+    const iss = modFindings(m).filter((f) => f.severity !== "low");
+    if (iss.length) L.push("", "Open issues:", ...iss.map((f) => "- " + f.severity + ": " + (f.title || f.kind) + " at " + f.where + ": " + f.text));
+    if (m.usedBy.length) L.push("", "Modules that depend on it (re-check them after a change): " + m.usedBy.map((u) => nameOf(u.module) + " via " + u.via.join(", ")).join("; ") + ".");
+    if (m.uses.length) L.push("It depends on: " + m.uses.map((u) => nameOf(u.module)).join(", ") + ".");
+    return L.join("\n");
+  }
+  function appCtx() {
+    const A = D.app;
+    return ["## Context: " + ((A && A.title) || D.name), A ? A.about.split(/\n\s*\n/)[0] : "", "", "Its modules (found from the code):",
+      ...MODS.map((m) => "- " + m.name + ": " + m.does.slice(0, 4).join(", ") + ((m.data && m.data.owns.length) ? "; owns " + m.data.owns.map((t) => t.table).join(", ") : "") + "; code in " + m.files.slice(0, 3).join(", ")),
+    ].join("\n");
+  }
+  const WORKFLOW = "How to work: read the code first. If this changes what the app must do, add or update the rules in the module's spec (specs/<module>/spec.md), each backed by [evidence: file:line]. Run `veridic claim` with the routes and files you will change, so edits that leak into other modules get caught. Make the change, write tests that assert the new behavior, then run `veridic done` and keep going until it says DONE.";
+  const promptChange = (m, ask) => m
+    ? "In " + D.name + ", change the " + m.name + " module:\n\n" + ask + "\n\nFirst run `" + claimOf(m) + "`. " + WORKFLOW + "\n\n" + ctx(m)
+    : "In " + D.name + ":\n\n" + ask + "\n\nFirst work out which module(s) this belongs to from the list below, and say so. If it is new, say which existing module it sits next to, or that it is a new one. " + WORKFLOW + "\n\n" + appCtx();
+  const promptModuleSpec = (m) => "Use veridic to write a spec for the " + m.name + " module of " + D.name + ". Start with the riskiest behavior (money, deletes, writes). Write user stories with Given/When/Then scenarios, requirements backed by [evidence: file:line] citations to the code that does them, and the invariants that must always hold. Save it as specs/" + m.id + "/spec.md, then run `veridic check` and `veridic tests`.\n\n" + ctx(m);
+  const promptModuleTests = (m) => { const ids = m.tests.untested; return "In " + D.name + ", these routes of the " + m.name + " module have no test that calls them or names them:\n" + ids.map((x) => "- " + x).join("\n") + "\n\nRun `veridic claim " + ids.slice(0, 8).map((x) => JSON.stringify(x)).join(" ") + "` first. Then, starting with the routes that move money or change data, write tests that call each route and assert its real effect (status, body, and what changed in the data). Make each test fail if the behavior broke. Run them, then `veridic done`.\n\n" + ctx(m); };
   const claimOf = (m) => "veridic claim " + [...m.routes, ...screensOf(m)].map((x) => JSON.stringify(x)).join(" ");
-  const promptTask = (m) => "I'm going to work on the " + m.name + " module of " + D.name + " (it does: " + m.does.join(", ") + ").\n\nFirst run `" + claimOf(m) + "` so stray edits outside it (backend or UI) get caught. Read its code before changing anything: " + filesOf(m).join(", ") + ".\n" +
-    ((m.data && m.data.owns.length) ? "It owns these tables: " + m.data.owns.map((t) => t.table + (t.alsoWrittenBy.length ? " (also changed by " + t.alsoWrittenBy.map((x) => (MOD.get(x) || { name: x }).name).join(", ") + ")" : "")).join(", ") + ". Tables it only reads belong to other modules: change them there.\n" : "") +
-    (m.usedBy.length ? "Other modules depend on it, so re-check them after the change: " + m.usedBy.map((u) => (MOD.get(u.module) || { name: u.module }).name + " (through " + u.via.join(", ") + ")").join("; ") + ".\n" : "") +
-    "When the change is done, run `veridic done` and keep going until it says DONE.\n\nThe task: <describe what you want to change here>";
+  const promptTask = (m) => promptChange(m, "<describe what you want to change here>");
 
   // ---- state ----
   const NAV = [
@@ -177,45 +214,107 @@
     return null;
   };
 
-  // ---- Modules (home): what the app is, what needs attention, its parts ----
+  // ---- Indicators: one word and a dot each, backed by a number ----
+  const IND = { good: ["ok", "Good"], care: ["med", "Needs work"], risk: ["high", "At risk"] };
+  const inModules = MODS.reduce((n, m) => n + m.stats.routes, 0);
+  const untestedAll = MODS.reduce((n, m) => n + m.tests.untested.length, 0);
+  const specsOf = (m) => SPECS.filter((sp) => m.specs.includes(sp.path));
+  function indicators(m) {
+    const fs = m ? modFindings(m) : F;
+    const hi = fs.filter((f) => f.severity === "high").length, me = fs.filter((f) => f.severity === "medium").length;
+    const routes = m ? m.stats.routes : inModules || ROUTES.length;
+    const tp = pct(routes - (m ? m.tests.untested.length : untestedAll), routes);
+    const sp = pct(m ? m.specified : ROUTES.filter((r) => r.specs && r.specs.length).length, m ? m.stats.routes : ROUTES.length);
+    const stale = (m ? specsOf(m) : SPECS).flatMap(specReqs).filter((r) => r.stale).length;
+    const safe = pct(routes - new Set(fs.filter((f) => f.severity !== "low" && f.area === "API").map((f) => f.where)).size, routes);
+    return [
+      { k: "Safety", i: "shield", s: hi ? "risk" : me ? "care" : "good", p: safe, v: "of routes safe" + (hi ? " · " + plural(hi, "serious issue") : me ? " · " + plural(me, "issue") : "") },
+      { k: "Tests", i: "flask", s: tp >= 70 ? "good" : tp >= 30 ? "care" : "risk", p: tp, v: "of routes tested" },
+      { k: "Rules", i: "doc", s: sp >= 50 && !stale ? "good" : "care", p: sp, v: stale ? stale + " out of date" : sp ? "of routes covered" : "none written" },
+      ...(!m && D.change ? [{ k: "Change", i: "branch", s: D.change.done ? "good" : "risk", p: D.change.done ? 100 : 0, big: D.change.done ? "✓" : String(D.change.problems.length), v: D.change.done ? "done" : "to finish", nav: "change" }] : []),
+    ];
+  }
+  const indRow = (list) => '<div class="inds">' + list.map((i) => { const c = IND[i.s][0]; return "<" + (i.nav ? 'button data-nav="' + i.nav + '"' : "div") + ' class="ind">' + ring(i.p, c, 64, i.big != null ? esc(i.big) : i.p + "%") + '<div><div class="ik">' + ic(i.i, "sm") + i.k + '</div><div class="iv t-' + c + '">' + IND[i.s][1] + '</div><div class="id2">' + esc(i.v) + "</div></div></" + (i.nav ? "button" : "div") + ">"; }).join("") + "</div>";
+
+  // ---- Next steps: what to do, in order, each backed by an indicator and handed to Claude with full context ----
+  const riskOrder = (a, b) => (b.risk || 0) - (a.risk || 0);
+  function nextSteps(scope) {
+    const steps = [];
+    const mods = scope ? [scope] : [...MODS].sort(riskOrder);
+    const c = D.change;
+    if (!scope && c && !c.done) steps.push({ i: "branch", c: "high", t: "Finish the change in progress", why: plural(c.problems.length, "problem") + " from veridic done: " + c.problems.slice(0, 2).join("; "), p: "Finish the current change in " + D.name + ". `veridic done` reports:\n\n" + c.problems.map((p) => "- " + p).join("\n") + "\n\nFix each, then run `veridic done` again until it says DONE." });
+    for (const m of mods) {
+      const fs = modFindings(m).filter((f) => f.severity === "high");
+      if (fs.length) steps.push({ i: "shield", c: "high", t: "Fix " + plural(fs.length, "serious issue") + (scope ? "" : " in " + m.name), why: [...new Set(fs.map((f) => f.title || f.kind))].join("; "), p: promptAll(fs) + "\n\n" + ctx(m) });
+    }
+    for (const sp of scope ? specsOf(scope) : SPECS) {
+      const st = specReqs(sp).filter((r) => r.stale);
+      if (st.length) steps.push({ i: "doc", c: "med", t: "Re-check " + plural(st.length, "rule") + " whose code changed", why: specTitle(sp) + ": " + st.map((r) => r.id).join(", ") + " cite code that changed since they were written", p: promptSpec(sp) });
+    }
+    for (const m of mods) {
+      const fs = modFindings(m).filter((f) => f.severity === "medium" && f.area !== "Spec");
+      if (fs.length && !modFindings(m).some((f) => f.severity === "high")) steps.push({ i: "shield", c: "med", t: "Review " + plural(fs.length, "issue") + (scope ? "" : " in " + m.name), why: [...new Set(fs.map((f) => f.title || f.kind))].join("; "), p: promptAll(fs) + "\n\n" + ctx(m) });
+    }
+    const needTests = mods.filter((m) => m.tests.untested.length && m.stats.writes + m.stats.destructive + m.stats.money).slice(0, scope ? 1 : 2);
+    for (const m of needTests) steps.push({ i: "flask", c: m.stats.money ? "high" : "med", t: "Add tests" + (scope ? "" : " to " + m.name), why: m.tests.untested.length + " of " + plural(m.stats.routes, "route") + " untested" + (m.stats.money ? "; it moves money" : m.stats.destructive ? "; it deletes data" : "; it changes data"), p: promptModuleTests(m) });
+    const needSpec = mods.filter((m) => !m.specified).slice(0, 1);
+    for (const m of needSpec) steps.push({ i: "doc", c: "", t: "Write down the rules" + (scope ? "" : " for " + m.name), why: "No spec yet, so a bug and an intended change look the same" + (m.stats.money ? "; it moves money" : ""), p: promptModuleSpec(m) });
+    if (!scope && T && T.unasserted + T.empty) {
+      const tf = F.filter((f) => f.area === "Tests" && f.severity === "medium");
+      steps.push({ i: "flask", c: "med", t: "Fix tests that check nothing", why: plural(T.unasserted + T.empty, "test") + " pass even when the code is broken", p: promptAll(tf.slice(0, 40)) });
+    }
+    return steps;
+  }
+  const stepList = (steps, n) => steps.length
+    ? '<div class="steps">' + steps.slice(0, n).map((s, i) => '<div class="stepc"><span class="sico ' + (s.c || "none") + '">' + ic(s.i || "sparkle") + '</span><div class="main"><div class="title">' + esc(s.t) + '</div><div class="sub" title="' + esc(s.why) + '">' + esc(s.why) + "</div></div>" + btn("Copy for Claude", s.p, i === 0 ? "primary" : "") + "</div>").join("") + "</div>"
+    : empty("Nothing pressing. Every route is checked, tested and covered by rules.");
+  const composer = (key, placeholder) => '<div class="composer"><textarea id="ask-' + key + '" rows="2" placeholder="' + esc(placeholder) + '"></textarea><div class="row"><span class="faint small">Copies a prompt with everything Claude needs to know about ' + (key === "app" ? "the app" : "this module") + ".</span>" + '<button class="btn primary" data-compose="' + esc(key) + '">' + ic("sparkle", "sm") + 'Copy for Claude</button></div></div>';
+
+  // ---- Home: the repo in a glance, and what to do next ----
   function vModules() {
     const A = D.app;
     let h = "<h1>" + esc((A && A.title) || D.name) + "</h1>";
-    if (A) h += '<div class="about' + (state.aboutOpen ? "" : " clamp") + '">' + mdBlock(A.about) + "</div>" + (A.about.length > 180 ? '<button class="text-btn" data-about style="margin-top:6px">' + (state.aboutOpen ? "Less" : "More") + "</button>" : "");
-    else h += '<p class="lead">No README describes this app yet.</p>';
-
-    // Needs attention: the few most serious things, one per kind and module.
-    const seen = new Set();
-    const ranked = F.filter((f) => f.severity !== "low").sort((a, b) => rank(a.severity) - rank(b.severity));
-    // One per module first, so three items show three places, then the rest.
-    const top = [...ranked.filter((f) => { const k = f.module || f.where; return !seen.has(k) && seen.add(k); }), ...ranked];
-    if (top.length) {
-      const total = F.filter((f) => f.severity !== "low").length;
-      h += section("attention", "Needs attention", null, total > 3 ? '<button class="text-btn" data-sub="findings">All ' + total + "</button>" : "");
-      h += '<div class="list">' + top.slice(0, 3).map((f) => li(
-        '<div style="display:flex;gap:12px;align-items:baseline">' + dot(SEVC[f.severity]) + "<div style=\"min-width:0\">" + two(esc(f.title || f.kind), (f.module && MOD.get(f.module) ? esc(MOD.get(f.module).name) + '<span class="sep">·</span>' : "") + '<span class="mono">' + esc(f.where) + "</span>") + "</div></div>",
-        '<span class="hover-only">' + textBtn("Copy fix prompt", promptFor(f)) + "</span>" + (f.module ? '<button class="text-btn" data-mod="' + esc(f.module) + '" data-to="issues">Open</button>' : ""),
-      )).join("") + "</div>";
-    }
-
+    h += A ? '<div class="about clamp">' + mdBlock(A.about.split(/\n\s*\n/)[0]) + "</div>" : '<p class="lead">No README describes this app yet.</p>';
+    h += indRow(indicators(null));
+    const steps = nextSteps(null);
+    h += section("next", "Next steps", null, steps.length > 5 ? '<button class="text-btn" data-open="steps">All ' + steps.length + "</button>" : "");
+    h += stepList(steps, state.open.has("steps") ? 99 : 5);
+    h += section("build", "Build or change something");
+    h += composer("app", "Describe a feature or a change, in your own words…");
     h += section("modules", "Modules", MODS.length);
     if (!MODS.length) return h + empty("Veridic finds modules from the app's routes. Run <code>veridic init</code> in the repo so it can index the code.");
-    const list = MODS.filter((m) => match(m.name + " " + m.does.join(" ") + " " + filesOf(m).join(" ")));
-    h += few("modules", list, 40, (m) => { const st = statusOf(m); return liBtn(two(esc(m.name), esc(m.does.slice(0, 3).join(", "))), st ? '<span class="tag ' + st.c + '">' + st.t + "</span>" : "", ' data-mod="' + esc(m.id) + '"'); }) || empty("Nothing matches.");
-    const screens = MODS.reduce((n, m) => n + (m.screens || []).length, 0);
-    h += '<p class="faint small" style="margin-top:20px">' + [plural(ROUTES.length, "route"), D.data ? plural(D.data.tables, "table") : "", screens ? plural(screens, "screen") : "", plural(SPECS.length, "spec")].filter(Boolean).join('<span class="sep">·</span>') + "</p>";
+    const list = MODS.filter((m) => match(m.name + " " + m.does.join(" ")));
+    h += list.length ? '<div class="tiles">' + list.map(tile).join("") + "</div>" + '<div class="legend">' + dot("ok") + "good" + dot("med") + "needs work" + dot("high") + "at risk</div>" : empty("Nothing matches.");
     return h;
   }
 
-  // ---- A module: everything needed to work on it without learning the rest ----
+  // A module as a tile: its health at a glance. Three pips: safety, tests, rules.
+  function tile(m) {
+    const [sf, ts, rl] = indicators(m);
+    const worst = [sf, ts, rl].some((x) => x.s === "risk") ? "high" : [sf, ts, rl].some((x) => x.s === "care") ? "med" : "ok";
+    const pip = (x) => '<span class="pip ' + IND[x.s][0] + '" title="' + x.k + ": " + IND[x.s][1] + '">' + ic(x.i, "sm") + "</span>";
+    return '<button class="tile ' + worst + '" data-mod="' + esc(m.id) + '"><div class="tname">' + esc(m.name) + '</div><div class="tsub">' + ic("route", "sm") + m.stats.routes + ((m.data && m.data.owns.length) ? ic("db", "sm") + m.data.owns.length : "") + ((m.screens || []).length ? ic("monitor", "sm") + m.screens.length : "") + '</div><div class="pips">' + pip(sf) + pip(ts) + pip(rl) + "</div></button>";
+  }
+
+  // ---- A module: a glance, its next steps, and a box to change it. The detail is the agent's, behind "Details" ----
   function vModule() {
     const m = MOD.get(state.mod);
     if (!m) { state.view = "modules"; return vModules(); }
-    const s = m.stats, rs = modRoutes(m), fs = modFindings(m).filter((f) => f.severity !== "low");
-    let h = '<button class="back" data-nav="modules">' + ic("back", "sm") + "Modules</button>";
+    let h = '<button class="back" data-nav="modules">' + ic("back", "sm") + "Home</button>";
     h += "<h1>" + esc(m.name) + "</h1>";
-    if (m.does.length) h += '<p class="lead">Lets callers ' + m.does.slice(0, 5).map(esc).join(", ") + (m.does.length > 5 ? ", and more" : "") + ".</p>";
-    h += '<div class="actions">' + btn("Start a task", promptTask(m), "primary") + btn("Copy claim", claimOf(m), "quiet") + (!m.specified ? btn("Draft a spec", promptModuleSpec(m), "quiet") : "") + "</div>";
+    if (m.does.length) h += '<p class="lead">Lets callers ' + m.does.slice(0, 4).map(esc).join(", ") + (m.does.length > 4 ? ", and more" : "") + ".</p>";
+    h += indRow(indicators(m));
+    const steps = nextSteps(m);
+    h += section("next", "Next steps");
+    h += stepList(steps, 4);
+    h += section("build", "Change something here");
+    h += composer(m.id, "What should change in " + m.name + "?");
+    h += '<details class="details"' + (state.open.has("details") ? " open" : "") + ' data-details><summary>Details<span class="faint"> · ' + plural(m.stats.routes, "route") + ((m.data && m.data.owns.length) ? ", " + plural(m.data.owns.length, "table") : "") + ((m.screens || []).length ? ", " + plural(m.screens.length, "screen") : "") + "</span></summary>" + moduleDetails(m) + "</details>";
+    return h;
+  }
+  function moduleDetails(m) {
+    const s = m.stats, rs = modRoutes(m), fs = modFindings(m).filter((f) => f.severity !== "low");
+    let h = "";
 
     // Issues: only when there are some.
     if (fs.length) {
@@ -449,10 +548,10 @@
     CLIP.length = 0;
     seq = 0;
     const main = $("#main");
-    main.className = "page fade" + (state.view === "spec" || state.view === "overview" ? " wide" : "");
+    main.className = "page fade" + (state.view !== "module" && state.view !== "change" ? " wide" : "");
     main.innerHTML = VIEWS[state.view]();
     void main.offsetWidth;
-    requestAnimationFrame(() => $$("#main [data-w]").forEach((el) => (el.style.width = el.dataset.w + "%")));
+    requestAnimationFrame(() => { $$("#main [data-w]").forEach((el) => (el.style.width = el.dataset.w + "%")); $$("#main [data-dash]").forEach((el) => el.setAttribute("stroke-dasharray", el.dataset.dash)); });
     if (state.openGroup) {
       const r = $("#main .grp-" + cssId(state.openGroup));
       if (r) { toggle(r); r.scrollIntoView({ block: "center" }); }
@@ -509,6 +608,8 @@
     const t = e.target;
     const c = t.closest("[data-copy]");
     if (c) { e.preventDefault(); e.stopPropagation(); copy(CLIP[+c.dataset.copy]); return; }
+    const cp = t.closest("[data-compose]");
+    if (cp) { const k = cp.dataset.compose, box = document.getElementById("ask-" + k), ask = box && box.value.trim(); if (!ask) { toast("Describe the change first."); if (box) box.focus(); return; } copy(promptChange(MOD.get(k) || null, ask)); return; }
     const md0 = t.closest("[data-mod]");
     if (md0) { openModule(md0.dataset.mod, md0.dataset.to); return; }
     const sp = t.closest("[data-spec]");
@@ -536,7 +637,7 @@
     const g = t.closest("[data-group]");
     if (g) { state.openGroup = g.dataset.group; state.sev = ["high", "medium", "low"]; state.area = "all"; state.sub = "findings"; state.open.add("findings"); render(true); return; }
     if (t.closest("#menu")) { $(".shell").classList.toggle("menu"); return; }
-    if (t.closest("a, button, select, input, label, pre")) return;
+    if (t.closest("a, button, select, input, label, pre, textarea, summary")) return;
     const row = t.closest(".li[data-d]");
     if (row) toggle(row);
   });
