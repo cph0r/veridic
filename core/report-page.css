@@ -299,6 +299,7 @@ button.stepc:hover { border-color: var(--faint); }
 
 /* ---- module page: two columns on wide screens ---- */
 .mgrid { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 28px; align-items: start; }
+.mcol { min-width: 0; }
 .mside { display: grid; gap: 12px; margin-top: 28px; position: sticky; top: 24px; }
 .card { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); padding: 14px 16px; }
 .card .ik { margin-bottom: 10px; }
@@ -319,7 +320,7 @@ button.stepc:hover { border-color: var(--faint); }
 .bignums { display: flex; gap: 22px; }
 .bignums .v { font-size: 22px; font-weight: 600; letter-spacing: -0.02em; }
 .bignums .k { color: var(--muted); font-size: 12px; }
-@media (max-width: 1100px) { .mgrid { grid-template-columns: 1fr; } .mside { position: static; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); } }
+@media (max-width: 1100px) { .mgrid { grid-template-columns: minmax(0, 1fr); } .mside { position: static; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); } }
 
 /* ---- modules side by side ---- */
 .mtable td { vertical-align: middle; padding: 10px 12px 10px 0; }
