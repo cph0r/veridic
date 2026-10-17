@@ -20,5 +20,8 @@
     "url": "https://github.com/cph0r"
   },
   "homepage": "https://github.com/cph0r/veridic",
-  "repository": "https://github.com/cph0r/veridic"
+  "repository": "https://github.com/cph0r/veridic",
+  "supportUrl": "https://github.com/cph0r/veridic/issues",
+  "documentationUrl": "https://github.com/cph0r/veridic#readme",
+  "privacyPolicyUrl": "https://github.com/cph0r/veridic/blob/main/PRIVACY.md"
 }
