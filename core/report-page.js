@@ -1,7 +1,7 @@
 // Veridic report page. Reads the JSON embedded in the page and renders it; no
 // network, no dependencies. Quiet by design: each view shows the few things that
-// matter, and the rest opens on a click. Views: Modules (home), a module's page,
-// Specs, Overview (everything app-wide), Current task. An observability tool: it
+// matter, and the rest opens on a click. Views: Home, a module's page,
+// Specs, Overview (everything app-wide). An observability tool: it
 // shows the state of the repo and links to the code; it never acts on it.
 (() => {
   "use strict";
@@ -30,6 +30,8 @@
     menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
     check: '<path d="m5 12 5 5L20 7"/>',
     copy: '<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
+    home: '<path d="M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z"/>',
+    pulse: '<path d="M3 12h4l3-8 4 16 3-8h4"/>',
     blocks: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><path d="M14 17.5h7M17.5 14v7"/>',
     shield: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>',
     flask: '<path d="M9 3h6M10 3v6L4.5 18.5A2 2 0 0 0 6.2 21h11.6a2 2 0 0 0 1.7-2.5L14 9V3"/><path d="M7 15h10"/>',
@@ -145,13 +147,12 @@
 
   // ---- state ----
   const NAV = [
-    { k: "modules", t: "Home" },
-    { k: "spec", t: "Specs" },
-    ...(D.change ? [{ k: "change", t: "Current task", dot: D.change.done ? "ok" : "high" }] : []),
-    { k: "overview", t: "Overview" },
+    { k: "modules", t: "Home", i: "home" },
+    { k: "spec", t: "Specs", i: "doc" },
+    { k: "overview", t: "Overview", i: "pulse" },
   ];
   const fromHash = () => { const h = location.hash.slice(1).split("/"); return h[0] === "module" && h[1] ? { view: "module", mod: decodeURIComponent(h[1]), jump: h[2] } : NAV.some((n) => n.k === h[0]) ? { view: h[0] } : { view: "modules" }; };
-  const state = { ...fromHash(), sub: "summary", q: "", sev: ["high", "medium"], area: "all", rf: "all", spec: 0, sf: "all", aboutOpen: false, openGroup: null, pages: {}, open: new Set() };
+  const state = { ...fromHash(), sub: "summary", q: "", sev: ["high", "medium"], area: "all", rf: "all", spec: -1, sf: "all", aboutOpen: false, openGroup: null, pages: {}, open: new Set() };
 
   // The sidebar's dot: only a module's own problems. Red: a serious issue or a call to an endpoint
   // that doesn't exist. Amber: issues to review, or it shares a table or a loop with another module.
@@ -190,7 +191,8 @@
       ...(!m && ST.modularity ? [{ k: "Modularity", i: "blocks", s: MODU.pct >= 80 ? "good" : MODU.pct >= 50 ? "care" : "risk", p: MODU.pct, v: MODU.clean + "/" + MODU.modules + " separate" }] : []),
       ...(!m && ST.duplication ? [{ k: "Duplication", i: "copy", s: DUP.pct < 5 ? "good" : DUP.pct < 12 ? "care" : "risk", p: Math.round(DUP.pct), big: DUP.pct + "%", v: "of code copied" }] : []),
       ...(m && ST.modularity ? (() => { const ps = MODU.problems.filter((p) => p.kind !== "hub" && p.modules.includes(m.id)), ds = dupsOf(m).filter((b) => b.lines >= 10); const n = ps.length + ds.length; return [{ k: "Structure", i: "blocks", s: ps.some((p) => p.kind === "cycle") ? "risk" : n ? "care" : "good", p: n ? Math.max(10, 100 - n * 20) : 100, big: n ? String(n) : "✓", v: n ? (n === 1 ? "problem" : "problems") : "separate" }]; })() : []),
-      ...(!m && D.change ? [{ k: "Change", i: "branch", s: D.change.done ? "good" : "risk", p: D.change.done ? 100 : 0, big: D.change.done ? "✓" : String(D.change.problems.length), v: D.change.done ? "done" : "to finish", nav: "change" }] : []),
+      // The change in progress: only while there is one. Without a claim it can't be checked.
+      ...(!m && D.change && D.change.files.length ? [(() => { const c = D.change, claimed = c.claims.length; return { k: "Change", i: "branch", s: !c.done ? "risk" : claimed ? "good" : "care", p: c.done ? 100 : 0, big: !c.done ? String(c.problems.length) : claimed ? "✓" : String(c.files.length), v: !c.done ? "to finish" : claimed ? "in scope, tested" : plural(c.files.length, "file") + " changed, not claimed" }; })()] : []),
     ];
   }
   const indRow = (list) => '<div class="inds">' + list.map((i) => { const c = IND[i.s][0]; return "<" + (i.nav ? 'button data-nav="' + i.nav + '"' : "div") + ' class="ind">' + ring(i.p, c, 56, i.big != null ? esc(i.big) : i.p + "%") + '<div><div class="ik">' + ic(i.i, "sm") + i.k + '</div><div class="iv t-' + c + '">' + IND[i.s][1] + '</div><div class="id2">' + esc(i.v) + "</div></div></" + (i.nav ? "button" : "div") + ">"; }).join("") + "</div>";
@@ -209,7 +211,7 @@
     const mods = scope ? [scope] : [...MODS].sort(riskOrder);
     const go = (m) => (scope ? "" : ' data-mod="' + esc(m.id) + '"');
     const c = D.change;
-    if (!scope && c && !c.done) out.push({ i: "branch", c: "high", t: "The change in progress isn't done", why: c.problems.slice(0, 2).join("; "), go: ' data-nav="change"' });
+    if (!scope && c && !c.done) out.push({ i: "branch", c: "high", t: "The change in progress isn't done", why: c.problems.slice(0, 2).join("; ") + " · run veridic done for the details" });
     for (const m of mods) {
       const fs = modFindings(m).filter((f) => f.severity === "high");
       if (fs.length) out.push({ i: "shield", c: "high", t: plural(fs.length, "serious issue") + (scope ? "" : " in " + m.name), why: [...new Set(fs.map((f) => f.title || f.kind))].join("; "), go: go(m) });
@@ -387,21 +389,22 @@
   function vSpec() {
     const covered = ROUTES.filter((r) => r.specs && r.specs.length).length;
     const without = MODS.filter((m) => !m.specified).sort(riskOrder);
-    // What's open below the map: a spec, or a module with none (state.specMod).
-    if (!state.specMod && !SPECS[state.spec] && without[0]) state.specMod = without[0].id;
     let h = "<h1>Specs</h1><p class=\"lead\">Written rules for what the app must do. A change that breaks one gets caught.</p>";
     const p = pct(covered, ROUTES.length), c = p >= 50 ? "ok" : p ? "med" : "high";
     h += '<div class="inds">' + '<div class="ind">' + ring(p, c, 64, p + "%") + '<div><div class="ik">' + ic("doc", "sm") + 'Coverage</div><div class="iv t-' + c + '">' + (p >= 50 ? "Good" : p ? "Needs work" : "None yet") + '</div><div class="id2">of routes have rules</div></div></div>' +
       '<div class="ind">' + ring(pct(MODS.length - without.length, MODS.length), c, 64, String(MODS.length - without.length)) + '<div><div class="ik">' + ic("route", "sm") + 'Modules</div><div class="iv">' + (MODS.length - without.length) + " of " + MODS.length + '</div><div class="id2">have a spec</div></div></div>' +
       (SPECS.length ? (() => { const all = SPECS.flatMap(specReqs), t = pct(all.filter(tested).length, all.length), cc = t >= 70 ? "ok" : t >= 30 ? "med" : "high"; return '<div class="ind">' + ring(t, cc, 64, t + "%") + '<div><div class="ik">' + ic("flask", "sm") + 'Rules tested</div><div class="iv t-' + cc + '">' + all.filter(tested).length + " of " + all.length + '</div><div class="id2">rules have a test</div></div></div>'; })() : "") + "</div>";
-    // The map: every spec, then every module still without one.
-    h += section("map", "Pick one", null, '<span class="legend" style="margin:0">' + dot("ok") + "has rules" + '<span class="dot none" style="border:1px dashed var(--faint)"></span>no rules yet</span>');
-    h += '<div class="tiles">' + SPECS.map((sp, i) => { const rs = specReqs(sp), t = pct(rs.filter(tested).length, rs.length), st = rs.filter((r) => r.stale).length, w = st || t < 50 ? "med" : "ok";
-      const mods = MODS.filter((m) => m.specs.includes(sp.path)).map((m) => m.name);
-      return '<button class="tile two ' + w + (!state.specMod && state.spec === i ? " on" : "") + '" data-spec="' + i + '"><div class="tname">' + esc(specTitle(sp)) + '</div><div class="tsub">' + (mods.length ? '<span style="margin-right:6px">' + esc(mods.join(", ")) + "</span>" : "") + ic("doc", "sm") + rs.length + ic("flask", "sm") + t + "%" + (st ? '<span class="t-med" style="margin-left:6px">' + st + " changed</span>" : "") + "</div></button>"; }).join("") +
-      without.map((m) => '<button class="tile ghost' + (state.specMod === m.id ? " on" : "") + '" data-specmod="' + esc(m.id) + '"><div class="tname">' + esc(m.name) + '</div><div class="tsub">' + ic("route", "sm") + m.stats.routes + (m.stats.money ? '<span class="t-high" style="margin-left:6px">money</span>' : m.stats.destructive ? '<span class="t-med" style="margin-left:6px">deletes</span>' : "") + "</div></button>").join("") + "</div>";
+    // One spec, or a module with none, picked from the sidebar or the list below.
     const m = state.specMod && MOD.get(state.specMod);
-    h += '<div class="pane" id="sec-pane">' + (m ? noSpecPane(m) : SPECS[state.spec] ? specPane(SPECS[state.spec], state.spec) : "") + "</div>";
+    if (m || SPECS[state.spec]) return '<button class="back" data-nav="spec">' + ic("back", "sm") + "Specs</button>" + (m ? noSpecPane(m) : specPane(SPECS[state.spec], state.spec));
+    // Otherwise every spec as one row, then the modules still without one.
+    h += section("list", "Specs", SPECS.length || null);
+    h += SPECS.length ? '<div class="list">' + SPECS.map((sp, i) => {
+      const rs = specReqs(sp), t = pct(rs.filter(tested).length, rs.length), st = rs.filter((r) => r.stale).length;
+      const mods = MODS.filter((x) => x.specs.includes(sp.path)).map((x) => x.name);
+      return liBtn(two(esc(specName(sp)), esc(specTitle(sp))), '<span class="hide-sm faint">' + esc(mods.slice(0, 3).join(", ")) + "</span>" + '<span class="tag">' + plural(rs.length, "rule") + '</span><span class="tag">' + t + "% tested</span>" + (st ? '<span class="tag med">' + st + " out of date</span>" : ""), ' data-spec="' + i + '"');
+    }).join("") + "</div>" : empty("No spec yet. `/veridic:specs` in Claude Code writes one per module.");
+    if (without.length) h += section("without", "Modules with no spec", without.length) + '<div class="list compact">' + without.map((x) => liBtn(esc(x.name), '<span class="tag">' + plural(x.stats.routes, "route") + "</span>" + (x.stats.money ? '<span class="tag high">moves money</span>' : ""), ' data-specmod="' + esc(x.id) + '"')).join("") + "</div>";
     return h;
   }
   function noSpecPane(m) {
@@ -489,7 +492,32 @@
     const names = { all: "All", issues: "Has issues", write: "Changes data", money: "Moves money", public: "Anyone can call" };
     let h = '<div class="filters">' + Object.keys(FL).map((k) => '<button class="filter" data-f="rf" data-v="' + k + '" aria-pressed="' + (state.rf === k) + '">' + names[k] + '<span class="n">' + ROUTES.filter(FL[k]).length + "</span></button>").join("") + "</div>";
     const list = ROUTES.filter((rt) => FL[state.rf](rt) && match(rt.id + " " + rt.handler));
-    return h + (few("routes", list, 40, (r) => routeRow(r, null)) || empty("Nothing matches."));
+    if (!list.length) return h + empty("Nothing matches.");
+    const untested = new Set(MODS.flatMap((m) => m.tests.untested));
+    const WHO = { public: "Anyone", auth: "Signed in", role: "Admins" };
+    const own = (r) => (r.access === "public" && r.effect === "read") || !r.scoped ? '<span class="faint">—</span>' : r.scoped === "yes" ? "checked" : r.scoped === "weak" ? '<span class="t-med">client values</span>' : '<span class="t-high">not checked</span>';
+    return h + pagedTable("routes", list, ["Method", "Path", "Does", "Who can call", "Whose data", "Module", "Test"], (r) => {
+      const iss = issuesByRoute.get(r.id) || [];
+      return [
+        '<span class="method">' + esc(r.method) + "</span>",
+        '<span class="path">' + esc(r.path) + "</span>" + (iss.length ? " " + dot(SEVC[iss[0].severity]) : ""),
+        r.moves_money ? '<span class="t-high">moves money</span>' : esc(EFF[r.effect] || EFF.read),
+        esc(WHO[r.access] || r.access),
+        own(r),
+        r.module ? esc(nameOf(r.module)) : '<span class="faint">—</span>',
+        untested.has(r.id) ? '<span class="faint">none</span>' : '<span class="t-ok">' + ic("check", "sm") + "</span>",
+      ];
+    }, (r) => routeDetail(r, issuesByRoute.get(r.id) || [], untested.has(r.id)));
+  }
+  // A table with numbered pages; a row opens to its detail.
+  function pagedTable(key, list, cols, cells, detail) {
+    const pages = Math.max(1, Math.ceil(list.length / PAGE)), p = Math.min(state.pages[key] || 0, pages - 1);
+    const rows = list.slice(p * PAGE, (p + 1) * PAGE).map((x) => { const id = "d" + seq++; return '<tr class="trow" data-d="' + id + '">' + cells(x).map((c) => "<td>" + c + "</td>").join("") + '<td class="chevcell">' + ic("chev", "sm chev") + '</td></tr><tr class="tdetail" id="' + id + '" hidden><td colspan="' + (cols.length + 1) + '"><div class="detail">' + detail(x) + "</div></td></tr>"; }).join("");
+    const shown = [...new Set([0, pages - 1, p - 1, p, p + 1].filter((i) => i >= 0 && i < pages))].sort((a, b) => a - b);
+    let nums = "", prev = -1;
+    for (const i of shown) { if (i - prev > 1) nums += '<span class="gap">…</span>'; nums += '<button data-page="' + key + '" data-p="' + i + '"' + (i === p ? ' aria-current="page"' : "") + ">" + (i + 1) + "</button>"; prev = i; }
+    const pager = pages > 1 ? '<div class="pager"><span>' + (p * PAGE + 1) + "–" + Math.min(list.length, (p + 1) * PAGE) + " of " + list.length + '</span><span class="grow"></span><button data-page="' + key + '" data-p="' + (p - 1) + '"' + (p ? "" : " disabled") + ' aria-label="Previous page">←</button>' + nums + '<button data-page="' + key + '" data-p="' + (p + 1) + '"' + (p < pages - 1 ? "" : " disabled") + ' aria-label="Next page">→</button></div>' : "";
+    return '<div class="tablewrap"><table class="plain dtable"><thead><tr>' + cols.map((c) => "<th>" + c + "</th>").join("") + "<th></th></tr></thead><tbody>" + rows + "</tbody></table></div>" + pager;
   }
   // Every module side by side: one row each, a dot and a number per indicator, riskiest first.
   function oModules() {
@@ -534,19 +562,7 @@
     return h;
   }
 
-  // ---- Current task ----
-  function vChange() {
-    const c = D.change;
-    let h = "<h1>" + (c.done ? "Done" : "Not done yet") + '</h1><p class="lead">' + (c.done ? "The change stays within its claim, and the routes it changed have tests that check them." : "Your uncommitted change, checked against what the task claimed. " + plural(c.problems.length, "thing") + " to finish.") + "</p>";
-    h += section("claim", "Claimed", c.claims.length || null);
-    h += c.claims.length ? '<p class="mono small">' + c.claims.map(esc).join("<br>") + "</p>" : empty("Nothing claimed. Run <code>veridic claim &lt;route&gt;</code> before editing, so stray edits can be caught.");
-    if (c.problems.length) h += section("problems", "To finish", c.problems.length) + '<div class="list">' + c.problems.map((p) => li('<div style="display:flex;gap:12px;align-items:baseline">' + dot("high") + "<span>" + esc(p) + "</span></div>")).join("") + "</div>";
-    h += section("files", "Changed files", c.files.length);
-    h += few("changed", c.files, 12, (f) => liOpen(fileLine(f.file), (f.untested_routes || []).length ? '<span class="tag high">untested</span>' : f.in_seam === false ? '<span class="tag high">outside the claim</span>' : '<span class="tag">ok</span>',
-      '<dl class="kv"><dt>Routes it reaches</dt><dd>' + ((f.routes || []).map((r) => '<span class="mono">' + esc(r) + "</span>").join("<br>") || '<span class="muted">none</span>') + "</dd><dt>Tests that reach it</dt><dd>" + ((f.tests || []).map((t) => loc(t + ":1")).join("<br>") || '<span class="muted">none</span>') + "</dd></dl>"));
-    return h;
-  }
-  const VIEWS = { modules: vModules, module: vModule, spec: vSpec, overview: vOverview, change: vChange };
+  const VIEWS = { modules: vModules, module: vModule, spec: vSpec, overview: vOverview };
 
   // ---- shell and rendering ----
   const ago = (iso) => { const s = (Date.now() - new Date(iso)) / 1000; return s < 60 ? "just now" : s < 3600 ? Math.round(s / 60) + " min ago" : s < 86400 ? Math.round(s / 3600) + " h ago" : Math.round(s / 86400) + " days ago"; };
@@ -561,19 +577,26 @@
   }
   // The sidebar: Home, then Modules with every module nested under it (collapsible), then the rest.
   let modsOpen = store.get("mods-open") !== "0";
+  let specsOpen = store.get("specs-open") === "1";
   function nav() {
     const cur = state.view;
-    const item = (n) => '<button class="item" data-nav="' + n.k + '"' + (n.k === cur ? ' aria-current="page"' : "") + '><span class="grow">' + n.t + "</span>" + (n.dot ? dot(n.dot) : "") + "</button>";
+    // Every row: an icon, the label, then one fixed slot on the right (a dot, or the chevron).
+    const slot = (x) => '<span class="slot">' + (x || "") + "</span>";
+    const item = (n) => '<button class="item" data-nav="' + n.k + '"' + (n.k === cur ? ' aria-current="page"' : "") + ">" + ic(n.i, "sm") + '<span class="grow">' + n.t + "</span>" + slot(n.dot ? dot(n.dot) : "") + "</button>";
     const group = MODS.length
-      ? '<button class="item group" data-modtoggle aria-expanded="' + modsOpen + '">' + ic("chev", "sm chev") + '<span class="grow">Modules</span><span class="meta">' + MODS.length + "</span></button>" +
-        (modsOpen ? '<div class="sublist">' + MODS.map((m) => '<button class="item sub' + (cur === "module" && state.mod === m.id ? " on" : "") + '" data-mod="' + esc(m.id) + '"><span class="grow">' + esc(m.name) + "</span>" + (sideDot(m) ? dot(sideDot(m)) : "") + "</button>").join("") + "</div>" : "")
+      ? '<button class="item group" data-modtoggle aria-expanded="' + modsOpen + '">' + ic("blocks", "sm") + '<span class="grow">Modules</span><span class="meta">' + MODS.length + "</span>" + slot(ic("chev", "sm chev")) + "</button>" +
+        (modsOpen ? '<div class="sublist">' + MODS.map((m) => '<button class="item sub' + (cur === "module" && state.mod === m.id ? " on" : "") + '" data-mod="' + esc(m.id) + '"><span class="grow">' + esc(m.name) + "</span>" + slot(sideDot(m) ? dot(sideDot(m)) : "") + "</button>").join("") + "</div>" : "")
       : "";
-    $("#nav").innerHTML = item(NAV[0]) + group + NAV.slice(1).map(item).join("");
+    const specGroup = SPECS.length
+      ? '<button class="item group" data-spectoggle aria-expanded="' + specsOpen + '"' + (cur === "spec" && state.spec < 0 && !state.specMod ? ' aria-current="page"' : "") + ">" + ic("doc", "sm") + '<span class="grow">Specs</span><span class="meta">' + SPECS.length + "</span>" + slot(ic("chev", "sm chev")) + "</button>" +
+        (specsOpen ? '<div class="sublist">' + SPECS.map((sp, i) => '<button class="item sub' + (cur === "spec" && state.spec === i && !state.specMod ? " on" : "") + '" data-spec="' + i + '" title="' + esc(specTitle(sp)) + '"><span class="grow">' + esc(specName(sp)) + "</span>" + slot(specReqs(sp).some((r) => r.stale) ? dot("med") : "") + "</button>").join("") + "</div>" : "")
+      : item(NAV[1]);
+    $("#nav").innerHTML = item(NAV[0]) + group + specGroup + NAV.slice(2).map(item).join("");
   }
   function render(keepScroll) {
     seq = 0;
     const main = $("#main");
-    main.className = "page fade" + (state.view !== "change" ? " wide" : "");
+    main.className = "page fade wide";
     main.innerHTML = VIEWS[state.view]();
     void main.offsetWidth;
     requestAnimationFrame(() => { $$("#main [data-w]").forEach((el) => (el.style.width = el.dataset.w + "%")); $$("#main [data-dash]").forEach((el) => el.setAttribute("stroke-dasharray", el.dataset.dash)); });
@@ -631,8 +654,8 @@
     if (md0) { openModule(md0.dataset.mod, md0.dataset.to); return; }
     const sp = t.closest("[data-spec]");
     const sm = t.closest("[data-specmod]");
-    if (sm) { state.specMod = sm.dataset.specmod; render(true); const el = $("#sec-pane"); if (el) el.scrollIntoView({ block: "start", behavior: "smooth" }); return; }
-    if (sp) { state.spec = +sp.dataset.spec; state.specMod = null; state.sf = "all"; if (state.view !== "spec") setView("spec"); else { state.pages = {}; state.open = new Set(); render(true); const el = $("#sec-pane"); if (el) el.scrollIntoView({ block: "start", behavior: "smooth" }); } return; }
+    if (sm) { state.specMod = sm.dataset.specmod; state.spec = -1; setView("spec"); return; }
+    if (sp) { state.spec = +sp.dataset.spec; state.specMod = null; state.sf = "all"; specsOpen = true; store.set("specs-open", "1"); setView("spec"); return; }
     if (t.closest("[data-about]")) { state.aboutOpen = !state.aboutOpen; render(true); return; }
     const op = t.closest("[data-open]");
     if (op) { state.open.add(op.dataset.open); render(true); return; }
@@ -643,7 +666,7 @@
     const sb = t.closest("[data-sub]");
     if (sb) { state.sub = sb.dataset.sub; state.sev = ["high", "medium"]; setView("overview"); return; }
     const n = t.closest("[data-nav]");
-    if (n) { setView(n.dataset.nav); return; }
+    if (n) { if (n.dataset.nav === "spec") (state.spec = -1), (state.specMod = null); setView(n.dataset.nav); return; }
     const f = t.closest("[data-f]");
     if (f) {
       const name = f.dataset.f, v = f.dataset.v;
@@ -655,10 +678,11 @@
     }
     const g = t.closest("[data-group]");
     if (g) { state.openGroup = g.dataset.group; state.sev = ["high", "medium", "low"]; state.area = "all"; state.sub = "findings"; state.open.add("findings"); render(true); return; }
+    if (t.closest("[data-spectoggle]")) { const onOverview = state.view === "spec" && state.spec < 0 && !state.specMod; specsOpen = onOverview ? !specsOpen : true; store.set("specs-open", specsOpen ? "1" : "0"); state.spec = -1; state.specMod = null; setView("spec"); return; }
     if (t.closest("[data-modtoggle]")) { modsOpen = !modsOpen; store.set("mods-open", modsOpen ? "1" : "0"); nav(); return; }
     if (t.closest("#menu")) { $(".shell").classList.toggle("menu"); return; }
     if (t.closest("a, button, select, input, label, pre, textarea, summary")) return;
-    const row = t.closest(".li[data-d]");
+    const row = t.closest(".li[data-d], tr[data-d]");
     if (row) toggle(row);
   });
   $("#q").addEventListener("input", (e) => { state.q = e.target.value; state.pages = {}; render(true); });
