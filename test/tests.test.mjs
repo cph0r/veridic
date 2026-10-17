@@ -206,3 +206,27 @@ test("test finder: method calls named test() aren't tests; supertest .expect(200
   assert.equal(findTaggedTests(repo, ["t/a.test.js"]).length, 1, "regex.test(`x`) is not a second test");
   fs.rmSync(repo, { recursive: true, force: true });
 });
+
+test("audit: a helper the test file defines that asserts is an assertion; Playwright waits are loose checks", async () => {
+  const { auditFile } = await import("../core/tests.mjs");
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "veridic-helpers-"));
+  fs.writeFileSync(path.join(repo, "a.test.js"), [
+    "describe('refusals', () => {",
+    "  const refused = (message) => {",
+    "    expect(addFile).not.toHaveBeenCalled();",
+    "  };",
+    "  async function viaRefused() { refused('x'); }",
+    "  const isOk = (r) => expect(r.ok).toBe(true);",
+    "  it('refuses', () => { attach(); refused('com_ui_error'); });",
+    "  it('refuses through a helper that calls the helper', async () => { await viaRefused(); });",
+    "  it('one-line helper', () => { isOk(call()); });",
+    "  it('waits for the page', async () => { await page.waitForURL('/dashboard'); });",
+    "  it('only clicks', async () => { await page.click('#x'); });",
+    "  it('type test', () => { expectTypeOf<Field['schema']>().toBeNullable(); });",
+    "});",
+  ].join("\n"));
+  const a = auditFile(repo, "a.test.js");
+  assert.deepEqual(a.counts, { strong: 4, weak: 1, unasserted: 1, empty: 0, skipped: 0 });
+  assert.equal(a.flagged.unasserted[0].title, "only clicks");
+  fs.rmSync(repo, { recursive: true, force: true });
+});

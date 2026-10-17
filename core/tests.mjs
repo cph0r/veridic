@@ -56,12 +56,12 @@ function reach(repo, file, files, levels = 2) {
 // Assertions, after comments and strings are blanked. An assertion on a literal checks nothing.
 // Custom assertion helpers count (`cy.expectChallengeSolved(…)`, `assertOrderPaid(…)`), and
 // `cy.request(…)`, which fails the test on an error status by default.
-const ASSERT = /\bexpect\s*\(|\bassert\w*\s*[.(]|\.should\b|\bt\.(?:is|not|true|false|deepEqual|throws\w*|regex|like|assert)\s*\(|\b(?:expect|assert|verify|check|should)[A-Z]\w*\s*\(|\bcy\.(?:request|contains|get)\s*\(|\.and\s*\(\s*["'`]/;
+const ASSERT = /\bexpect\s*\(|\bassert\w*\s*[.(]|\.should\b|\bt\.(?:is|not|true|false|deepEqual|throws\w*|regex|like|assert)\s*\(|\b(?:expect|assert|verify|check|should)[A-Z]\w*\s*(?:<[^()]*>)?\s*\(|\bcy\.(?:request|contains|get)\s*\(|\.and\s*\(\s*["'`]|\.waitFor(?:URL|Selector)\s*\(/;
 // Only bare `expect(true)`: supertest's `.expect(200)` checks the response status.
 const LITERAL_EXPECT = /(?<![\w$.])expect\s*\(\s*(?:true|false|null|undefined|-?\d+(?:\.\d+)?|""|''|``)\s*\)/g;
 // Loose: passes for almost any value. `.not.toHaveBeenCalled()` and `toBeUndefined()` are exact, so not loose.
 // `cy.get(…)` with nothing after it only checks the element exists.
-const LOOSE = /\bcy\.get\s*\(|\.(?:toBeTruthy|toBeDefined|toBeFalsy)\s*\(\s*\)|\.not\.(?:toBeNull|toBeUndefined)\s*\(\s*\)|(?<!\.not)\.toHaveBeenCalled\s*\(\s*\)/g;
+const LOOSE = /\bcy\.get\s*\(|\.waitFor(?:URL|Selector)\s*\(|\.(?:toBeTruthy|toBeDefined|toBeFalsy)\s*\(\s*\)|\.not\.(?:toBeNull|toBeUndefined)\s*\(\s*\)|(?<!\.not)\.toHaveBeenCalled\s*\(\s*\)/g;
 
 // A `/` starts a regex literal (not division) after an operator, an opening
 // bracket, a comma, or a keyword like `return`.
@@ -126,11 +126,12 @@ function closeParen(code, from) {
 }
 
 /** How much a test body checks: empty | unasserted | weak | strong. */
-export function testStrength(body) {
+export function testStrength(body, helpers = null) {
   if (!body.replace(/\basync\b|\bfunction\b|=>|[(){},;\s]|\b(?:done|ctx|t)\b/g, "")) return "empty";
   const real = body.replace(LITERAL_EXPECT, "literal(");
-  if (!ASSERT.test(real)) return "unasserted";
-  const total = (real.match(new RegExp(ASSERT.source, "g")) ?? []).length;
+  const viaHelper = helpers ? (real.match(helpers) ?? []).length : 0;
+  if (!ASSERT.test(real) && !viaHelper) return "unasserted";
+  const total = (real.match(new RegExp(ASSERT.source, "g")) ?? []).length + viaHelper;
   const loose = (real.match(LOOSE) ?? []).length;
   return loose >= total ? "weak" : "strong";
 }
@@ -189,6 +190,38 @@ export function auditTests(repo) {
 }
 
 /** One test file's tests, by what they check. */
+// Functions the test file defines whose bodies assert (`const refused = (msg) => { expect(…) }`),
+// and those that call them: a call to one is an assertion.
+function localHelpers(code) {
+  const defs = [];
+  for (const m of code.matchAll(/(?:\bfunction\s+([A-Za-z_$][\w$]*)\s*\(|\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:async\s*)?(?:function\b[^(]*\(|\([^()]*\)\s*(?::[^=]+)?=>|[A-Za-z_$][\w$]*\s*=>))/g)) {
+    const after = m.index + m[0].length;
+    // An expression-bodied arrow (`(x) => expect(x)…`): the body runs to the end of the statement.
+    if (m[0].endsWith("=>") && !/^\s*\{/.test(code.slice(after))) {
+      defs.push({ name: m[2], body: code.slice(after, after + Math.max(0, code.slice(after).search(/;|\n\s*\n|$/))) });
+      continue;
+    }
+    const brace = code.indexOf("{", after);
+    if (brace < 0 || /;/.test(code.slice(after, brace))) continue;
+    let depth = 0, end = brace;
+    for (; end < code.length; end++) {
+      if (code[end] === "{") depth++;
+      else if (code[end] === "}" && --depth === 0) break;
+    }
+    defs.push({ name: m[1] ?? m[2], body: code.slice(brace, end) });
+  }
+  const asserting = new Set(defs.filter((d) => ASSERT.test(d.body.replace(LITERAL_EXPECT, "literal("))).map((d) => d.name));
+  for (let grew = true; grew; ) {
+    grew = false;
+    for (const d of defs) {
+      if (asserting.has(d.name) || ![...asserting].some((n) => new RegExp(`(?<![\\w$.])${n.replace(/\$/g, "\\$")}\\s*\\(`).test(d.body))) continue;
+      asserting.add(d.name);
+      grew = true;
+    }
+  }
+  return asserting.size ? new RegExp(`(?<![\\w$.])(?:${[...asserting].map((n) => n.replace(/\$/g, "\\$")).join("|")})\\s*\\(`, "g") : null;
+}
+
 export function auditFile(repo, file) {
   const counts = { strong: 0, weak: 0, unasserted: 0, empty: 0, skipped: 0 };
   const flagged = { weak: [], unasserted: [], empty: [] };
@@ -197,6 +230,7 @@ export function auditFile(repo, file) {
     const src = safeRead(repo, file);
     const code = codeOnly(src);
     const skipped = [...code.matchAll(/\b(?:xdescribe|describe\.skip)\s*\(/g)].map((m) => [m.index, closeParen(code, m.index + m[0].length)]);
+    const helpers = localHelpers(code);
     for (const t of src.matchAll(TITLE)) {
       if (code[t.index] === " " || /^x?describe/.test(t[0])) continue;
       tests++;
@@ -206,7 +240,7 @@ export function auditFile(repo, file) {
         continue;
       }
       const open = t.index + t[0].indexOf("(") + 1;
-      const s = testStrength(code.slice(t.index + t[0].length, closeParen(code, open)));
+      const s = testStrength(code.slice(t.index + t[0].length, closeParen(code, open)), helpers);
       counts[s]++;
       if (flagged[s]) flagged[s].push({ at: `${file}:${src.slice(0, t.index).split("\n").length}`, title: t[4].slice(0, 100) });
     }
