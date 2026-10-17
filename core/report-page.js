@@ -283,10 +283,11 @@
   function areaPane(a) {
     const rs = ROUTES.filter((r) => r.area === a.area && match(r.id));
     const specs = SPECS.map((s, i) => [s, i]).filter(([s]) => a.specs.includes(s.path));
-    let h = '<div class="pane-h in"><div><div class="eyebrow">' + ic("branch", "sm") + "Area</div><h2 class=\"mono\">" + esc(a.area) + "</h2><p>" + plural(a.routes, "route") + " · " + doesIcons(a) + "</p></div>" + btn(a.specified ? "Copy prompt: spec the rest" : "Copy prompt: write its spec", promptArea(a), "primary", "sparkle") + "</div>";
+    let h = '<div class="pane-h in"><div><div class="eyebrow">' + ic("branch", "sm") + "Area</div><h2 class=\"mono\">" + esc(a.area) + "</h2><p>" + plural(a.routes, "route") + " · " + doesIcons(a) + "</p></div>" + (a.specified ? btn("Copy prompt: spec the rest", promptArea(a), "primary", "sparkle") : "") + "</div>";
     h += a.specified
       ? '<div class="callout ok in">' + ic("check", "sm") + "<div><b>" + pctOf(a.specified, a.routes) + "% of this area is specified</b> by " + specs.map(([s, i]) => '<button class="linkbtn" data-sel="spec:' + i + '">' + esc(specTitle(s)) + "</button>").join(", ") + ". " + (a.specified < a.routes ? plural(a.routes - a.specified, "route") + " still have no spec." : "") + "</div></div>"
-      : '<div class="callout warn in">' + ic("alert", "sm") + "<div><b>No spec covers this area yet.</b> Nothing written says what these routes must do, so nothing can tell when a change breaks them." + (a.money ? " It moves money, so it should come first." : "") + "</div></div>";
+      : '<div class="callout warn in">' + ic("alert", "sm") + '<div style="flex:1"><b>No spec for this area yet.</b> A spec writes down the rules these routes must follow, like <i>“an order can\'t be cancelled once it\'s paid”</i>, each tied to the code that does it. Without one, nobody can tell a bug from an intended change here.' + (a.money ? " <b>It moves money, so it\'s a good one to start with.</b>" : "") +
+        '<div class="row-flex" style="margin-top:10px">' + btn("Draft a spec from the code", promptArea(a), "primary", "sparkle") + '<span class="muted small">Copies a prompt. Paste it into Claude Code; it reads these ' + plural(a.routes, "route") + " and writes the spec.</span></div></div></div>";
     const pg = paginate("area:" + a.area, rs);
     h += table(["Method", "Path", "Does", "Who can call", "Issues", "Spec"], pg.items.map((rt) => {
       const iss = issuesByRoute.get(rt.id) || [], e = EFF[rt.effect] || EFF.read;
