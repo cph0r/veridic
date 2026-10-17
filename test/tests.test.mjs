@@ -223,10 +223,11 @@ test("audit: a helper the test file defines that asserts is an assertion; Playwr
     "  it('waits for the page', async () => { await page.waitForURL('/dashboard'); });",
     "  it('only clicks', async () => { await page.click('#x'); });",
     "  it('type test', () => { expectTypeOf<Field['schema']>().toBeNullable(); });",
+    "  it('polls', async () => { await expect\n  .poll(() => count()).toBe(0); });",
     "});",
   ].join("\n"));
   const a = auditFile(repo, "a.test.js");
-  assert.deepEqual(a.counts, { strong: 4, weak: 1, unasserted: 1, empty: 0, skipped: 0 });
+  assert.deepEqual(a.counts, { strong: 5, weak: 1, unasserted: 1, empty: 0, skipped: 0 });
   assert.equal(a.flagged.unasserted[0].title, "only clicks");
   fs.rmSync(repo, { recursive: true, force: true });
 });

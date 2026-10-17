@@ -56,7 +56,7 @@ function reach(repo, file, files, levels = 2) {
 // Assertions, after comments and strings are blanked. An assertion on a literal checks nothing.
 // Custom assertion helpers count (`cy.expectChallengeSolved(…)`, `assertOrderPaid(…)`), and
 // `cy.request(…)`, which fails the test on an error status by default.
-const ASSERT = /\bexpect\s*\(|\bassert\w*\s*[.(]|\.should\b|\bt\.(?:is|not|true|false|deepEqual|throws\w*|regex|like|assert)\s*\(|\b(?:expect|assert|verify|check|should)[A-Z]\w*\s*(?:<[^()]*>)?\s*\(|\bcy\.(?:request|contains|get)\s*\(|\.and\s*\(\s*["'`]|\.waitFor(?:URL|Selector)\s*\(/;
+const ASSERT = /\bexpect\s*\(|\bexpect\s*\.\s*(?:poll|soft)\s*\(|\bassert\w*\s*[.(]|\.should\b|\bt\.(?:is|not|true|false|deepEqual|throws\w*|regex|like|assert)\s*\(|\b(?:expect|assert|verify|check|should)[A-Z]\w*\s*(?:<[^()]*>)?\s*\(|\bcy\.(?:request|contains|get)\s*\(|\.and\s*\(\s*["'`]|\.waitFor(?:URL|Selector)\s*\(/;
 // Only bare `expect(true)`: supertest's `.expect(200)` checks the response status.
 const LITERAL_EXPECT = /(?<![\w$.])expect\s*\(\s*(?:true|false|null|undefined|-?\d+(?:\.\d+)?|""|''|``)\s*\)/g;
 // Loose: passes for almost any value. `.not.toHaveBeenCalled()` and `toBeUndefined()` are exact, so not loose.
