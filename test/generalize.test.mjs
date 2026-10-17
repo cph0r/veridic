@@ -334,3 +334,9 @@ test("modules: the list and one module's context for an agent", async () => {
   assert.match(md, /never as MUST requirements/);
   assert.match(md, /Acts on any record by ID/);
 });
+
+test("specs: a requirement written as a heading is a requirement, and its citations carry their lines", async () => {
+  const { parseSpec } = await import("../core/citations.mjs");
+  const p = parseSpec("# Auth\n\n### FR-1: Registration creates a user\nIt MUST create one. [evidence: src/auth.ts:14-21]\n\n## Notes\nSee [evidence: src/x.ts:3]\n");
+  assert.deepEqual(p.citations.map((c) => [c.fr, c.start, c.end]), [["FR-1", 14, 21], ["Notes (line 7)", 3, 3]]);
+});

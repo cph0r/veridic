@@ -7,7 +7,8 @@ import fs from "node:fs";
 import path from "node:path";
 import { lineMentions } from "./anchors.mjs";
 
-const LABEL = /\*\*((?:FR|SC|NFR|R|AC|INV|D)-?\d+[a-z]?)\*\*|^\s*\|\s*((?:FR|SC|NFR|R|AC|INV|D)-?\d+[a-z]?)\s*\||^\s*(?:-|\d+\.)\s*((?:FR|SC|NFR|R|AC|INV|D)-?\d+[a-z]?)\s*[:.]/;
+// A requirement's label: **FR-001**, a table row | FR-001 |, a list item - FR-001:, or a heading ### FR-1: Title.
+const LABEL = /\*\*((?:FR|SC|NFR|R|AC|INV|D)-?\d+[a-z]?)\*\*|^\s*\|\s*((?:FR|SC|NFR|R|AC|INV|D)-?\d+[a-z]?)\s*\||^\s*(?:-|\d+\.)\s*((?:FR|SC|NFR|R|AC|INV|D)-?\d+[a-z]?)\s*[:.]|^#{1,6}\s+((?:FR|SC|NFR|R|AC|INV|D)-?\d+[a-z]?)\s*[:.\-–—]/;
 const MAX_TEXT_LINES = 40;
 
 /**
@@ -24,7 +25,7 @@ export function parseSpec(spec) {
   let heading = null;
   spec.split("\n").forEach((line, i) => {
     const l = line.match(LABEL);
-    const label = l ? (l[1] ?? l[2] ?? l[3]) : null;
+    const label = l ? (l[1] ?? l[2] ?? l[3] ?? l[4]) : null;
     const h = line.match(/^#{1,6}\s+(.*)$/);
     if (label) section = label;
     else if (h) {

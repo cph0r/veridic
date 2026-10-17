@@ -18,13 +18,17 @@ Veridic has already split the app into modules. Use its split, never your own.
    that this uses Claude Code usage, and that nothing in the app's code changes.
    Unless the user named the modules, ask how many to do now (suggest the first
    four, or all of them if there are four or fewer) and wait for the answer.
-3. **Write, one agent per module,** at most four at a time. Give each agent
-   this, with the module filled in:
+3. **Write, one agent per module,** at most four at a time. Run the agents in
+   the foreground, never in the background, and wait until every one has
+   replied before going on: the specs are only done when the agents are. Give
+   each agent this, with the module filled in:
 
    > Write the spec for the `<id>` module of this repo, following the veridic
    > skill's sequence for writing a spec. Gather once:
    > `veridic prepare --module <id> --out .veridic/context/<id>.md`, then read
-   > that file in full. Write the spec at `<spec_path>` (if a spec already
+   > that file in full. Write the spec at `<spec_path>`, each requirement a
+   > list item labelled `**FR-001**:` (invariants `**INV-1**:`) ending in its
+   > `[evidence: path:line-line]` citations (if a spec already
    > covers this module, extend it instead of writing a second one). Verify
    > with `veridic cite` and `veridic claims` until both are clean, then write
    > `traceability.md` with `veridic tests --spec <spec_path> --table`. The

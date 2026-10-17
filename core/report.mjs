@@ -169,7 +169,9 @@ function specSection(repo, file, m) {
   const ids = [...new Set([...cov.requirements.map((r) => r.id), ...citesBy.keys()])];
   const reqs = ids.map((id) => {
     const r = cov.requirements.find((x) => x.id === id) ?? {};
-    const cites = (citesBy.get(id) ?? []).map((c) => {
+    const cites = (citesBy.get(id) ?? []).map((c0) => {
+      // A resolved citation carries its lines as range: [start, end].
+      const c = { ...c0, start: c0.start ?? c0.range?.[0], end: c0.end ?? c0.range?.[1] };
       const lines = c.resolves ? readLines(repo, c.file) : null;
       return {
         cite: c.cite,
@@ -184,7 +186,7 @@ function specSection(repo, file, m) {
     });
     // Citations under a heading (a decision table, a contract section) aren't requirements.
     const requirement = /^(?:FR|SC|NFR|R|AC|INV|D)-?\d+[a-z]?$/.test(id);
-    const text = (r.text ?? "").replace(/^\*\*[\w-]+\*\*\s*(?:\([^)]*\))?\s*:?\s*/, "");
+    const text = (r.text ?? "").replace(/^\*\*[\w-]+\*\*\s*(?:\([^)]*\))?\s*:?\s*/, "").replace(/^#{1,6}\s+[\w-]+\s*[:.\-–—]\s*/, "");
     const extra = doc.reqs[id] ?? {};
     return { id, requirement, text, section: extra.section ?? null, holds: extra.holds ?? null, checks: extra.vcs ?? [], status: r.status ?? "none", tests: (r.tests ?? []).map((t) => (typeof t === "string" ? t : t.at ?? `${t.file}:${t.line}`)), stale: stale.has(id), cites };
   });
