@@ -6,6 +6,7 @@
 // (what each route really does, tables, screens, tests, rules, findings) first.
 
 import fs from "node:fs";
+import path from "node:path";
 import { prepare } from "../../core/prepare.mjs";
 import { loadModules, findModule, moduleMarkdown } from "../../core/modulectx.mjs";
 import { parseArgs, emit, fail, run, writeAll } from "./_cli.mjs";
@@ -26,7 +27,12 @@ run(async () => {
   const r = prepare(a.repo, seeds, { entry: a.entry, all: !!a.all });
   r.markdown = head + r.markdown;
   if (a.out) {
-    fs.writeFileSync(a.out, r.markdown);
+    const out = path.resolve(a.out);
+    fs.mkdirSync(path.dirname(out), { recursive: true });
+    // Context under .veridic/ quotes the code: keep it out of git, as the report does.
+    const vdir = path.join(a.repo, ".veridic");
+    if (out.startsWith(vdir + path.sep) && !fs.existsSync(path.join(vdir, ".gitignore"))) fs.writeFileSync(path.join(vdir, ".gitignore"), "# Written by veridic: generated files, never committed.\n*\n");
+    fs.writeFileSync(out, r.markdown);
     emit({ repo: a.repo, wrote: a.out, ...r.stats });
   }
   writeAll(r.markdown);
