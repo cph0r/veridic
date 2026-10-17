@@ -240,7 +240,8 @@ test("ui: screens link to routes through generated clients, API objects and wrap
     "web/src/pages/Orders.tsx": "import { useListOrders } from '../api';\nexport default function Orders() { useListOrders(); return null; }\n",
     "web/src/pages/Users.jsx": "import Admin from '../models/admin';\nexport default function Users() { Admin.users(); return null; }\n",
     "web/src/pages/Menu.tsx": "const adminApi = (p) => fetch(`/api/admin${p}`);\nexport default function Menu() { adminApi('/menu/items'); return null; }\n",
-    "web/src/pages/Pricing.tsx": "export default function Pricing() { return <Link href=\"/api/orders\">Orders</Link>; }\nconst next = role ? '/owner' : '/admin/menu/items';\n",
+    "web/src/pages/Pricing.tsx": "export default function Pricing() { return <Link href=\"/admin/menu/items\">Menu</Link>; }\nconst next = role ? '/owner' : '/admin/menu/items';\n",
+    "web/src/pages/Invites.tsx": "export default function Invites() { return <a href=\"/api/invites\" download>Export</a>; }\n",
   };
   for (const [f, t] of Object.entries(files)) fs.mkdirSync(path.dirname(path.join(repo, f)), { recursive: true }), fs.writeFileSync(path.join(repo, f), t);
   execFileSync("git", ["init", "-q"], { cwd: repo });
@@ -259,6 +260,7 @@ test("ui: screens link to routes through generated clients, API objects and wrap
   assert.deepEqual(of("web/src/pages/Users.jsx")?.routes, ["GET /api/users/all"], "one method of an API object, not all of them");
   assert.deepEqual(of("web/src/pages/Menu.tsx")?.routes, ["GET /api/admin/menu/items"], "a wrapper that adds /api/admin");
   assert.equal(of("web/src/pages/Pricing.tsx"), undefined, "links to the UI's own pages aren't API calls");
+  assert.deepEqual(of("web/src/pages/Invites.tsx")?.routes, ["GET /api/invites"], "a link into the API (a download) is a call");
   assert.ok(!ui.files.some((x) => x.routes.includes("ALL /*")), "a catch-all matches nothing");
   assert.ok(!ui.files.some((x) => x.file.startsWith("server/")), "backend files aren't screens");
   fs.rmSync(repo, { recursive: true, force: true });

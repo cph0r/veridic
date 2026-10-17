@@ -278,7 +278,7 @@ export async function collectReport(repo, { specs: specFiles } = {}) {
       } catch (e) {
         note("ui", e);
       }
-      out.ui = { scanned: ui.scanned ?? 0, linked: ui.files.length, shared: ui.files.filter((f) => !f.module).map((f) => ({ file: f.file, kind: f.kind, routes: f.routes.length, modules: f.modules })) };
+      out.ui = { scanned: ui.scanned ?? 0, linked: ui.files.length, shared: ui.files.filter((f) => !f.module).map((f) => ({ file: f.file, kind: f.kind, routes: f.routes.length, modules: f.modules })), broken: ui.broken ?? [] };
       // The data: which tables each module owns and which it only uses (see data.mjs).
       let data = null;
       try {
@@ -371,6 +371,15 @@ export async function collectReport(repo, { specs: specFiles } = {}) {
           calledFrom: ui.files.filter((f) => f.module !== m.id && f.routes.some((id) => m.routes.includes(id))).map((f) => ({ file: f.file, kind: f.kind, module: f.module, routes: f.routes.filter((id) => m.routes.includes(id)) })),
         });
       }
+      // Endpoints nothing in the repo calls: no screen and no test, and not the kind outside
+      // services call (webhooks, OAuth callbacks, health checks). Old features often hide here.
+      const OUTSIDE = /webhook|callback|oauth|\bhooks?\b|health|ready|live|metrics|cron|\.well-known|sitemap|robots|feed|rss|deauthori[sz]e|data-deletion|unsubscribe|ping/i;
+      const called = new Set(ui.files.flatMap((f) => f.routes));
+      const untested = new Set(out.modules.flatMap((m) => m.tests.untested));
+      out.uncalled = inv.routes.filter((r) => !called.has(r.id) && untested.has(r.id) && !OUTSIDE.test(r.path) && r.method !== "ALL").map((r) => ({ route: r.id, module: routeById.get(r.id)?.module ?? null, handler: `${r.file}:${r.start}-${r.end}` }));
+      // A broken call belongs to the module of the screen that makes it.
+      const screenModule = new Map(ui.files.map((f) => [f.file, f.module]));
+      for (const b of out.ui.broken) b.module = screenModule.get(b.file) ?? null;
       // Riskiest first: open high issues, money, deletes, then size.
       const risk = (m) => m.stats.high * 100 + m.stats.medium * 20 + m.stats.money * 10 + m.stats.destructive * 4 + m.stats.writes + (m.specified ? 0 : 5);
       out.modules.sort((a, b) => risk(b) - risk(a) || b.stats.routes - a.stats.routes);

@@ -193,6 +193,8 @@
   const MODU = ST.modularity || { problems: [] };
   const DUP = ST.duplication || { blocks: [] };
   const dupsOf = (m) => DUP.blocks.filter((b) => b.a.module === m.id || b.b.module === m.id);
+  const BROKEN = (D.ui && D.ui.broken) || [];
+  const UNCALLED = D.uncalled || [];
   const base = (f) => f.split("/").pop();
   function attention(scope) {
     const out = [];
@@ -216,6 +218,10 @@
       if (p.kind === "shared-writes") { const locs = Object.values(p.at).flat(); out.push({ i: "branch", c: "med", t: p.names.slice(1).join(", ") + " also write" + (p.names.length > 2 ? "" : "s") + " " + p.table, why: "Owned by " + p.names[0] + "; written outside it at " + locs.slice(0, 2).map(base).join(", "), go: go(MOD.get(p.owner)) }); }
       else out.push({ i: "branch", c: "med", t: p.names.join(" and ") + " depend on each other", why: "A change to either can break the other", go: go(MOD.get(p.modules[0])) });
     }
+    const br = BROKEN.filter((b) => !scope || b.module === scope.id);
+    if (br.length) out.push({ i: "route", c: "high", t: plural(br.length, "call") + " to endpoints that don't exist", why: [...new Set(br.map((b) => b.url))].slice(0, 3).join(", ") + " · in " + [...new Set(br.map((b) => base(b.file)))].slice(0, 2).join(", "), go: scope ? ' data-open="details"' : ' data-sub="structure"' });
+    const un = UNCALLED.filter((u) => !scope || u.module === scope.id);
+    if (un.length) out.push({ i: "route", c: "", t: plural(un.length, "endpoint") + " nothing in the repo calls", why: un.slice(0, 3).map((u) => u.route).join(", ") + (un.length > 3 ? ", …" : "") + " · no screen or test uses them", go: scope ? ' data-open="details"' : ' data-sub="structure"' });
     const blocks = (scope ? dupsOf(scope) : DUP.blocks).filter((b) => b.lines >= 10);
     if (blocks.length) { const b = blocks[0]; out.push({ i: "copy", c: "", t: plural(blocks.length, "block") + " of copied code" + (scope ? "" : ", " + DUP.pct + "% of the code"), why: "Largest: " + b.lines + " lines in " + base(b.a.file) + " and " + base(b.b.file), go: scope ? ' data-open="details"' : ' data-sub="structure"' }); }
     const needTests = mods.filter((m) => m.tests.untested.length && m.stats.writes + m.stats.destructive + m.stats.money).slice(0, scope ? 1 : 2);
@@ -332,6 +338,11 @@
     h += section("tests", "Tests");
     h += '<div class="li" style="border-top:1px solid var(--line)"><div class="main"><div>' + (nT === s.routes ? "Every route has a test." : nT + " of " + plural(s.routes, "route") + " have a test.") + '</div><div class="meter"><span data-w="' + pct(nT, s.routes) + '"></span></div></div><div class="end">' + "" + "</div></div>";
     if (m.tests.files.length) h += few("testfiles", m.tests.files, 3, (t) => li(fileLine(t.file), plural(t.tests, "test")), "compact");
+
+    // Calls to endpoints that don't exist, and endpoints nothing calls.
+    const mb = BROKEN.filter((b) => b.module === m.id), mu = UNCALLED.filter((u) => u.module === m.id);
+    if (mb.length) { h += section("broken", "Calls to endpoints that don't exist", mb.length); h += '<div class="list compact">' + mb.map((b) => li(two('<span class="mono">' + esc(b.url) + "</span>", loc(b.file + ":" + b.line, base(b.file) + ":" + b.line)), '<span class="tag high">no such route</span>')).join("") + "</div>"; }
+    if (mu.length) { h += section("uncalled", "Endpoints nothing in the repo calls", mu.length); h += '<div class="list compact">' + mu.map((u) => li('<span class="mono">' + esc(u.route) + "</span>", loc(u.handler, "handler", "plain"))).join("") + "</div>"; }
 
     // Copied code that touches this module.
     const ds = dupsOf(m);
@@ -494,6 +505,10 @@
       : liOpen(two(esc(p.names.join(" and ")) + " depend on each other", "A change to either can break the other"), "", '<dl class="kv">' + Object.entries(p.via).map(([o, files]) => "<dt>" + esc(nameOf(o)) + " uses the other through</dt><dd>" + files.map((f) => loc(f + ":1")).join("<br>") + "</dd>").join("") + "</dl>")) : empty("Every module keeps to its own tables, and none depend on each other in a loop.");
     const hubs = MODU.problems.filter((p) => p.kind === "hub");
     if (hubs.length) h += '<p class="muted small" style="margin-top:10px">Most of the app depends on ' + hubs.map((p) => modLink(p.modules[0])).join(", ") + ": a change there reaches far.</p>";
+    h += section("broken", "Calls to endpoints that don't exist", BROKEN.length || null);
+    h += BROKEN.length ? few("broken", BROKEN, 8, (b) => li(two('<span class="mono">' + esc(b.url) + "</span>", loc(b.file + ":" + b.line, base(b.file) + ":" + b.line) + (b.module ? '<span class="sep">·</span>' + esc(nameOf(b.module)) : "")), '<span class="tag high">no such route</span>')) : empty("Every API call in the UI matches a route.");
+    h += section("uncalled", "Endpoints nothing in the repo calls", UNCALLED.length || null);
+    h += UNCALLED.length ? few("uncalled", UNCALLED, 8, (u) => li(two('<span class="mono">' + esc(u.route) + "</span>", loc(u.handler, base(u.handler.split(":")[0])) + (u.module ? '<span class="sep">·</span>' + esc(nameOf(u.module)) : "")), '<span class="tag">no screen or test</span>')) + '<p class="faint small" style="margin-top:8px">Something outside the repo (a mobile app, an email link) may still call them; if nothing does, they are code to maintain and secure for no one.</p>' : empty("Every endpoint is called by a screen or a test, or is a webhook or callback.");
     h += section("dup", "Copied code", DUP.blocks.length || null);
     h += DUP.blocks.length ? few("dups", DUP.blocks.filter((b) => match(b.a.file + b.b.file)), 10, (b) => li(two(loc(b.a.file + ":" + b.a.start, base(b.a.file) + ":" + b.a.start) + '<span class="sep">=</span>' + loc(b.b.file + ":" + b.b.start, base(b.b.file) + ":" + b.b.start), (b.a.module ? esc(nameOf(b.a.module)) : "shared") + (b.a.module !== b.b.module ? " and " + (b.b.module ? esc(nameOf(b.b.module)) : "shared") : "") + (b.copies > 2 ? '<span class="sep">·</span>' + b.copies + " copies" : "")), '<span class="tag">' + b.lines + " lines</span>")) : empty("No copied blocks found.");
     return h;

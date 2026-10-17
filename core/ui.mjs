@@ -16,6 +16,8 @@ const SRC = /\.(?:[cm]?[jt]sx?|vue|svelte)$/;
 const SKIP = /(^|\/)(node_modules|dist|build|coverage|\.next|\.nuxt|\.codegraph|\.veridic|vendor|public\/build)\//;
 const TEST = /(^|\/)(__tests__|tests?|e2e|cypress|playwright|__mocks__|mocks?|stories)\/|\.(test|spec|stories|d)\.[cm]?[jt]sx?$/;
 const P = "\u0001";
+// Folders that hold examples, fixtures, docs or side scripts, not the app's own UI.
+const NOT_APP = /(^|\/)(static|examples?|samples?|extras?|docs?|scripts?|fixtures?|codefixes|stories|demo)\//i;
 const PREFIX = /^(?:api|v\d+|rest|admin|public|owner|internal|private|app)$/i; // a value filled in at runtime: `${id}`, "' + id + '"
 
 /** Route-shaped strings in a file: [{ segs, based, at }] where based means "starts from a base URL". */
@@ -24,15 +26,24 @@ function urlLiterals(text) {
   const re = /`(?:\\[\s\S]|\$\{(?:[^{}]|\{[^{}]*\})*\}|[^`\\])*`|"(?:\\.|[^"\\\n])*"|'(?:\\.|[^'\\\n])*'/g;
   let m;
   while ((m = re.exec(text))) {
-    // A link to one of the UI's own pages (href, to, navigate, router.push) isn't an API call.
-    if (/(?:\bhref|\bto|\bpath|\bnavigate|\bpush|\breplace|\bsetLocation|\bredirect|\bRedirect|\bLink|\blocation(?:\.href)?|\bpathname|\broute)\s*[:=(]\s*\{?\s*$/.test(text.slice(Math.max(0, m.index - 40), m.index))) continue;
+    // A link (href, to, navigate, router.push) goes to one of the UI's own pages, unless it
+    // points into the API (a download link): marked, and matched only under the API's prefix.
+    const nav = /(?:\bhref|\bto|\bpath|\bnavigate|\bpush|\breplace|\bsetLocation|\bredirect|\bRedirect|\bLink|\blocation(?:\.href)?|\bpathname|\broute)\s*[:=(]\s*\{?\s*$/.test(text.slice(Math.max(0, m.index - 40), m.index));
     let s = m[0].slice(1, -1).replace(/\$\{(?:[^{}]|\{[^{}]*\})*\}/g, P);
     if (!s.includes("/") || s.length > 300 || /\s/.test(s.replace(/\$\{[^}]*\}/g, ""))) continue;
     s = s.split(/[?#]/)[0];
+    // A value glued to the end of the last word: a query string (`/status${qs}`) is no path part;
+    // anything else (`/api/admin${path}`) is a base still being built, so it can't be called broken.
+    const glued = m[0].match(/[^/{}]\$\{([^{}]*)\}[`'"]$/);
+    const open = !!glued && !m[0].includes("?") && !/q(?:uery)?s?\b|query|param|search/i.test(glued[1]);
+    if (glued && !open) s = s.replace(/([^/\u0001])\u0001$/, "$1");
     const abs = s.match(/^(?:https?:)?\/\/[^/]+(\/.*)?$/);
     if (abs) s = abs[1] ?? "/";
     const based = s.startsWith(P);
-    if (!based && !s.startsWith("/")) continue;
+    // "api/admin/campaigns": a path relative to the site root, as some fetch helpers take it.
+    // Only one that a route could start with: a plain word, then more path.
+    const rel = !based && !s.startsWith("/") && /^[a-z][\w-]*\/[^.]*$/i.test(s) && !/^(?:[a-z]+:|www\.)/i.test(s);
+    if (!based && !rel && !s.startsWith("/")) continue;
     // "'/api/orders/' + id": the value after the trailing slash is a path part.
     const concat = /^\s*\+/.test(text.slice(m.index + m[0].length, m.index + m[0].length + 4)) && s.endsWith("/");
     const segs = s.split("/").filter(Boolean).map((x) => (x.includes(P) ? ":p" : x));
@@ -41,8 +52,14 @@ function urlLiterals(text) {
     if (!segs.length || segs.every((x) => x === ":p")) continue;
     // Passed straight into a call (`api.get("/orders")`, `adminApi("/menu/…")`): a wrapper or a
     // client with a baseURL may add a prefix such as /api.
-    const call = /[\w$)\]]\s*\(\s*$/.test(text.slice(Math.max(0, m.index - 20), m.index));
-    out.push({ segs, based, call, at: text.slice(0, m.index).split("\n").length });
+    const before = text.slice(Math.max(0, m.index - 20), m.index);
+    const call = !nav && /[\w$)\]]\s*\(\s*$/.test(before);
+    const callee = call ? before.match(/([\w$]+)\s*\(\s*$/)?.[1] ?? null : null;
+    // Compared with, not called: url.includes("/api/admin"), path === "/api/x".
+    const cmp = /\.(?:includes|startsWith|endsWith|indexOf|match|test|replace|split)\(\s*$|[=!]==?\s*$/.test(before);
+    // A wrapper's base (`/api/owner${path}`): the prefix it adds to the paths passed to it.
+    const base = open ? s.replace(/\u0001$/, "").split("/").filter(Boolean) : null;
+    out.push({ segs, based, call, callee, nav, cmp, open, rel, base, index: m.index, at: text.slice(0, m.index).split("\n").length });
   }
   return out;
 }
@@ -56,6 +73,7 @@ function matcher(routes) {
     const hits = [];
     for (const s of shapes) {
       if (lit.segs.length > s.segs.length) continue;
+      if (lit.rel && lit.segs.length !== s.segs.length) continue;
       const tail = s.segs.slice(s.segs.length - lit.segs.length);
       // Without a base, the URL may still skip a prefix a wrapper or baseURL adds (/api, /api/admin).
       if (!lit.based && tail.length !== s.segs.length && !(lit.call && lit.segs.length >= 2 && s.segs.slice(0, s.segs.length - lit.segs.length).every((x) => PREFIX.test(x)))) continue;
@@ -172,20 +190,57 @@ export function linkUi(repo, routes, modules) {
     return null;
   };
   const match = matcher(routes);
+  // A URL that looks like a call to this API but matches none of its routes: a broken call.
+  // It looks like one when it starts with the prefix most routes share (/api, /api/v1), or,
+  // when routes share none, when it's passed straight into a call and starts with a word
+  // some route starts with. File paths (/logo.png) never do.
+  const firsts = routes.map((r) => r.path.split("/").filter(Boolean)[0]).filter(Boolean);
+  const common = [...new Set(firsts)].find((w) => !/^[:{*]/.test(w) && firsts.filter((x) => x === w).length > routes.length / 2);
+  const looksApi = (l) => {
+    const head = l.segs[0];
+    if (!head || head === ":p" || l.segs.some((x) => /\.\w{2,4}$|^\.+$/.test(x))) return false;
+    if (l.cmp || l.open || l.nav) return false;
+    // At least one fixed word after the prefix: `/api/${path}` is a wrapper, not a call.
+    if (common) return !l.based && head === common && l.segs.slice(1).some((x) => x !== ":p");
+    return l.call && firsts.includes(head) && l.segs.filter((x) => x !== ":p").length >= 2;
+  };
+  const broken = [];
   const read = (f) => { try { return fs.readFileSync(path.join(repo, f), "utf8"); } catch { return ""; } };
+
+  // Wrapper bases anywhere in the UI (`/api/owner${path}`), to complete the short paths passed to them.
+  const texts = new Map();
+  for (const f of candidates) { const t = read(f); if (t && t.length <= 2_000_000) texts.set(f, { text: t, lits: urlLiterals(t) }); }
+  // Each base belongs to the function that builds it: `ownerApi` adds /api/owner.
+  const baseOf = new Map();
+  for (const { text, lits } of texts.values()) {
+    const cs = chunks(text);
+    for (const l of lits) if (l.base?.length) { const c = cs.findLast((x) => x.start <= l.index); if (c?.name) baseOf.set(c.name, l.base); }
+  }
+  const bases = [...new Map([...baseOf.values()].map((b) => [b.join("/"), b])).values()];
+  const matchAll = (l) => {
+    // A link counts only when it points into the API.
+    if (l.nav && !(common && l.segs[0] === common)) return [];
+    const ids = match(l);
+    if (ids.length || !l.call || l.based || l.rel) return ids;
+    // `ownerApi("/restaurants")`: the base of the wrapper it's passed to; else the one base that fits.
+    const own = baseOf.get(l.callee);
+    if (own) return match({ ...l, segs: [...own, ...l.segs], call: false });
+    const hits = bases.map((b) => match({ ...l, segs: [...b, ...l.segs], call: false })).filter((h) => h.length);
+    return hits.length === 1 ? hits[0] : ids;
+  };
 
   // Per file: its chunks (with the routes their own URLs call), imports and re-exports.
   const F = new Map();
-  for (const f of candidates) {
-    const text = read(f);
-    if (!text || text.length > 2_000_000) continue;
+  for (const [f, { text, lits }] of texts) {
     const cs = chunks(text);
-    const lits = urlLiterals(text);
     const direct = new Set();
     const chunkRoutes = cs.map(() => new Set());
     for (const l of lits) {
-      const ids = match(l);
-      if (!ids.length) continue;
+      const ids = matchAll(l);
+      if (!ids.length) {
+        if (looksApi(l) && !NOT_APP.test(f)) broken.push({ file: f, line: l.at, url: "/" + l.segs.map((x) => (x === ":p" ? "…" : x)).join("/") });
+        continue;
+      }
       const pos = text.split("\n").slice(0, l.at - 1).join("\n").length;
       const ci = cs.findLastIndex((c) => c.start <= pos);
       for (const id of ids) (ci >= 0 ? chunkRoutes[ci] : direct).add(id), direct.add(id);
@@ -194,7 +249,7 @@ export function linkUi(repo, routes, modules) {
       const pr = new Map();
       for (const [name, p] of c.props) {
         const set = new Set();
-        for (const l of urlLiterals(p.text)) for (const id of match(l)) set.add(id);
+        for (const l of urlLiterals(p.text)) for (const id of matchAll(l)) set.add(id);
         pr.set(name, set);
       }
       return pr;
@@ -294,5 +349,5 @@ export function linkUi(repo, routes, modules) {
     const top = mods[0] ? counts.get(mods[0]) / rs.size : 0;
     out.push({ file: f, kind, routes: [...rs].sort(), modules: mods, module: kind === "client" || top < 0.5 ? null : mods[0] });
   }
-  return { files: out.sort((a, b) => a.file.localeCompare(b.file)), scanned: F.size };
+  return { files: out.sort((a, b) => a.file.localeCompare(b.file)), scanned: F.size, broken };
 }
