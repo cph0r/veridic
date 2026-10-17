@@ -5,24 +5,25 @@
 import path from "node:path";
 import { SYMBOL_KINDS, isTestFile } from "./graph.mjs";
 import { codeOnly } from "./tests.mjs";
+import { importResolver } from "./resolve.mjs";
 
 const MAX_NODES = 120;
 
 // Module references the code index doesn't link: `userController.createUser`, where
 // userController is a required or imported module, resolves to createUser's
 // definition in that module (through one index-file re-export).
+// Relative imports and the project's own aliases (tsconfig/jsconfig paths, module-alias).
+const resolvers = new WeakMap();
 const resolveRel = (g, from, spec) => {
-  if (!spec.startsWith(".")) return null;
-  const base = path.posix.normalize(path.posix.join(path.posix.dirname(from), spec)).replace(/\.[cm]?js$/, "");
-  for (const c of [base, `${base}.ts`, `${base}.js`, `${base}.mjs`, `${base}.cjs`, `${base}.tsx`, `${base}/index.ts`, `${base}/index.js`]) if (g.text(c) != null) return c;
-  return null;
+  if (!resolvers.has(g)) resolvers.set(g, importResolver(g.repo ?? "."));
+  return resolvers.get(g)(from, spec);
 };
 const modulesOf = cacheBy((g, file) => {
   const src = g.text(file) ?? "";
   const map = {};
-  for (const m of src.matchAll(/\b(?:const|let|var)\s+([\w$]+)\s*=\s*require\(\s*["'](\.[^"']+)["']\s*\)/g)) map[m[1]] = { file: resolveRel(g, file, m[2]) };
+  for (const m of src.matchAll(/\b(?:const|let|var)\s+([\w$]+)\s*=\s*require\(\s*["']([^"']+)["']\s*\)/g)) map[m[1]] = { file: resolveRel(g, file, m[2]) };
   for (const m of src.matchAll(/import\s+(?:\*\s+as\s+)?([\w$]+)\s+from\s+["'](\.[^"']+)["']/g)) map[m[1]] = { file: resolveRel(g, file, m[2]) };
-  for (const m of src.matchAll(/\b(?:const|let|var)\s*\{([^}]*)\}\s*=\s*require\(\s*["'](\.[^"']+)["']\s*\)|import\s*\{([^}]*)\}\s*from\s*["'](\.[^"']+)["']/g)) {
+  for (const m of src.matchAll(/\b(?:const|let|var)\s*\{([^}]*)\}\s*=\s*require\(\s*["']([^"']+)["']\s*\)|import\s*\{([^}]*)\}\s*from\s*["']([^"']+)["']/g)) {
     const names = m[1] ?? m[3];
     const from = resolveRel(g, file, m[2] ?? m[4]);
     for (const part of names.split(",")) {
