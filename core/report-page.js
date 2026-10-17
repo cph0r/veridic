@@ -19,7 +19,6 @@
   // ---- icons: only the few the chrome needs ----
   const P = {
     logo: '<path d="m5 12.5 4.5 4.5L19 7.5"/>',
-    search: '<circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>',
     chev: '<path d="m9 6 6 6-6 6"/>',
     back: '<path d="m15 18-6-6 6-6"/>',
     copy: '<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
@@ -99,8 +98,7 @@
   const loc = (t, label, cls) => { const h = hrefOf(t); return h ? '<a class="loc ' + (cls || "") + '" href="' + h + '">' + esc(label || t) + "</a>" : '<span class="mono">' + esc(label || t) + "</span>"; };
   const fileLine = (f) => { const i = f.lastIndexOf("/"); return '<div class="fname">' + loc(f + ":1", f.slice(i + 1)) + '</div><div class="fdir">' + esc(f.slice(0, i + 1)) + "</div>"; };
   const modLink = (id) => { const m = MOD.get(id); return m ? '<button class="link" data-mod="' + esc(id) + '">' + esc(m.name) + "</button>" : esc(id); };
-  const q = () => (state.q || "").toLowerCase();
-  const match = (text) => !q() || String(text).toLowerCase().includes(q());
+  const match = () => true; // no search: every list shows everything (its own filters aside)
 
   // Markdown, the little the specs and READMEs use: `code` (file:line becomes a link), **bold**, lists.
   const md = (t) => String(t ?? "").split(/`([^`]+)`/).map((p, i) => (i % 2 ? (LOC.test(p) ? loc(p) : "<code>" + esc(p) + "</code>") : esc(p).replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>"))).join("");
@@ -151,7 +149,7 @@
     { k: "modules", t: "Home", i: "home" },
   ];
   const fromHash = () => { const h = location.hash.slice(1).split("/"); return h[0] === "module" && h[1] ? { view: "module", mod: decodeURIComponent(h[1]), jump: h[2] } : NAV.some((n) => n.k === h[0]) ? { view: h[0] } : { view: "modules" }; };
-  const state = { ...fromHash(), sub: "attention", q: "", sev: ["high", "medium"], area: "all", rf: "all", spec: -1, sf: "all", aboutOpen: false, openGroup: null, pages: {}, open: new Set() };
+  const state = { ...fromHash(), sub: "attention", sev: ["high", "medium"], area: "all", rf: "all", spec: -1, sf: "all", aboutOpen: false, openGroup: null, pages: {}, open: new Set() };
 
   // The sidebar's dot: only a module's own problems. Red: a serious issue or a call to an endpoint
   // that doesn't exist. Amber: issues to review, or it shares a table or a loop with another module.
@@ -184,12 +182,14 @@
     const routes = m ? m.stats.routes : inModules || ROUTES.length;
     const tp = pct(routes - (m ? m.tests.untested.length : untestedAll), routes);
     const sp = pct(m ? m.specified : ROUTES.filter((r) => r.specs && r.specs.length).length, m ? m.stats.routes : ROUTES.length);
-    const stale = (m ? specsOf(m) : SPECS).flatMap(specReqs).filter((r) => r.stale).length;
+    // Out-of-date rules count toward the module that owns the spec, not every module it cites.
+    const stale = (m ? SPECS.filter((x) => specOwner(x) === m) : SPECS).flatMap(specReqs).filter((r) => r.stale).length;
     const safe = pct(routes - new Set(fs.filter((f) => f.severity !== "low" && f.area === "API").map((f) => f.where)).size, routes);
     return [
       { k: "Safety", i: "shield", s: hi ? "risk" : me ? "care" : "good", p: safe, v: hi ? hi + " serious" : me ? me + " to review" : "of routes safe" },
       { k: "Tests", i: "flask", s: tp >= 70 ? "good" : tp >= 30 ? "care" : "risk", p: tp, v: "routes tested" },
-      { k: "Rules", i: "doc", s: sp >= 50 && !stale ? "good" : "care", p: sp, v: stale ? stale + " out of date" : sp ? "routes covered" : "none written" },
+      // The ring, its colour and its word all follow coverage; out-of-date rules are noted under it.
+      { k: "Rules", i: "doc", s: sp >= 80 ? "good" : sp ? "care" : "risk", p: sp, v: (sp ? "routes covered" : "none written") + (stale ? " · " + stale + " out of date" : "") },
       ...(!m && ST.modularity ? [{ k: "Modularity", i: "blocks", s: MODU.pct >= 80 ? "good" : MODU.pct >= 50 ? "care" : "risk", p: MODU.pct, v: MODU.clean + "/" + MODU.modules + " separate" }] : []),
       ...(!m && ST.duplication ? [{ k: "Duplication", i: "copy", s: DUP.pct < 5 ? "good" : DUP.pct < 12 ? "care" : "risk", p: Math.round(DUP.pct), big: DUP.pct + "%", v: "of code copied" }] : []),
       ...(m && ST.modularity ? (() => { const ps = MODU.problems.filter((p) => p.kind !== "hub" && p.modules.includes(m.id)), ds = dupsOf(m).filter((b) => b.lines >= 10); const n = ps.length + ds.length; return [{ k: "Structure", i: "blocks", s: ps.some((p) => p.kind === "cycle") ? "risk" : n ? "care" : "good", p: n ? Math.max(10, 100 - n * 20) : 100, big: n ? String(n) : "✓", v: n ? (n === 1 ? "problem" : "problems") : "separate" }]; })() : []),
@@ -582,11 +582,18 @@
 
   const VIEWS = { modules: vModules, module: vModule };
 
+  // Open a rule on its module's page: turn its table to the right page, open the row, show it.
+  function showReq(key, id) {
+    if (key && RULES[key]) state.pages[key] = Math.floor(RULES[key].findIndex((x) => x.id === id) / 10);
+    render(true);
+    const r = $("#main .req-" + cssId(id));
+    if (r) { if (!r.classList.contains("open")) toggle(r); r.scrollIntoView({ block: "center", behavior: "smooth" }); r.classList.add("flash"); setTimeout(() => r.classList.remove("flash"), 1400); }
+  }
+
   // ---- shell and rendering ----
   const ago = (iso) => { const s = (Date.now() - new Date(iso)) / 1000; return s < 60 ? "just now" : s < 3600 ? Math.round(s / 60) + " min ago" : s < 86400 ? Math.round(s / 3600) + " h ago" : Math.round(s / 86400) + " days ago"; };
   function shell() {
     $("#app").innerHTML = '<div class="shell"><button class="iconbtn menu-btn" id="menu" aria-label="Menu">' + ic("menu") + '</button><aside class="side"><div class="brand"><span class="mark">' + ic("logo") + '</span><span>Veridic</span><span class="repo">' + esc(D.name) + "</span></div>" +
-      '<label class="search">' + ic("search", "sm") + '<input id="q" placeholder="Search" autocomplete="off" spellcheck="false"><kbd>/</kbd></label>' +
       '<nav class="nav" id="nav"></nav>' +
       '<div class="sidefoot"><span class="grow" title="' + esc(new Date(D.generated).toLocaleString()) + '">' + esc(ago(D.generated)) + '</span><select class="pick" id="editor" title="Where file links open"><option value="vscode">VS Code</option><option value="cursor">Cursor</option><option value="none">No links</option></select>' +
       '<button class="iconbtn" id="theme" aria-label="Toggle light or dark"></button></div></aside>' +
@@ -626,18 +633,16 @@
   function setView(k) {
     if (!VIEWS[k]) return;
     state.view = k;
-    // The search box searches the current view: a new view starts unfiltered.
-    state.q = "";
+
     state.pages = {};
     state.open = new Set();
-    $("#q").value = "";
     $(".shell").classList.remove("menu");
     try { history.pushState(null, "", "#" + (k === "module" ? "module/" + encodeURIComponent(state.mod) : k)); } catch {}
     nav();
     render();
   }
   const openModule = (id, jump) => { state.mod = id; state.jump = jump || null; setView("module"); };
-  window.addEventListener("popstate", () => { Object.assign(state, { view: "modules", mod: null, jump: null }, fromHash()); state.q = ""; state.pages = {}; state.open = new Set(); $("#q").value = ""; nav(); render(); });
+  window.addEventListener("popstate", () => { Object.assign(state, { view: "modules", mod: null, jump: null }, fromHash()); state.pages = {}; state.open = new Set(); nav(); render(); });
   function toggle(row) {
     const d = document.getElementById(row.dataset.d);
     if (!d) return;
@@ -669,15 +674,7 @@
     const op = t.closest("[data-open]");
     if (op) { state.open.add(op.dataset.open); render(true); return; }
     const rq = t.closest("[data-req]");
-    if (rq) {
-      // A scenario's rule: turn its table to the right page, then open and show it.
-      const id = rq.dataset.req, key = Object.keys(RULES).find((k) => RULES[k].some((x) => x.id === id));
-      if (key) state.pages[key] = Math.floor(RULES[key].findIndex((x) => x.id === id) / 10);
-      render(true);
-      const r = $("#main .req-" + cssId(id));
-      if (r) { if (!r.classList.contains("open")) toggle(r); r.scrollIntoView({ block: "center", behavior: "smooth" }); r.classList.add("flash"); setTimeout(() => r.classList.remove("flash"), 1400); }
-      return;
-    }
+    if (rq) { const id = rq.dataset.req; showReq(Object.keys(RULES).find((k) => RULES[k].some((x) => x.id === id)), id); return; }
     const pg = t.closest("[data-page]");
     if (pg) { if (pg.disabled) return; state.pages[pg.dataset.page] = +pg.dataset.p; render(true); return; }
     const sb = t.closest("[data-sub]");
@@ -701,15 +698,12 @@
     const row = t.closest(".li[data-d], tr[data-d], .stepc[data-d]");
     if (row) toggle(row);
   });
-  $("#q").addEventListener("input", (e) => { state.q = e.target.value; state.pages = {}; render(true); });
   $("#editor").addEventListener("change", (e) => { ED = e.target.value; store.set("editor", ED); render(true); });
   $("#theme").addEventListener("click", () => { store.set("theme", effective() === "dark" ? "light" : "dark"); applyTheme(); });
   matchMedia("(prefers-color-scheme: dark)").addEventListener("change", applyTheme);
   document.addEventListener("keydown", (e) => {
     const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement && document.activeElement.tagName);
-    if (e.key === "Escape" && typing) { const i = $("#q"); i.value = ""; state.q = ""; i.blur(); render(true); return; }
     if (typing || e.metaKey || e.ctrlKey || e.altKey) return;
-    if (e.key === "/") { e.preventDefault(); $("#q").focus(); }
-    else if (e.key === "t") $("#theme").click();
+    if (e.key === "t") $("#theme").click();
   });
 })();

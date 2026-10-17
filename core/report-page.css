@@ -81,9 +81,6 @@ code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
 .brand .mark { width: 20px; height: 20px; border-radius: 6px; background: var(--accent); color: var(--accent-ink); display: grid; place-items: center; flex: none; }
 .brand .mark .i { width: 13px; height: 13px; stroke-width: 2.6; }
 .brand .repo { color: var(--muted); font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.search { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 8px; color: var(--muted); border: 1px solid var(--line); background: var(--surface); }
-.search input { border: 0; background: none; outline: none; font: inherit; color: var(--text); width: 100%; min-width: 0; }
-.search kbd { font: 11px var(--mono); color: var(--faint); }
 .nav { display: flex; flex-direction: column; gap: 1px; overflow: auto; flex: 1; margin: 0 -4px; padding: 0 4px; scrollbar-width: thin; }
 .item > .i { color: var(--faint); }
 .item[aria-current="page"] > .i, .item:hover > .i { color: var(--text-2); }
