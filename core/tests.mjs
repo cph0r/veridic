@@ -72,6 +72,28 @@ const regexCanStart = (before) => {
   return /\b(?:return|typeof|case|do|else|in|of|void|yield|await|throw|new|delete)$/.test(t);
 };
 
+// The closing backtick of the template opening at i, and the `}` closing an interpolation at k.
+function templateEnd(src, i) {
+  for (let j = i + 1; j < src.length; j++) {
+    if (src[j] === "\\") j++;
+    else if (src[j] === "`") return j;
+    else if (src[j] === "$" && src[j + 1] === "{") j = exprEnd(src, j + 2);
+  }
+  return src.length;
+}
+function exprEnd(src, k) {
+  let depth = 0;
+  for (; k < src.length; k++) {
+    const c = src[k];
+    if (c === "`") k = templateEnd(src, k);
+    else if (c === '"' || c === "'") {
+      for (k++; k < src.length && src[k] !== c && src[k] !== "\n"; k++) if (src[k] === "\\") k++;
+    } else if (c === "{") depth++;
+    else if (c === "}" && depth-- === 0) return k;
+  }
+  return src.length;
+}
+
 /** Blank comments, string contents and regex literals (keeping offsets), so code checks don't see them. */
 export function codeOnly(src) {
   let out = "";
@@ -101,7 +123,21 @@ export function codeOnly(src) {
         out += `/${" ".repeat(j - i - 1)}/`;
         i = j;
       }
-    } else if (c === '"' || c === "'" || c === "`") {
+    } else if (c === "`") {
+      // A template literal: its text is blanked, its `${…}` parts are code (and may hold templates).
+      const end = templateEnd(src, i);
+      out += "`";
+      for (let j = i + 1; j < end; ) {
+        if (src[j] === "\\") (out += src[j + 1] === "\n" ? " \n" : "  "), (j += 2);
+        else if (src[j] === "$" && src[j + 1] === "{") {
+          const close = exprEnd(src, j + 2);
+          out += "${" + codeOnly(src.slice(j + 2, close)) + (close < end ? "}" : "");
+          j = close + 1;
+        } else (out += src[j] === "\n" ? "\n" : " "), j++;
+      }
+      out += src[end] ?? "";
+      i = end;
+    } else if (c === '"' || c === "'") {
       out += c;
       let j = i + 1;
       while (j < src.length && src[j] !== c) {

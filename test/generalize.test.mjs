@@ -61,6 +61,14 @@ test("code blanking: regex literals with quotes don't swallow the code after the
   assert.match(code, /a \/ b \/ c/);
 });
 
+test("code blanking: a template nested in ${…} doesn't end the outer one", () => {
+  const code = codeOnly("cy.visit(`/x?d=${encodeURIComponent(`../${loc.pathname}/redirect?to=https://a.b/c`)}`)\ncy.expectChallengeSolved({ challenge: 'X' })\n");
+  assert.match(code, /encodeURIComponent\(/);
+  assert.match(code, /loc\.pathname/);
+  assert.match(code, /cy\.expectChallengeSolved\(/);
+  assert.doesNotMatch(code, /a\.b/);
+});
+
 test("effects: MongoDB/Mongoose writes and deletes, through a controller module and exports.x handlers", () => {
   const files = {
     "routes.js": 'const ctrl = require("./ctrl");\nrouter.post("/users", ctrl.create);\nrouter.delete("/users/:id", ctrl.remove);\nrouter.get("/pdf", ctrl.pdf);\n',
