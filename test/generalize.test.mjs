@@ -152,20 +152,49 @@ test("access: guards passed as an array, identity from a session helper, API key
     'app.delete("/v1/admin/users/:id", [validApiKey], async (request, response) => { await User.delete({ id: request.params.id }); });',
     'app.delete("/workspace/:slug/thread/:threadId", [validatedRequest], async (request, response) => { await Thread.delete({ id: request.params.threadId }); });',
     'app.delete("/documents/:docId", [validatedRequest, isSingleUserMode], async (request, response) => { await Doc.delete({ id: request.params.docId }); });',
+    'router.delete("/access/:pk", asyncHandler(async (req, res, next) => { const service = new AccessService({ accountability: req.accountability, schema: req.schema }); await service.deleteOne(req.params.pk); }));',
   ];
   const g = { lines: () => src, text: () => src.join("\n"), nodes: new Map(), usesInRange: () => [] };
   const r = (i, method, p) => ({ id: `${method} ${p}`, method, path: p, file: "r.js", start: i, end: i, guards: [] });
-  const m = accessMatrix(g, { routes: [r(1, "POST", "/workspace/:slug/chat-feedback/:chatId"), r(2, "DELETE", "/v1/admin/users/:id"), r(3, "DELETE", "/workspace/:slug/thread/:threadId"), r(4, "DELETE", "/documents/:docId")] });
+  const m = accessMatrix(g, { routes: [r(1, "POST", "/workspace/:slug/chat-feedback/:chatId"), r(2, "DELETE", "/v1/admin/users/:id"), r(3, "DELETE", "/workspace/:slug/thread/:threadId"), r(4, "DELETE", "/documents/:docId"), r(5, "DELETE", "/access/:pk")] });
   assert.equal(m[0].access, "auth", "validatedRequest signs the caller in");
   assert.equal(m[0].scoped, "yes", "userFromSession(request) is the caller");
   assert.equal(m[1].access, "role", "an API key on an /admin route is an admin credential");
   assert.ok(m[2].flags.includes("id-param-without-caller-scope"), "a signed-in delete by id with no caller scope is still flagged");
   assert.equal(m[3].flags.length, 0, "single-user mode has one owner");
+  assert.equal(m[4].scoped, "yes", "the caller's accountability handed to a service that enforces permissions");
 });
 
 test("effects: closing a response stream is not a destructive write", () => {
   const files = { "r.js": 'router.get("/stream", (req, res) => {\n  res.destroy();\n  stream.destroy();\n});\n' };
   const { g, done } = fakeRepo(files);
   assert.equal(routeEffects(g, { id: "x", file: "r.js", start: 1, end: 4 }).filter((e) => e.kind === "destructive").length, 0);
+  done();
+});
+
+test("effects: cheerio/jQuery $(…).remove() edits HTML, it doesn't delete data", () => {
+  const files = { "r.js": 'router.get("/status", (req, res) => {\n  $("link[rel=icon]").remove();\n  res.send($.html());\n});\nrouter.delete("/x/:id", (req, res) => {\n  Item.remove({ _id: req.params.id });\n});\n' };
+  const { g, done } = fakeRepo(files);
+  const kinds = (start, end) => new Set(routeEffects(g, { id: "x", file: "r.js", start, end }).map((e) => e.kind));
+  assert.equal(kinds(1, 4).has("destructive"), false);
+  assert.equal(kinds(5, 7).has("destructive"), true);
+  done();
+});
+
+test("reach: a member call isn't linked by name to a function elsewhere, nor a built-in to a class it never names", async () => {
+  const { reached } = await import("../core/reach.mjs");
+  const files = {
+    "routes.js": 'router.get("/info", async (req, res) => {\n  const list = items.sort();\n  await service.snapshot();\n  res.json(list);\n});\n',
+    "cli.js": "function snapshot() {\n  db.insert();\n}\n",
+    "utils.js": "class UtilsService {\n  sort() {\n    db.update();\n  }\n}\n",
+  };
+  const nodes = [
+    { id: "f", kind: "function", name: "snapshot", file: "cli.js", start: 1, end: 3 },
+    { id: "m", kind: "method", name: "sort", qname: "UtilsService::sort", file: "utils.js", start: 2, end: 4 },
+  ];
+  const { g, done } = fakeRepo(files, nodes);
+  g.usesInRange = (file) => (file === "routes.js" ? nodes.map((t) => ({ target: t })) : []);
+  const names = reached(g, { id: "GET /info", file: "routes.js", start: 1, end: 5 }, 1).slice(1).map((n) => n.name);
+  assert.deepEqual(names, []);
   done();
 });

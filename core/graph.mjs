@@ -23,7 +23,8 @@ export function openGraph(repo) {
 
   const nodes = new Map();
   const nodesByFile = new Map();
-  for (const n of db.prepare(`select id, kind, name, file_path file, start_line start, end_line end from nodes where kind not in ('import')`).all()) {
+  const hasQname = db.prepare("select 1 from pragma_table_info('nodes') where name = 'qualified_name'").get();
+  for (const n of db.prepare(`select id, kind, name, ${hasQname ? "qualified_name" : "null"} qname, file_path file, start_line start, end_line end from nodes where kind not in ('import')`).all()) {
     nodes.set(n.id, n);
     if (!nodesByFile.has(n.file)) nodesByFile.set(n.file, []);
     nodesByFile.get(n.file).push(n);

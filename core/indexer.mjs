@@ -30,7 +30,13 @@ export function findCodegraph() {
 export function codegraph(repo, args, { bin = findCodegraph(), quiet = true } = {}) {
   if (!bin) throw new Error(`codegraph isn't installed. Run \`veridic init --install\` or \`npm i -g ${CODEGRAPH_PACKAGE}\``);
   const t = Date.now();
-  const r = spawnSync(bin, args, { cwd: repo, encoding: "utf8", env: { ...process.env, CODEGRAPH_TELEMETRY: "0", NO_COLOR: "1" }, stdio: quiet ? ["ignore", "pipe", "pipe"] : "inherit", timeout: 30 * 60_000 });
+  const run = () => spawnSync(bin, args, { cwd: repo, encoding: "utf8", env: { ...process.env, CODEGRAPH_TELEMETRY: "0", NO_COLOR: "1" }, stdio: quiet ? ["ignore", "pipe", "pipe"] : "inherit", timeout: 30 * 60_000 });
+  let r = run();
+  // Another process (an editor's CodeGraph server, a second agent) may hold the database briefly.
+  for (let wait = 1; r.status !== 0 && /database is locked/i.test(`${r.stderr}${r.stdout}`) && wait <= 8; wait *= 2) {
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, wait * 1000);
+    r = run();
+  }
   if (r.status !== 0) throw new Error(`codegraph ${args.join(" ")} failed: ${(r.stderr || r.stdout || "").trim().slice(-400)}`);
   return { ms: Date.now() - t, out: r.stdout ?? "" };
 }

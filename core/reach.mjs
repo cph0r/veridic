@@ -126,6 +126,31 @@ function cacheBy(fn) {
 }
 
 /** The handler range plus every function/method it reaches, up to `depth` calls away. */
+const BUILTIN = new Set("sort map filter find findIndex includes indexOf push pop shift unshift splice slice concat join reverse keys values entries forEach reduce some every at has add clear set get then catch finally pipe on once emit write end close toString replace split trim test exec match parse stringify assign freeze".split(" "));
+const esc = (s) => s.replace(/[$]/g, "\\$");
+// A link from another file that the call can't mean:
+//  - `x.name(` never calls a top-level function elsewhere (an imported module's member is
+//    resolved through the import, not by name);
+//  - `xs.sort(` / `p.then(` is a built-in unless the caller's file names the method's class.
+function nameOnly(g, file, text, t) {
+  const bare = new RegExp(`(?<![\\w$.])${esc(t.name)}\\s*\\(`).test(text);
+  const member = new RegExp(`\\.${esc(t.name)}\\s*\\(`).test(text);
+  if (t.kind === "function" && member && !bare) return true;
+  if (t.kind === "method" && BUILTIN.has(t.name)) {
+    const cls = (t.qname ?? "").split("::")[0];
+    return !cls || !new RegExp(`\\b${esc(cls)}\\b`).test(g.text(file) ?? "");
+  }
+  return false;
+}
+
+// Every call of `.name(` in the text is on a `$(…)` DOM query.
+function domOnly(text, name) {
+  const esc = name.replace(/\$/g, "\\$");
+  const all = text.match(new RegExp(`\\.${esc}\\s*\\(`, "g"))?.length ?? 0;
+  const dom = text.match(new RegExp(`\\$\\([^()]*\\)\\.${esc}\\s*\\(`, "g"))?.length ?? 0;
+  return all > 0 && all === dom;
+}
+
 export function reached(g, route, depth = 3) {
   const out = [{ file: route.file, start: route.start, end: route.end, name: route.id, depth: 0 }];
   const seen = new Set();
@@ -133,10 +158,16 @@ export function reached(g, route, depth = 3) {
   for (let d = 1; d <= depth && frontier.length && out.length < MAX_NODES; d++) {
     const next = [];
     for (const r of frontier) {
-      let targets = [...g.usesInRange(r.file, r.start, r.end).map((u) => u.target), ...memberTargets(g, r.file, r.start, r.end)];
+      const rangeText = (g.lines(r.file) ?? []).slice(r.start - 1, r.end).join("\n");
+      const byImport = memberTargets(g, r.file, r.start, r.end);
+      // The index links calls by name; drop links the call itself rules out.
+      const linked = g.usesInRange(r.file, r.start, r.end).map((u) => u.target).filter((t) => t.file === r.file || !nameOnly(g, r.file, rangeText, t));
+      let targets = [...linked, ...byImport];
       // A chained route shares lines with its neighbours: keep what its own call names.
       if (r.depth === 0 && route.handlerText) targets = targets.filter((t) => new RegExp(`(?<![\\w$])${t.name.replace(/\$/g, "\\$")}(?![\\w$])`).test(route.handlerText));
       for (const t of targets) {
+        // `$("link").remove()` is cheerio/jQuery, whatever else in the repo is named remove.
+        if (t.kind === "method" && domOnly(rangeText, t.name)) continue;
         // Functions, and constants holding one (`const createUser = catchAsync(async …)`).
         const fnLike = t.kind === "function" || t.kind === "method" || ((t.kind === "constant" || t.kind === "variable") && t.end > t.start && holdsFunction(g, t));
         if (!SYMBOL_KINDS.has(t.kind) || !fnLike || isTestFile(t.file) || t.file.includes("node_modules") || seen.has(t.id)) continue;

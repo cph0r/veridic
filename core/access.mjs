@@ -60,7 +60,7 @@ const LIMITER = /limit|limiter|throttle/i;
 // In the handler: a server-side plan check, a role check, and use of the caller's identity.
 const PLAN_CHECK = /getActiveSubscription|hasActivePlan|requirePro|isPro\b|requireSubscription|checkSubscription|requirePlan|assertPlan|entitlement/;
 const ROLE_CHECK = /\.role\s*(?:!==|===|!=|==)|hasRole\(|requireRole\(/;
-const CALLER = /\b(?:req|request)\.(?:userId|user\??!?\.id|user!\.id|customer\??\.id|auth\??\.\w+|session\??\.\w*[uU]ser)|\buserId\b|ownerId|restaurantId:\s*req\.|\w+\(\s*req\.user\b/; // identity handed to a helper, e.g. getActiveRestaurantId(req.user!)
+const CALLER = /\b(?:req|request)\.(?:accountability\b|userId|user\??!?\.id|user!\.id|customer\??\.id|auth\??\.\w+|session\??\.\w*[uU]ser)|\buserId\b|ownerId|restaurantId:\s*req\.|\w+\(\s*req\.user\b/; // identity handed to a helper, e.g. getActiveRestaurantId(req.user!)
 // In handler code reached from the route, only the request's own identity counts as scoping:
 // a function that merely mentions `userId` doesn't limit anything to the caller.
 // An explicit ownership or permission check in the handler: validateAuthor(…), checkAccess(…).
