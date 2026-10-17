@@ -123,3 +123,25 @@ test("routes: an app handed to a class method mounts its routers; jsonc keeps st
   assert.deepEqual(ids(g), ["GET /:apiPrefix"]);
   done();
 });
+
+test("access: identity taken from the request body, and a user id from the URL that shadows the session", () => {
+  const src = [
+    'app.put("/api/BasketItems/:id", security.appendUserId(), (req, res) => BasketItem.update({ quantity: 2 }, { where: { BasketId: req.body.BasketId } }));',
+    'app.post("/api/Cards", security.appendUserId(), (req, res) => Card.create({ UserId: req.body.UserId }));',
+    'app.post("/api/users", (req, res) => User.create(req.body.user));',
+    'app.get("/allocations/:userId", isLoggedIn, (req, res) => { const { userId } = req.session; const { userId: id } = req.params; dao.get(req.params.userId); });',
+    'app.get("/users/:userId", isLoggedIn, (req, res) => { if (req.params.userId !== req.user.id) return res.status(403).end(); dao.get(req.params.userId); });',
+    'router.get("/v1/users/:userId", auth("getUsers"), (req, res) => dao.get(req.params.userId));',
+  ];
+  const g = { lines: () => src, text: () => src.join("\n"), nodes: new Map(), usesInRange: () => [] };
+  const r = (i, method, p) => ({ id: `${method} ${p}`, method, path: p, file: "r.js", start: i, end: i, guards: [] });
+  const m = accessMatrix(g, { routes: [r(1, "PUT", "/api/BasketItems/:id"), r(2, "POST", "/api/Cards"), r(3, "POST", "/api/users"), r(4, "GET", "/allocations/:userId"), r(5, "GET", "/users/:userId"), r(6, "GET", "/v1/users/:userId")] });
+  const has = (i, kind) => m[i].flags.some((f) => f.startsWith(kind));
+  assert.equal(has(0, "identity-from-request-body"), true, "BasketId from the body");
+  assert.equal(has(1, "identity-from-request-body"), false, "UserId injected by appendUserId");
+  assert.equal(has(2, "identity-from-request-body"), false, "a { user: … } payload is data, not an identity");
+  assert.equal(has(3, "user-id-from-url"), true, "params.userId used, session id ignored");
+  assert.equal(m[3].scoped, "no");
+  assert.equal(has(4, "user-id-from-url"), false, "compared with the caller");
+  assert.equal(m[5].access, "role", "a guard given a permission is an authorization check");
+});

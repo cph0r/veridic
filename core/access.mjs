@@ -37,7 +37,7 @@ function middlewareOf(g, r) {
 }
 
 const AUTH_GUARD = /auth|authenticated|requireUser|session|signedIn|login|protect|jwt|verifyToken|passport|ensureLoggedIn|requiresLogin|loggedIn/i;
-const ROLE_GUARD = /admin|role|platform|staff|superuser|manage|authori[sz]e|permission|\bcan[A-Z]|restrict|\bis(?!Authori[sz]ed|Authenticated|Logged)[A-Z]\w*\s*\(/;
+const ROLE_GUARD = /admin|role|platform|staff|superuser|manage|authori[sz]e|permission|\bcan[A-Z]|restrict|\bis(?!Authori[sz]ed|Authenticated|Logged)[A-Z]\w*\s*\(|^[\w$.]+\(\s*["'][\w:.-]+["']\s*\)$/; // last: a guard given a permission, auth("getUsers")
 // Middleware that checks the caller owns the resource: the route is scoped even if the handler isn't.
 // Also middleware that injects the caller's own id into the request (`appendUserId()`).
 const OWNER_GUARD = /owner|hasAuthorization|isOwner|ownership|belongsTo|canEdit|canModify|(?:append|attach|inject)\w*User/i;
@@ -56,7 +56,11 @@ const OPEN_BY_DESIGN = /webhook|callback|login|logout|health|oauth|signup|regist
 // Scoped only by values the client supplies (query/body ids, e.g. from a QR code): weaker than caller identity.
 const CLIENT_SCOPE = /req\.(?:query|body)\.\w+[\s\S]{0,400}?\beq\([\w.]+\.(?:\w*[iI]d|\w*Token)\b/;
 // Reads worth protecting even when public: someone's orders, messages, payments, account data.
-const SENSITIVE = /order|message|conversation|payment|user|customer|invoice|account|profile|session|subscription|bill/i;
+const SENSITIVE = /order|message|conversation|payment|user|customer|invoice|account|profile|session|subscription|bill|basket|cart|wallet|address|card|document/i;
+// A write that takes who-it-is-for from the request body: `UserId`, `author`, `BasketId`.
+// Only fields that name a party: an id (`UserId`, `basketId`) or `author`/`owner`. A payload
+// wrapper like RealWorld's `req.body.user` (`{ user: { email, … } }`) is data, not an identity.
+const BODY_IDENTITY = /req\.body\.([\w$]*(?:user|author|owner|customer|account|basket|cart|wallet|order)_?id|author|owner)\b/gi;
 
 /** One row per route. */
 export function accessMatrix(g, inv) {
@@ -73,10 +77,30 @@ export function accessMatrix(g, inv) {
     const body = handlerText(g, r, handlerNames.get(r) ?? null);
     // Without sign-in anywhere on the route, req.user can't be the caller (it's whatever was loaded).
     const identity = access !== "public" && CALLER_IN_HANDLER.test(body);
-    const scoped = CALLER.test(text) || identity || guards.some((n) => OWNER_GUARD.test(n)) ? "yes" : CLIENT_SCOPE.test(text) || CLIENT_SCOPE.test(body) ? "weak" : "no";
+    let scoped = CALLER.test(text) || identity || guards.some((n) => OWNER_GUARD.test(n)) ? "yes" : CLIENT_SCOPE.test(text) || CLIENT_SCOPE.test(body) ? "weak" : "no";
     const flags = [];
+    // Identity or ownership supplied by the client on a write. Not when middleware put the
+    // caller's own user id there (`appendUserId()`) and that is the field used.
+    if (r.method !== "GET" && !OPEN_BY_DESIGN.test(r.path)) {
+      const injected = guards.some((n) => /(?:append|attach|inject)\w*User/i.test(n));
+      const fields = [...new Set([...`${text}\n${body}`.matchAll(BODY_IDENTITY)].map((m) => m[1]))].filter((f) => !(injected && /^user_?id$/i.test(f)));
+      if (fields.length) flags.push(`identity-from-request-body: ${fields.slice(0, 3).join(", ")}`);
+    }
     const sensitive = r.method !== "GET" || SENSITIVE.test(r.path);
     const params = [...r.path.matchAll(/:(\w+)/g)].map((m) => m[1]);
+    // A user's own id in the URL (`/allocations/:userId`), used without being compared with
+    // the caller's: the handler reads or acts as whichever user the URL names, even if it also
+    // looked at the caller's session.
+    const userParam = params.find((p) => /^(?:user|account|customer|member|owner)_?id$/i.test(p));
+    if (userParam && !OPEN_BY_DESIGN.test(r.path)) {
+      const all = `${text}\n${body}`;
+      const compared = new RegExp(`(?:req\\.params\\.${userParam}|\\b${userParam}\\b)\\s*[!=]==?\\s*(?:String\\()?\\s*req\\.(?:session|user|auth)|req\\.(?:session|user|auth)[\\w.?!]*\\s*[!=]==?\\s*(?:String\\()?\\s*(?:req\\.params\\.)?${userParam}\\b`).test(all);
+      const used = new RegExp(`req\\.params\\.${userParam}\\b|\\{[^}]*\\b${userParam}\\b[^}]*\\}\\s*=\\s*req\\.params`).test(all);
+      if (used && !compared && access !== "role") {
+        flags.push(`user-id-from-url: ${userParam}`);
+        scoped = "no";
+      }
+    }
     if (params.length && !params.every((p) => CODE_PARAM.test(p)) && scoped !== "yes" && access !== "role" && sensitive && !OPEN_BY_DESIGN.test(r.path))
       flags.push(scoped === "weak" ? "id-param-scoped-by-client-values" : "id-param-without-caller-scope");
     return { route: r.id, at: `${r.file}:${r.start}-${r.end}`, access, roles: roles.length ? roles : inlineRole ? ["(inline check)"] : [], plan, scoped, guards, flags };
