@@ -56,7 +56,7 @@ function reach(repo, file, files, levels = 2) {
 // Assertions, after comments and strings are blanked. An assertion on a literal checks nothing.
 // Custom assertion helpers count (`cy.expectChallengeSolved(…)`, `assertOrderPaid(…)`), and
 // `cy.request(…)`, which fails the test on an error status by default.
-const ASSERT = /\bexpect\s*\(|\bexpect\s*\.\s*(?:poll|soft)\s*\(|\bassert\w*\s*[.(]|\.should\b|\bt\.(?:is|not|true|false|deepEqual|throws\w*|regex|like|assert)\s*\(|\b(?:expect|assert|verify|check|should)[A-Z]\w*\s*(?:<[^()]*>)?\s*\(|\bcy\.(?:request|contains|get)\s*\(|\.and\s*\(\s*["'`]|\.waitFor(?:URL|Selector)\s*\(/;
+const ASSERT = /\bexpect\s*\(|\bexpect\s*\.\s*(?:poll|soft|element)\s*\(|\bassert\w*\s*[.(]|\.should\b|\bt\.(?:is|not|true|false|deepEqual|throws\w*|regex|like|assert)\s*\(|\b(?:expect|assert|verify|check|should)[A-Z]\w*\s*(?:<[^()]*>)?\s*\(|\bcy\.(?:request|contains|get)\s*\(|\.and\s*\(\s*["'`]|\.waitFor(?:URL|Selector)\s*\(/;
 // Only bare `expect(true)`: supertest's `.expect(200)` checks the response status.
 const LITERAL_EXPECT = /(?<![\w$.])expect\s*\(\s*(?:true|false|null|undefined|-?\d+(?:\.\d+)?|""|''|``)\s*\)/g;
 // Loose: passes for almost any value. `.not.toHaveBeenCalled()` and `toBeUndefined()` are exact, so not loose.
@@ -167,7 +167,10 @@ const EACH = /(?<![\w$.])(x?)(?:it|test)(?:\.(skip|only|concurrent))?\.each\s*(?
 function* testCases(src, code) {
   for (const t of src.matchAll(TITLE)) {
     if (code[t.index] === " " || /^x?describe/.test(t[0])) continue;
-    yield { index: t.index, x: t[1] === "x", mod: t[2], title: t[4], bodyStart: t.index + t[0].length, bodyEnd: closeParen(code, t.index + t[0].indexOf("(") + 1) };
+    const bodyEnd = closeParen(code, t.index + t[0].indexOf("(") + 1);
+    // Mocha's `it("title")` with no function is pending: a reminder, not a test that runs.
+    const pending = !/\S/.test(code.slice(t.index + t[0].length, bodyEnd).replace(/,/g, ""));
+    yield { index: t.index, x: t[1] === "x", mod: pending ? "todo" : t[2], title: t[4], bodyStart: t.index + t[0].length, bodyEnd };
   }
   for (const m of code.matchAll(EACH)) {
     const tableOpen = m.index + m[0].length;
@@ -179,6 +182,10 @@ function* testCases(src, code) {
     yield { index: m.index, x: m[1] === "x", mod: m[2], title: call[2], bodyStart: tableEnd + 1 + call[0].length, bodyEnd: closeParen(code, titleCall) };
   }
 }
+
+// A title that promises only that nothing fails ("should pass", "is a no-op", "does not
+// throw"): awaiting or returning the call is the check, a loose one.
+const NO_THROW_TITLE = /\b(?:should pass|passes|(?:does ?n[o']t|not|never|without) (?:throw|fail|error|crash)\w*|no-?op|succeeds?|works?|resolves?)\b/i;
 
 /** How much a test body checks: empty | unasserted | weak | strong. */
 export function testStrength(body, helpers = null) {
@@ -299,7 +306,8 @@ export function auditFile(repo, file) {
       // `test.each(table)("…", testStoragePath)`: the body is a function the file defines.
       const body = code.slice(t.bodyStart, t.bodyEnd);
       const named = body.match(/^\s*,\s*([A-Za-z_$][\w$]*)\s*,?\s*(?:\d+\s*)?$/)?.[1];
-      const s = testStrength(named && bodies.has(named) ? bodies.get(named) : body, helpers);
+      let s = testStrength(named && bodies.has(named) ? bodies.get(named) : body, helpers);
+      if (s === "unasserted" && NO_THROW_TITLE.test(t.title) && /\b(?:await|return)\b|=>\s*\w/.test(body)) s = "weak";
       counts[s]++;
       if (flagged[s]) flagged[s].push({ at: `${file}:${src.slice(0, t.index).split("\n").length}`, title: t.title.slice(0, 100) });
     }
