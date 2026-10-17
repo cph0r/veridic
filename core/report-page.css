@@ -268,6 +268,7 @@ button.ind:hover { border-color: var(--faint); }
 .stepc { display: flex; gap: 14px; align-items: center; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); min-width: 0; }
 .stepc .main { flex: 1; min-width: 0; }
 button.stepc { width: 100%; text-align: left; cursor: pointer; }
+.stepwrap { min-width: 0; }
 .stepc.click { cursor: pointer; }
 .stepc.click:hover { border-color: var(--faint); }
 .stepc .chev { transition: transform 0.15s; }
