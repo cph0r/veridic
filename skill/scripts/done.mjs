@@ -23,7 +23,7 @@ run(async () => {
     if (a.card) {
       const rows = [
         ["claimed", r.claimed.length ? r.claimed.join(", ") : "nothing claimed: checking tests only", null],
-        ...(r.seam ? [["seam", r.seam.strays.length ? `${r.seam.strays.length} stray file(s) outside what was claimed` : `held: every change is in the code the claim runs`, !r.seam.strays.length]] : []),
+        ...(r.seam ? [["seam", r.seam.strays.length ? `${r.seam.strays.length} stray change(s) outside what was claimed` : `held: every change is in the code the claim runs`, !r.seam.strays.length]] : []),
         ["reaches", `${r.changed.source} changed file(s) behind ${r.affected_routes} route(s)${r.risky_routes.length ? `, ${r.risky_routes.length} that move money or delete` : ""}`, null],
         ["tests", r.files.some((f) => f.untested_routes.length) ? `${[...new Set(r.files.flatMap((f) => f.untested_routes))].length} changed route(s) without an asserting test about them` : "every changed route has an asserting test about it", !r.files.some((f) => f.untested_routes.length)],
         ["range", r.range, null],
