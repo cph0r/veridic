@@ -145,3 +145,27 @@ test("access: identity taken from the request body, and a user id from the URL t
   assert.equal(has(4, "user-id-from-url"), false, "compared with the caller");
   assert.equal(m[5].access, "role", "a guard given a permission is an authorization check");
 });
+
+test("access: guards passed as an array, identity from a session helper, API keys on admin routes, single-user mode", () => {
+  const src = [
+    'app.post("/workspace/:slug/chat-feedback/:chatId", [validatedRequest, flexUserRoleValid([ROLES.all]), validWorkspaceSlug], async (request, response) => { const user = await userFromSession(request, response); await Chats.get({ id: request.params.chatId, user_id: user?.id }); });',
+    'app.delete("/v1/admin/users/:id", [validApiKey], async (request, response) => { await User.delete({ id: request.params.id }); });',
+    'app.delete("/workspace/:slug/thread/:threadId", [validatedRequest], async (request, response) => { await Thread.delete({ id: request.params.threadId }); });',
+    'app.delete("/documents/:docId", [validatedRequest, isSingleUserMode], async (request, response) => { await Doc.delete({ id: request.params.docId }); });',
+  ];
+  const g = { lines: () => src, text: () => src.join("\n"), nodes: new Map(), usesInRange: () => [] };
+  const r = (i, method, p) => ({ id: `${method} ${p}`, method, path: p, file: "r.js", start: i, end: i, guards: [] });
+  const m = accessMatrix(g, { routes: [r(1, "POST", "/workspace/:slug/chat-feedback/:chatId"), r(2, "DELETE", "/v1/admin/users/:id"), r(3, "DELETE", "/workspace/:slug/thread/:threadId"), r(4, "DELETE", "/documents/:docId")] });
+  assert.equal(m[0].access, "auth", "validatedRequest signs the caller in");
+  assert.equal(m[0].scoped, "yes", "userFromSession(request) is the caller");
+  assert.equal(m[1].access, "role", "an API key on an /admin route is an admin credential");
+  assert.ok(m[2].flags.includes("id-param-without-caller-scope"), "a signed-in delete by id with no caller scope is still flagged");
+  assert.equal(m[3].flags.length, 0, "single-user mode has one owner");
+});
+
+test("effects: closing a response stream is not a destructive write", () => {
+  const files = { "r.js": 'router.get("/stream", (req, res) => {\n  res.destroy();\n  stream.destroy();\n});\n' };
+  const { g, done } = fakeRepo(files);
+  assert.equal(routeEffects(g, { id: "x", file: "r.js", start: 1, end: 4 }).filter((e) => e.kind === "destructive").length, 0);
+  done();
+});

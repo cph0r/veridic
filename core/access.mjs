@@ -9,6 +9,18 @@ import { codeOnly } from "./tests.mjs";
 import { closeParen, splitArgs } from "./chains.mjs";
 
 const handlerNames = new WeakMap();
+// The handler is `handlers.updateFile` and `handlers` was built by a factory handed a
+// permission checker: `createSkillHandlers({ checkPermission, … })`.
+const PERMISSION_DEP = /\b(?:check\w*Permission|canAccess\w*|hasPermission|authori[sz]e\w*|checkAccess\w*|requirePermission)\b/;
+function factoryChecked(g, r, names) {
+  if (!names?.size) return false;
+  const src = g.text(r.file) ?? "";
+  for (const n of names) {
+    const m = src.match(new RegExp(`\\b(?:const|let|var)\\s+${n.replace(/\$/g, "\\$")}\\s*=\\s*(?:await\\s+)?[\\w$.]+\\s*\\(([\\s\\S]{0,1500}?)\\)\\s*;`));
+    if (m && PERMISSION_DEP.test(m[1])) return true;
+  }
+  return false;
+}
 // The route call's middleware arguments (all but the path and the last, the handler),
 // as written: `protect`, `admin`, `auth("manageUsers")`. A name defined in the file as a
 // list or call (`const articleAuth = [requiresLogin, hasAuthorization]`) brings its definition.
@@ -36,11 +48,11 @@ function middlewareOf(g, r) {
   });
 }
 
-const AUTH_GUARD = /auth|authenticated|requireUser|session|signedIn|login|protect|jwt|verifyToken|passport|ensureLoggedIn|requiresLogin|loggedIn/i;
+const AUTH_GUARD = /auth|authenticated|valid(?:ated)?(?:Request|Session|Token|ApiKey)|UserRoleValid|requireUser|session|signedIn|login|protect|jwt|verifyToken|passport|ensureLoggedIn|requiresLogin|loggedIn/i;
 const ROLE_GUARD = /admin|role|platform|staff|superuser|manage|authori[sz]e|permission|\bcan[A-Z]|restrict|\bis(?!Authori[sz]ed|Authenticated|Logged)[A-Z]\w*\s*\(|^[\w$.]+\(\s*["'][\w:.-]+["']\s*\)$/; // last: a guard given a permission, auth("getUsers")
 // Middleware that checks the caller owns the resource: the route is scoped even if the handler isn't.
 // Also middleware that injects the caller's own id into the request (`appendUserId()`).
-const OWNER_GUARD = /owner|hasAuthorization|isOwner|ownership|belongsTo|canEdit|canModify|(?:append|attach|inject)\w*User|\w+Access\b|\bacl\b/i;
+const OWNER_GUARD = /owner|hasAuthorization|isOwner|ownership|belongsTo|canEdit|canModify|(?:append|attach|inject)\w*User|\w+Access\b|\bacl\b|singleUser|ownerOnly/i; // single-user mode: the one user owns everything
 // Parameters that name a code, not a record someone owns: `:continueCode`, `:token`, `:provider`.
 const CODE_PARAM = /code|token|coupon|key|slug|provider|lang|locale|page|hash|secret/i;
 const PLAN_GUARD = /pro\b|Pro[A-Z]|plan|subscri|premium|paid|tier|entitle/i;
@@ -48,12 +60,12 @@ const LIMITER = /limit|limiter|throttle/i;
 // In the handler: a server-side plan check, a role check, and use of the caller's identity.
 const PLAN_CHECK = /getActiveSubscription|hasActivePlan|requirePro|isPro\b|requireSubscription|checkSubscription|requirePlan|assertPlan|entitlement/;
 const ROLE_CHECK = /\.role\s*(?:!==|===|!=|==)|hasRole\(|requireRole\(/;
-const CALLER = /req\.(?:userId|user\??!?\.id|user!\.id|customer\??\.id|auth\??\.\w+|session\??\.\w*[uU]ser)|\buserId\b|ownerId|restaurantId:\s*req\.|\w+\(\s*req\.user\b/; // identity handed to a helper, e.g. getActiveRestaurantId(req.user!)
+const CALLER = /\b(?:req|request)\.(?:userId|user\??!?\.id|user!\.id|customer\??\.id|auth\??\.\w+|session\??\.\w*[uU]ser)|\buserId\b|ownerId|restaurantId:\s*req\.|\w+\(\s*req\.user\b/; // identity handed to a helper, e.g. getActiveRestaurantId(req.user!)
 // In handler code reached from the route, only the request's own identity counts as scoping:
 // a function that merely mentions `userId` doesn't limit anything to the caller.
 // An explicit ownership or permission check in the handler: validateAuthor(…), checkAccess(…).
 const OWNER_HELPER = /\b(?:validate|verify|check|assert|ensure|require|can)\w*(?:Author|Owner|Access|Permission|Ownership)\w*\s*\(/;
-const CALLER_IN_HANDLER = /req\.(?:userId|user\b|customer\??\.id|auth\??\.\w+|session\??\.\w*[uU]ser)|\w+\(\s*req\.user\b/;
+const CALLER_IN_HANDLER = /\b\w*(?:user|caller|account|member)\w*From(?:Session|Request|Token|Auth)\s*\(|\b(?:req|request)\.(?:userId|user\b|customer\??\.id|auth\??\.\w+|session\??\.\w*[uU]ser)|\w+\(\s*req\.user\b/;
 const OPEN_BY_DESIGN = /webhook|callback|login|logout|health|oauth|signup|register|token/i;
 // Scoped only by values the client supplies (query/body ids, e.g. from a QR code): weaker than caller identity.
 const CLIENT_SCOPE = /req\.(?:query|body)\.\w+[\s\S]{0,400}?\beq\([\w.]+\.(?:\w*[iI]d|\w*Token)\b/;
@@ -65,21 +77,38 @@ const SENSITIVE = /order|message|conversation|payment|user|customer|invoice|acco
 const BODY_IDENTITY = /req\.body\.([\w$]*(?:user|author|owner|customer|account|basket|cart|wallet|order)_?id|author|owner)\b/gi;
 
 /** One row per route. */
+// Middleware handed over as an array (`[validatedRequest, flexUserRoleValid([…])]`) is several guards.
+function splitList(n) {
+  const t = String(n).trim();
+  if (!t.startsWith("[") || !t.endsWith("]")) return [n];
+  const out = [];
+  let depth = 0, cur = "";
+  for (const ch of t.slice(1, -1)) {
+    if ("([{".includes(ch)) depth++;
+    if (")]}".includes(ch)) depth--;
+    if (ch === "," && depth === 0) (out.push(cur.trim()), (cur = ""));
+    else cur += ch;
+  }
+  if (cur.trim()) out.push(cur.trim());
+  return out;
+}
+
 export function accessMatrix(g, inv) {
   return inv.routes.map((r) => {
     const text = (g.lines(r.file) ?? []).slice(r.start - 1, r.end).join("\n");
-    const guards = [...new Set([...(r.guards ?? []).map((x) => x.name ?? x), ...middlewareOf(g, r)])].filter((n) => !LIMITER.test(n));
+    const guards = [...new Set([...(r.guards ?? []).map((x) => x.name ?? x), ...middlewareOf(g, r)].flatMap(splitList))].filter((n) => !LIMITER.test(n));
     const roles = guards.filter((n) => ROLE_GUARD.test(n));
     const inlineRole = ROLE_CHECK.test(text);
-    const roleGuarded = guards.some((n) => ROLE_GUARD.test(n) && !OWNER_GUARD.test(n.split(" ")[0]));
+    // A machine API key on an /admin route is an admin credential.
+    const roleGuarded = guards.some((n) => ROLE_GUARD.test(n) && !OWNER_GUARD.test(n.split(" ")[0])) || (/\/admin(\/|$)/.test(r.path) && guards.some((n) => /api[-_]?key/i.test(n)));
     const access = roles.length || inlineRole || roleGuarded ? "role" : guards.some((n) => AUTH_GUARD.test(n) || PLAN_GUARD.test(n)) ? "auth" : "public";
     const plan = guards.some((n) => PLAN_GUARD.test(n)) || PLAN_CHECK.test(text) ? "pro" : "free";
     // Scoping lives in the handler, which may be in a controller module: read what the route names.
     // Only the handler's own code: middleware that sets req.user doesn't scope the data.
     const body = handlerText(g, r, handlerNames.get(r) ?? null);
     // Without sign-in anywhere on the route, req.user can't be the caller (it's whatever was loaded).
-    const identity = access !== "public" && CALLER_IN_HANDLER.test(body);
-    const ownerChecked = guards.some((n) => OWNER_GUARD.test(n)) || OWNER_HELPER.test(body) || OWNER_HELPER.test(text);
+    const identity = access !== "public" && (CALLER_IN_HANDLER.test(body) || CALLER_IN_HANDLER.test(text)); // text: an inline handler
+    const ownerChecked = guards.some((n) => OWNER_GUARD.test(n)) || OWNER_HELPER.test(body) || OWNER_HELPER.test(text) || factoryChecked(g, r, handlerNames.get(r));
     let scoped = CALLER.test(text) || identity || ownerChecked || guards.some((n) => OWNER_GUARD.test(n)) ? "yes" : CLIENT_SCOPE.test(text) || CLIENT_SCOPE.test(body) ? "weak" : "no";
     const flags = [];
     // Identity or ownership supplied by the client on a write. Not when middleware put the

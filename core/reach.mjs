@@ -99,7 +99,9 @@ function memberTargets(g, file, start, end) {
   for (const m of text.matchAll(/(?<![\w$.])([A-Za-z_$][\w$]*)\.([A-Za-z_$][\w$]*)/g)) {
     const mod = mods[m[1]];
     if (!mod?.file) continue;
-    const target = mod.member ? reexport(g, mod.file, mod.member) : mod.file;
+    // `const { Workspace } = require("../models/workspace")`: Workspace.update lives in that
+    // module (an object of methods), unless the module only re-exports it from elsewhere.
+    const target = mod.member ? (reexport(g, mod.file, mod.member) ?? mod.file) : mod.file;
     const t = target && symbolIn(g, target, m[2]);
     if (t) out.push(t);
   }
