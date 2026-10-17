@@ -229,8 +229,9 @@ export function dataByModule(modules, uses, tables) {
     for (const id of m.routes)
       for (const u of uses.get(id) ?? []) {
         const mods = per.get(u.table) ?? per.set(u.table, new Map()).get(u.table);
-        const s = mods.get(m.id) ?? mods.set(m.id, { read: new Set(), write: new Set(), delete: new Set() }).get(m.id);
+        const s = mods.get(m.id) ?? mods.set(m.id, { read: new Set(), write: new Set(), delete: new Set(), at: new Set() }).get(m.id);
         s[u.op].add(id);
+        if (u.op !== "read") s.at.add(u.at);
       }
   // The owner: a module the table is named after, if it changes it (directus_comments → Comments);
   // otherwise the module with the most routes that write it. A table nearly every module
@@ -257,6 +258,8 @@ export function dataByModule(modules, uses, tables) {
       if (owner.get(table) === mid) {
         // Other modules that change this table: a change here can break them, and theirs can break this.
         row.alsoWrittenBy = [...mods].filter(([o, x]) => o !== mid && x.write.size + x.delete.size).map(([o]) => o);
+        // Where the others write it: what a fix moves behind this module.
+        row.foreignWrites = Object.fromEntries(row.alsoWrittenBy.map((o) => [o, [...mods.get(o).at].slice(0, 6)]));
         row.readBy = [...mods].filter(([o, x]) => o !== mid && !(x.write.size + x.delete.size)).map(([o]) => o);
         byModule.get(mid).owns.push(row);
       } else byModule.get(mid).uses.push({ ...row, owner: owner.get(table) });

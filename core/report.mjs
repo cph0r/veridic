@@ -18,6 +18,7 @@ import { doneWithoutSpec, loadClaim } from "./seam.mjs";
 import { findModules } from "./modules.mjs";
 import { linkUi } from "./ui.mjs";
 import { findTables, routeData, dataByModule } from "./data.mjs";
+import { modularity, duplication } from "./structure.mjs";
 import { testsReaching } from "./tests.mjs";
 
 const MAX_SNIPPET = 40; // lines of cited code shown per citation
@@ -378,6 +379,14 @@ export async function collectReport(repo, { specs: specFiles } = {}) {
   }
   // Findings that name a test or spec file belong to the module whose code they're about, when there is one.
   const fileModule = new Map(out.modules.flatMap((m) => [...m.files, ...m.code, ...(m.screens ?? []).map((x) => x.file)].map((f) => [f, m.id])));
+  // Structure: how cleanly the modules are separated, and how much code is copied (see structure.mjs).
+  try {
+    const dup = duplication(repo);
+    for (const b of dup.blocks) (b.a.module = fileModule.get(b.a.file) ?? null), (b.b.module = fileModule.get(b.b.file) ?? null);
+    out.structure = { modularity: out.modules.length ? modularity(out.modules) : null, duplication: dup };
+  } catch (e) {
+    note("structure", e);
+  }
   for (const m of out.modules) for (const t of m.tests.files) if (!fileModule.has(t.file)) fileModule.set(t.file, m.id);
   for (const f of out.findings)
     if (!f.module) {

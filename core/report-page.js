@@ -1,8 +1,8 @@
 // Veridic report page. Reads the JSON embedded in the page and renders it; no
 // network, no dependencies. Quiet by design: each view shows the few things that
 // matter, and the rest opens on a click. Views: Modules (home), a module's page,
-// Specs, Overview (everything app-wide), Current task. Buttons copy prompts or
-// open the editor: a static page never runs anything itself.
+// Specs, Overview (everything app-wide), Current task. An observability tool: it
+// shows the state of the repo and links to the code; it never acts on it.
 (() => {
   "use strict";
   const D = JSON.parse(document.getElementById("data").textContent);
@@ -29,6 +29,8 @@
     refresh: '<path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5"/>',
     menu: '<path d="M4 7h16M4 12h16M4 17h16"/>',
     check: '<path d="m5 12 5 5L20 7"/>',
+    copy: '<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
+    blocks: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><path d="M14 17.5h7M17.5 14v7"/>',
     shield: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>',
     flask: '<path d="M9 3h6M10 3v6L4.5 18.5A2 2 0 0 0 6.2 21h11.6a2 2 0 0 0 1.7-2.5L14 9V3"/><path d="M7 15h10"/>',
     doc: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/>',
@@ -93,10 +95,6 @@
     return ED + "://file" + encodeURI(abs.startsWith("/") ? abs : "/" + abs) + ":" + m[2];
   };
   const loc = (t, label, cls) => { const h = hrefOf(t); return h ? '<a class="loc ' + (cls || "") + '" href="' + h + '">' + esc(label || t) + "</a>" : '<span class="mono">' + esc(label || t) + "</span>"; };
-  const CLIP = [];
-  const clip = (text) => CLIP.push(text) - 1;
-  const btn = (label, text, cls) => '<button class="btn ' + (cls || "") + '" data-copy="' + clip(text) + '">' + (/Claude/.test(label) ? ic("sparkle", "sm") : "") + esc(label) + "</button>";
-  const textBtn = (label, text, cls) => '<button class="text-btn ' + (cls || "") + '" data-copy="' + clip(text) + '">' + esc(label) + "</button>";
   const fileLine = (f) => { const i = f.lastIndexOf("/"); return '<div class="fname">' + loc(f + ":1", f.slice(i + 1)) + '</div><div class="fdir">' + esc(f.slice(0, i + 1)) + "</div>"; };
   const modLink = (id) => { const m = MOD.get(id); return m ? '<button class="link" data-mod="' + esc(id) + '">' + esc(m.name) + "</button>" : esc(id); };
   const q = () => (state.q || "").toLowerCase();
@@ -139,61 +137,11 @@
   const hl = (line) => { let out = "", last = 0, m; KW.lastIndex = 0; while ((m = KW.exec(line))) { out += esc(line.slice(last, m.index)) + '<span class="' + (m[1] ? "k4" : m[2] ? "k3" : m[3] ? "k1" : "k2") + '">' + esc(m[0]) + "</span>"; last = KW.lastIndex; } return out + esc(line.slice(last)); };
   const codeBlock = (c) => '<pre class="code">' + c.code.split("\n").map((l, i) => '<span class="l"><span class="ln">' + (c.start + i) + "</span>" + hl(l) + "</span>").join("") + (c.truncated ? '<span class="l"><span class="ln">…</span></span>' : "") + "</pre>";
 
-  // ---- prompts handed to the agent ----
-  const TAIL = "Before editing, run `veridic claim` with the route(s) or file(s) you will change. Make the smallest change that fixes it, add or fix a test that asserts the behavior, then run `veridic done` and keep going until it says DONE.";
-  const promptFor = (f) => f.area === "Tests"
-    ? "Fix this test in " + D.name + ": " + f.where + ' ("' + f.text + '"). ' + (f.why || "") + "\nSuggested fix: " + (f.fix || "") + "\nRead the code it exercises, assert what the title promises, and make sure the test would fail if that behavior broke. Run the test, then `veridic done`."
-    : "Fix this Veridic finding in " + D.name + ":\n\n" + f.severity.toUpperCase() + ": " + (f.title || f.kind) + " at " + f.where + "\n" + f.text + ((f.evidence || []).length ? "\nEvidence: " + f.evidence.join(", ") : "") + (f.fix ? "\nSuggested fix: " + f.fix : "") + "\n\nFirst confirm it is real by reading the evidence lines; if it is not, say why and stop. " + TAIL;
-  const promptAll = (list) => "Fix these " + list.length + " Veridic findings in " + D.name + ", one at a time, most severe first. For each: confirm it is real by reading the evidence (skip it and say why if not), then fix it.\n\n" + list.map((f, i) => (i + 1) + ". " + f.severity.toUpperCase() + ": " + (f.title || f.kind) + " at " + f.where + ": " + f.text + ((f.evidence || []).length ? " (evidence: " + f.evidence.join(", ") + ")" : "") + (f.fix ? "\n   Suggested fix: " + f.fix : "")).join("\n") + "\n\n" + TAIL;
-  const citesOf = (r) => r.cites.map((c) => c.cite).join(", ");
-  const promptTest = (s, r) => "In " + D.name + ", requirement " + r.id + " of " + s.path + " has no test that checks it:\n\n" + r.id + ": " + r.text + "\n\nIts code: " + citesOf(r) + "\n\nWrite a test with " + r.id + " in its title that asserts exactly this behavior and would fail if it broke. Run it, then `veridic tests` to confirm " + r.id + " shows as tested.";
-  const promptStale = (s, r) => "In " + D.name + ", the code behind requirement " + r.id + " of " + s.path + " changed since the spec was written:\n\n" + r.id + ": " + r.text + "\n\nCited: " + citesOf(r) + "\n\nRun `veridic stale` to see what changed. If only lines moved, run `veridic stale --fix`. If the behavior changed, decide whether the code or the requirement is right, update the other, then run `veridic check`.";
-  const promptSpec = (s) => {
-    const gaps = specReqs(s).filter((r) => !tested(r) || r.stale);
-    return gaps.length
-      ? "Close the gaps in " + s.path + " (" + D.name + "):\n\n" + gaps.map((r) => "- " + r.id + ": " + (r.stale ? "its code changed (" + citesOf(r) + "); re-check it. " : "") + (!tested(r) ? "needs a test named with " + r.id + ". " : "") + r.text).join("\n") + "\n\nFor stale ones run `veridic stale` (and `--fix` if lines only moved). Write each missing test with the requirement id in its title. Finish with `veridic check` and `veridic tests`."
-      : "Every requirement in " + s.path + " is tested and matches the code. Run `veridic metrics --card` to confirm.";
-  };
   const modRoutes = (m) => ROUTES.filter((r) => r.module === m.id);
   const modFindings = (m) => F.filter((f) => f.module === m.id);
   const screensOf = (m) => (m.screens || []).map((x) => x.file);
   const filesOf = (m) => [...m.files, ...m.code.filter((f) => !m.files.includes(f)), ...screensOf(m)];
-  // Everything the agent needs to know about a module: what it does, its routes and what each
-  // really does, its tables, screens, tests, rules, issues and neighbours. The page stays brief; this doesn't.
   const nameOf = (id) => (MOD.get(id) || { name: id }).name;
-  function ctx(m) {
-    const d = m.data || { owns: [], uses: [] };
-    const L = ["## Context: the " + m.name + " module of " + D.name, "It lets callers " + m.does.join(", ") + "."];
-    L.push("", "Routes (what each really does, traced through the code it calls):");
-    for (const r of modRoutes(m)) L.push("- " + r.id + ": " + [EFF[r.effect] || EFF.read, r.moves_money && "moves money", r.notifies && "notifies", r.external && "calls an outside service"].filter(Boolean).join(", ") + "; callable by " + (ACC[r.access] || r.access).toLowerCase() + (r.scoped && r.access !== "public" ? "; " + (OWN[r.scoped] || "").toLowerCase() : "") + ((r.tables || []).length ? "; tables: " + r.tables.map((t) => t.op + " " + t.table).join(", ") : "") + (m.tests.untested.includes(r.id) ? "; NO TEST" : "") + ". Code: " + r.handler);
-    if (d.owns.length) L.push("", "Tables it owns: " + d.owns.map((t) => t.table + " (" + t.at + ")" + (t.alsoWrittenBy.length ? ", also changed by " + t.alsoWrittenBy.map(nameOf).join(", ") : "")).join("; ") + ".");
-    if (d.uses.length) L.push("Tables it only reads (owned by other modules; change them there): " + d.uses.map((t) => t.table + (t.owner ? " (" + nameOf(t.owner) + ")" : "")).join(", ") + ".");
-    if ((m.screens || []).length) L.push("", "Screens that call it: " + m.screens.map((x) => x.file + " (" + x.kind + ")").join(", ") + ".");
-    L.push("", "Backend code: " + [...m.files, ...m.code.filter((f) => !m.files.includes(f))].join(", ") + ".");
-    if (m.shared.length) L.push("Shared code it relies on (used app-wide; change only if you must): " + m.shared.slice(0, 12).join(", ") + ".");
-    if (m.tests.files.length) L.push("Tests that reach it: " + m.tests.files.map((t) => t.file).join(", ") + ".");
-    for (const sp of specsOf(m)) L.push("", "Its rules (" + sp.path + "):", ...specReqs(sp).map((r) => "- " + r.id + ": " + r.text + (r.stale ? " [code changed since written]" : "") + (tested(r) ? "" : " [no test]")));
-    if (!m.specified) L.push("", "It has no spec yet: nothing written says what these routes must do.");
-    const iss = modFindings(m).filter((f) => f.severity !== "low");
-    if (iss.length) L.push("", "Open issues:", ...iss.map((f) => "- " + f.severity + ": " + (f.title || f.kind) + " at " + f.where + ": " + f.text));
-    if (m.usedBy.length) L.push("", "Modules that depend on it (re-check them after a change): " + m.usedBy.map((u) => nameOf(u.module) + " via " + u.via.join(", ")).join("; ") + ".");
-    if (m.uses.length) L.push("It depends on: " + m.uses.map((u) => nameOf(u.module)).join(", ") + ".");
-    return L.join("\n");
-  }
-  function appCtx() {
-    const A = D.app;
-    return ["## Context: " + ((A && A.title) || D.name), A ? A.about.split(/\n\s*\n/)[0] : "", "", "Its modules (found from the code):",
-      ...MODS.map((m) => "- " + m.name + ": " + m.does.slice(0, 4).join(", ") + ((m.data && m.data.owns.length) ? "; owns " + m.data.owns.map((t) => t.table).join(", ") : "") + "; code in " + m.files.slice(0, 3).join(", ")),
-    ].join("\n");
-  }
-  const WORKFLOW = "How to work: read the code first. If this changes what the app must do, add or update the rules in the module's spec (specs/<module>/spec.md), each backed by [evidence: file:line]. Run `veridic claim` with the routes and files you will change, so edits that leak into other modules get caught. Make the change, write tests that assert the new behavior, then run `veridic done` and keep going until it says DONE.";
-  const promptChange = (m, ask) => m
-    ? "In " + D.name + ", change the " + m.name + " module:\n\n" + ask + "\n\nFirst run `" + claimOf(m) + "`. " + WORKFLOW + "\n\n" + ctx(m)
-    : "In " + D.name + ":\n\n" + ask + "\n\nFirst work out which module(s) this belongs to from the list below, and say so. If it is new, say which existing module it sits next to, or that it is a new one. " + WORKFLOW + "\n\n" + appCtx();
-  const promptModuleSpec = (m) => "Use veridic to write a spec for the " + m.name + " module of " + D.name + ". Start with the riskiest behavior (money, deletes, writes). Write user stories with Given/When/Then scenarios, requirements backed by [evidence: file:line] citations to the code that does them, and the invariants that must always hold. Save it as specs/" + m.id + "/spec.md, then run `veridic check` and `veridic tests`.\n\n" + ctx(m);
-  const promptModuleTests = (m) => { const ids = m.tests.untested; return "In " + D.name + ", these routes of the " + m.name + " module have no test that calls them or names them:\n" + ids.map((x) => "- " + x).join("\n") + "\n\nRun `veridic claim " + ids.slice(0, 8).map((x) => JSON.stringify(x)).join(" ") + "` first. Then, starting with the routes that move money or change data, write tests that call each route and assert its real effect (status, body, and what changed in the data). Make each test fail if the behavior broke. Run them, then `veridic done`.\n\n" + ctx(m); };
-  const claimOf = (m) => "veridic claim " + [...m.routes, ...screensOf(m)].map((x) => JSON.stringify(x)).join(" ");
-  const promptTask = (m) => promptChange(m, "<describe what you want to change here>");
 
   // ---- state ----
   const NAV = [
@@ -228,47 +176,57 @@
     const stale = (m ? specsOf(m) : SPECS).flatMap(specReqs).filter((r) => r.stale).length;
     const safe = pct(routes - new Set(fs.filter((f) => f.severity !== "low" && f.area === "API").map((f) => f.where)).size, routes);
     return [
-      { k: "Safety", i: "shield", s: hi ? "risk" : me ? "care" : "good", p: safe, v: "of routes safe" + (hi ? " · " + plural(hi, "serious issue") : me ? " · " + plural(me, "issue") : "") },
-      { k: "Tests", i: "flask", s: tp >= 70 ? "good" : tp >= 30 ? "care" : "risk", p: tp, v: "of routes tested" },
-      { k: "Rules", i: "doc", s: sp >= 50 && !stale ? "good" : "care", p: sp, v: stale ? stale + " out of date" : sp ? "of routes covered" : "none written" },
+      { k: "Safety", i: "shield", s: hi ? "risk" : me ? "care" : "good", p: safe, v: hi ? hi + " serious" : me ? me + " to review" : "of routes safe" },
+      { k: "Tests", i: "flask", s: tp >= 70 ? "good" : tp >= 30 ? "care" : "risk", p: tp, v: "routes tested" },
+      { k: "Rules", i: "doc", s: sp >= 50 && !stale ? "good" : "care", p: sp, v: stale ? stale + " out of date" : sp ? "routes covered" : "none written" },
+      ...(!m && ST.modularity ? [{ k: "Modularity", i: "blocks", s: MODU.pct >= 80 ? "good" : MODU.pct >= 50 ? "care" : "risk", p: MODU.pct, v: MODU.clean + "/" + MODU.modules + " separate" }] : []),
+      ...(!m && ST.duplication ? [{ k: "Duplication", i: "copy", s: DUP.pct < 5 ? "good" : DUP.pct < 12 ? "care" : "risk", p: Math.round(DUP.pct), big: DUP.pct + "%", v: "of code copied" }] : []),
+      ...(m && ST.modularity ? (() => { const ps = MODU.problems.filter((p) => p.kind !== "hub" && p.modules.includes(m.id)), ds = dupsOf(m).filter((b) => b.lines >= 10); const n = ps.length + ds.length; return [{ k: "Structure", i: "blocks", s: ps.some((p) => p.kind === "cycle") ? "risk" : n ? "care" : "good", p: n ? Math.max(10, 100 - n * 20) : 100, big: n ? String(n) : "✓", v: n ? plural(n, "problem") : "separate" }]; })() : []),
       ...(!m && D.change ? [{ k: "Change", i: "branch", s: D.change.done ? "good" : "risk", p: D.change.done ? 100 : 0, big: D.change.done ? "✓" : String(D.change.problems.length), v: D.change.done ? "done" : "to finish", nav: "change" }] : []),
     ];
   }
-  const indRow = (list) => '<div class="inds">' + list.map((i) => { const c = IND[i.s][0]; return "<" + (i.nav ? 'button data-nav="' + i.nav + '"' : "div") + ' class="ind">' + ring(i.p, c, 64, i.big != null ? esc(i.big) : i.p + "%") + '<div><div class="ik">' + ic(i.i, "sm") + i.k + '</div><div class="iv t-' + c + '">' + IND[i.s][1] + '</div><div class="id2">' + esc(i.v) + "</div></div></" + (i.nav ? "button" : "div") + ">"; }).join("") + "</div>";
+  const indRow = (list) => '<div class="inds">' + list.map((i) => { const c = IND[i.s][0]; return "<" + (i.nav ? 'button data-nav="' + i.nav + '"' : "div") + ' class="ind">' + ring(i.p, c, 56, i.big != null ? esc(i.big) : i.p + "%") + '<div><div class="ik">' + ic(i.i, "sm") + i.k + '</div><div class="iv t-' + c + '">' + IND[i.s][1] + '</div><div class="id2">' + esc(i.v) + "</div></div></" + (i.nav ? "button" : "div") + ">"; }).join("") + "</div>";
 
-  // ---- Next steps: what to do, in order, each backed by an indicator and handed to Claude with full context ----
   const riskOrder = (a, b) => (b.risk || 0) - (a.risk || 0);
-  function nextSteps(scope) {
-    const steps = [];
+  // What needs attention, most serious first: each an observation backed by an indicator, and a link to where it is.
+  const ST = D.structure || {};
+  const MODU = ST.modularity || { problems: [] };
+  const DUP = ST.duplication || { blocks: [] };
+  const dupsOf = (m) => DUP.blocks.filter((b) => b.a.module === m.id || b.b.module === m.id);
+  const base = (f) => f.split("/").pop();
+  function attention(scope) {
+    const out = [];
     const mods = scope ? [scope] : [...MODS].sort(riskOrder);
+    const go = (m) => (scope ? "" : ' data-mod="' + esc(m.id) + '"');
     const c = D.change;
-    if (!scope && c && !c.done) steps.push({ i: "branch", c: "high", t: "Finish the change in progress", why: plural(c.problems.length, "problem") + " from veridic done: " + c.problems.slice(0, 2).join("; "), p: "Finish the current change in " + D.name + ". `veridic done` reports:\n\n" + c.problems.map((p) => "- " + p).join("\n") + "\n\nFix each, then run `veridic done` again until it says DONE." });
+    if (!scope && c && !c.done) out.push({ i: "branch", c: "high", t: "The change in progress isn't done", why: c.problems.slice(0, 2).join("; "), go: ' data-nav="change"' });
     for (const m of mods) {
       const fs = modFindings(m).filter((f) => f.severity === "high");
-      if (fs.length) steps.push({ i: "shield", c: "high", t: "Fix " + plural(fs.length, "serious issue") + (scope ? "" : " in " + m.name), why: [...new Set(fs.map((f) => f.title || f.kind))].join("; "), p: promptAll(fs) + "\n\n" + ctx(m) });
+      if (fs.length) out.push({ i: "shield", c: "high", t: plural(fs.length, "serious issue") + (scope ? "" : " in " + m.name), why: [...new Set(fs.map((f) => f.title || f.kind))].join("; "), go: go(m) });
     }
-    for (const sp of scope ? specsOf(scope) : SPECS) {
+    for (const [sp, si] of SPECS.map((x, i) => [x, i]).filter(([x]) => !scope || specsOf(scope).includes(x))) {
       const st = specReqs(sp).filter((r) => r.stale);
-      if (st.length) steps.push({ i: "doc", c: "med", t: "Re-check " + plural(st.length, "rule") + " whose code changed", why: specTitle(sp) + ": " + st.map((r) => r.id).join(", ") + " cite code that changed since they were written", p: promptSpec(sp) });
+      if (st.length) out.push({ i: "doc", c: "med", t: plural(st.length, "rule") + " out of date", why: specTitle(sp) + ": the code behind " + st.map((r) => r.id).join(", ") + " changed since they were written", go: ' data-spec="' + si + '"' });
     }
     for (const m of mods) {
       const fs = modFindings(m).filter((f) => f.severity === "medium" && f.area !== "Spec");
-      if (fs.length && !modFindings(m).some((f) => f.severity === "high")) steps.push({ i: "shield", c: "med", t: "Review " + plural(fs.length, "issue") + (scope ? "" : " in " + m.name), why: [...new Set(fs.map((f) => f.title || f.kind))].join("; "), p: promptAll(fs) + "\n\n" + ctx(m) });
+      if (fs.length && !modFindings(m).some((f) => f.severity === "high")) out.push({ i: "shield", c: "med", t: plural(fs.length, "issue") + " to review" + (scope ? "" : " in " + m.name), why: [...new Set(fs.map((f) => f.title || f.kind))].join("; "), go: go(m) });
     }
+    for (const p of MODU.problems.filter((p) => p.kind !== "hub" && (!scope || p.modules.includes(scope.id))).slice(0, scope ? 4 : 3)) {
+      if (p.kind === "shared-writes") { const locs = Object.values(p.at).flat(); out.push({ i: "branch", c: "med", t: p.names.slice(1).join(", ") + " also write" + (p.names.length > 2 ? "" : "s") + " " + p.table, why: "Owned by " + p.names[0] + "; written outside it at " + locs.slice(0, 2).map(base).join(", "), go: go(MOD.get(p.owner)) }); }
+      else out.push({ i: "branch", c: "med", t: p.names.join(" and ") + " depend on each other", why: "A change to either can break the other", go: go(MOD.get(p.modules[0])) });
+    }
+    const blocks = (scope ? dupsOf(scope) : DUP.blocks).filter((b) => b.lines >= 10);
+    if (blocks.length) { const b = blocks[0]; out.push({ i: "copy", c: "", t: plural(blocks.length, "block") + " of copied code" + (scope ? "" : ", " + DUP.pct + "% of the code"), why: "Largest: " + b.lines + " lines in " + base(b.a.file) + " and " + base(b.b.file), go: scope ? ' data-open="details"' : ' data-sub="structure"' }); }
     const needTests = mods.filter((m) => m.tests.untested.length && m.stats.writes + m.stats.destructive + m.stats.money).slice(0, scope ? 1 : 2);
-    for (const m of needTests) steps.push({ i: "flask", c: m.stats.money ? "high" : "med", t: "Add tests" + (scope ? "" : " to " + m.name), why: m.tests.untested.length + " of " + plural(m.stats.routes, "route") + " untested" + (m.stats.money ? "; it moves money" : m.stats.destructive ? "; it deletes data" : "; it changes data"), p: promptModuleTests(m) });
-    const needSpec = mods.filter((m) => !m.specified).slice(0, 1);
-    for (const m of needSpec) steps.push({ i: "doc", c: "", t: "Write down the rules" + (scope ? "" : " for " + m.name), why: "No spec yet, so a bug and an intended change look the same" + (m.stats.money ? "; it moves money" : ""), p: promptModuleSpec(m) });
-    if (!scope && T && T.unasserted + T.empty) {
-      const tf = F.filter((f) => f.area === "Tests" && f.severity === "medium");
-      steps.push({ i: "flask", c: "med", t: "Fix tests that check nothing", why: plural(T.unasserted + T.empty, "test") + " pass even when the code is broken", p: promptAll(tf.slice(0, 40)) });
-    }
-    return steps;
+    for (const m of needTests) out.push({ i: "flask", c: m.stats.money ? "high" : "med", t: (scope ? "" : m.name + ": ") + m.tests.untested.length + " of " + plural(m.stats.routes, "route") + " untested", why: m.stats.money ? "It moves money" : m.stats.destructive ? "It deletes data" : "It changes data", go: go(m) });
+    for (const m of mods.filter((m) => !m.specified).slice(0, 1)) out.push({ i: "doc", c: "", t: (scope ? "No" : m.name + " has no") + " written rules", why: "Nothing says what its routes must do, so a bug and an intended change look the same", go: scope ? "" : ' data-nav="spec"' });
+    if (!scope && T && T.unasserted + T.empty) out.push({ i: "flask", c: "med", t: plural(T.unasserted + T.empty, "test") + " check nothing", why: "They pass even when the code is broken", go: ' data-sub="tests"' });
+    return out;
   }
-  const stepList = (steps, n) => steps.length
-    ? '<div class="steps">' + steps.slice(0, n).map((s, i) => '<div class="stepc"><span class="sico ' + (s.c || "none") + '">' + ic(s.i || "sparkle") + '</span><div class="main"><div class="title">' + esc(s.t) + '</div><div class="sub" title="' + esc(s.why) + '">' + esc(s.why) + "</div></div>" + btn("Copy for Claude", s.p, i === 0 ? "primary" : "") + "</div>").join("") + "</div>"
-    : empty("Nothing pressing. Every route is checked, tested and covered by rules.");
-  const composer = (key, placeholder) => '<div class="composer"><textarea id="ask-' + key + '" rows="2" placeholder="' + esc(placeholder) + '"></textarea><div class="row"><span class="faint small">Copies a prompt with everything Claude needs to know about ' + (key === "app" ? "the app" : "this module") + ".</span>" + '<button class="btn primary" data-compose="' + esc(key) + '">' + ic("sparkle", "sm") + 'Copy for Claude</button></div></div>';
+  const attList = (items, n) => items.length
+    ? '<div class="steps">' + items.slice(0, n).map((s) => "<" + (s.go ? "button" : "div") + ' class="stepc' + (s.go ? " go" : "") + '"' + (s.go || "") + '><span class="sico ' + (s.c || "none") + '">' + ic(s.i) + '</span><div class="main"><div class="title">' + esc(s.t) + '</div><div class="sub" title="' + esc(s.why) + '">' + esc(s.why) + "</div></div>" + (s.go ? ic("chev", "sm faint") : "") + "</" + (s.go ? "button" : "div") + ">").join("") + "</div>"
+    : empty("Nothing needs attention. Every route is checked, tested and covered by rules.");
 
   // ---- Home: the repo in a glance, and what to do next ----
   function vModules() {
@@ -276,11 +234,9 @@
     let h = "<h1>" + esc((A && A.title) || D.name) + "</h1>";
     h += A ? '<div class="about clamp">' + mdBlock(A.about.split(/\n\s*\n/)[0]) + "</div>" : '<p class="lead">No README describes this app yet.</p>';
     h += indRow(indicators(null));
-    const steps = nextSteps(null);
-    h += section("next", "Next steps", null, steps.length > 5 ? '<button class="text-btn" data-open="steps">All ' + steps.length + "</button>" : "");
-    h += stepList(steps, state.open.has("steps") ? 99 : 5);
-    h += section("build", "Build or change something");
-    h += composer("app", "Describe a feature or a change, in your own words…");
+    const items = attention(null);
+    h += section("next", "Needs attention", items.length || null, items.length > 6 ? '<button class="text-btn" data-open="steps">Show all</button>' : "");
+    h += attList(items, state.open.has("steps") ? 99 : 6);
     h += section("modules", "Modules", MODS.length);
     if (!MODS.length) return h + empty("Veridic finds modules from the app's routes. Run <code>veridic init</code> in the repo so it can index the code.");
     const list = MODS.filter((m) => match(m.name + " " + m.does.join(" ")));
@@ -290,10 +246,10 @@
 
   // A module as a tile: its health at a glance. Three pips: safety, tests, rules.
   function tile(m) {
-    const [sf, ts, rl] = indicators(m);
+    const [sf, ts, rl, sr] = indicators(m);
     const worst = [sf, ts, rl].some((x) => x.s === "risk") ? "high" : [sf, ts, rl].some((x) => x.s === "care") ? "med" : "ok";
     const pip = (x) => '<span class="pip ' + IND[x.s][0] + '" title="' + x.k + ": " + IND[x.s][1] + '">' + ic(x.i, "sm") + "</span>";
-    return '<button class="tile ' + worst + '" data-mod="' + esc(m.id) + '"><div class="tname">' + esc(m.name) + '</div><div class="tsub">' + ic("route", "sm") + m.stats.routes + ((m.data && m.data.owns.length) ? ic("db", "sm") + m.data.owns.length : "") + ((m.screens || []).length ? ic("monitor", "sm") + m.screens.length : "") + '</div><div class="pips">' + pip(sf) + pip(ts) + pip(rl) + "</div></button>";
+    return '<button class="tile ' + worst + '" data-mod="' + esc(m.id) + '"><div class="tname">' + esc(m.name) + '</div><div class="tsub">' + ic("route", "sm") + m.stats.routes + ((m.data && m.data.owns.length) ? ic("db", "sm") + m.data.owns.length : "") + ((m.screens || []).length ? ic("monitor", "sm") + m.screens.length : "") + '</div><div class="pips">' + pip(sf) + pip(ts) + pip(rl) + (sr ? pip(sr) : "") + "</div></button>";
   }
 
   // ---- A module: a glance, its next steps, and a box to change it. The detail is the agent's, behind "Details" ----
@@ -304,11 +260,8 @@
     h += "<h1>" + esc(m.name) + "</h1>";
     if (m.does.length) h += '<p class="lead">Lets callers ' + m.does.slice(0, 4).map(esc).join(", ") + (m.does.length > 4 ? ", and more" : "") + ".</p>";
     h += '<div class="mgrid"><div class="mcol">' + indRow(indicators(m));
-    const steps = nextSteps(m);
-    h += section("next", "Next steps");
-    h += stepList(steps, 4);
-    h += section("build", "Change something here");
-    h += composer(m.id, "What should change in " + m.name + "?") + '</div><aside class="mside">' + shape(m) + "</aside></div>";
+    h += section("next", "Needs attention");
+    h += attList(attention(m), 8) + '</div><aside class="mside">' + shape(m) + "</aside></div>";
     h += '<details class="details"' + (state.open.has("details") ? " open" : "") + ' data-details><summary>Details<span class="faint"> · ' + plural(m.stats.routes, "route") + ((m.data && m.data.owns.length) ? ", " + plural(m.data.owns.length, "table") : "") + ((m.screens || []).length ? ", " + plural(m.screens.length, "screen") : "") + "</span></summary>" + moduleDetails(m) + "</details>";
     return h;
   }
@@ -330,7 +283,7 @@
 
     // Issues: only when there are some.
     if (fs.length) {
-      h += section("issues", "Issues", fs.length, fs.length > 1 ? textBtn("Copy prompt to fix all", promptAll(fs)) : "");
+      h += section("issues", "Issues", fs.length, "");
       h += few("issues", fs.sort((a, b) => rank(a.severity) - rank(b.severity)), 3, (f) => liOpen(
         '<div style="display:flex;gap:12px;align-items:baseline">' + dot(SEVC[f.severity]) + '<div style="min-width:0">' + two(esc(f.title || f.kind), '<span class="mono">' + esc(f.where) + "</span>") + "</div></div>", "", issueDetail(f)));
     }
@@ -344,11 +297,11 @@
         const shown = reqs.length ? reqs : specReqs(sp);
         h += section("rules", "Rules", shown.length, '<button class="text-btn" data-spec="' + si + '">' + esc(specTitle(sp)) + " →</button>");
         h += few("rules-" + si, shown, 6, (r) => { const st = REQ[r.status] || REQ.none; const c = r.stale ? "med" : st[1]; return li('<div class="req" style="display:flex;gap:12px;align-items:baseline"><span class="id">' + esc(r.id) + '</span><span>' + md(r.text) + "</span></div>", '<span class="tag ' + (c === "ok" ? "" : c) + '">' + (r.stale ? "code changed" : st[0].toLowerCase()) + "</span>"); }, "compact");
-        if (m.specified < s.routes) h += '<p class="small muted" style="margin-top:8px">' + plural(s.routes - m.specified, "route") + " not covered yet. " + textBtn("Draft the rest", promptModuleSpec(m), "accent") + "</p>";
+        if (m.specified < s.routes) h += '<p class="small muted" style="margin-top:8px">' + plural(s.routes - m.specified, "route") + " not covered by its rules yet.</p>";
       }
     } else {
       h += section("rules", "Rules");
-      h += empty("No spec yet. Nothing written says what these routes must do, so nothing can tell a bug from an intended change." + (s.money ? " It moves money, so it's a good one to start with." : ""), btn("Draft a spec", promptModuleSpec(m)));
+      h += empty("No spec yet. Nothing written says what these routes must do, so nothing can tell a bug from an intended change." + (s.money ? " It moves money, so it's a good one to start with." : ""));
     }
 
     // Routes.
@@ -377,8 +330,12 @@
     // Tests: one sentence and one action.
     const nT = s.routes - m.tests.untested.length;
     h += section("tests", "Tests");
-    h += '<div class="li" style="border-top:1px solid var(--line)"><div class="main"><div>' + (nT === s.routes ? "Every route has a test." : nT + " of " + plural(s.routes, "route") + " have a test.") + '</div><div class="meter"><span data-w="' + pct(nT, s.routes) + '"></span></div></div><div class="end">' + (m.tests.untested.length ? textBtn("Write the missing tests", promptModuleTests(m), "accent") : "") + "</div></div>";
+    h += '<div class="li" style="border-top:1px solid var(--line)"><div class="main"><div>' + (nT === s.routes ? "Every route has a test." : nT + " of " + plural(s.routes, "route") + " have a test.") + '</div><div class="meter"><span data-w="' + pct(nT, s.routes) + '"></span></div></div><div class="end">' + "" + "</div></div>";
     if (m.tests.files.length) h += few("testfiles", m.tests.files, 3, (t) => li(fileLine(t.file), plural(t.tests, "test")), "compact");
+
+    // Copied code that touches this module.
+    const ds = dupsOf(m);
+    if (ds.length) { h += section("dups", "Copied code", ds.length); h += few("mdups", ds, 4, (b) => li(two(loc(b.a.file + ":" + b.a.start, base(b.a.file) + ":" + b.a.start) + '<span class="sep">=</span>' + loc(b.b.file + ":" + b.b.start, base(b.b.file) + ":" + b.b.start), ""), '<span class="tag">' + b.lines + " lines</span>"), "compact"); }
 
     // Connected modules.
     if (m.usedBy.length || m.uses.length) {
@@ -393,8 +350,7 @@
     const ev = (f.evidence || []).filter((e) => LOC.test(e));
     return (f.why ? "<p>" + esc(f.why) + "</p>" : "") + '<p class="muted small" style="margin-top:6px">' + esc(f.text) + "</p>" +
       (f.fix ? '<div class="fix"><b>Fix.</b> ' + esc(f.fix) + "</div>" : "") +
-      (ev.length ? '<p class="small">' + ev.slice(0, 4).map((e) => loc(e)).join('<span class="sep">·</span>') + "</p>" : "") +
-      '<div class="actions" style="margin-top:12px">' + btn("Copy fix prompt", promptFor(f), "primary") + "</div>";
+      (ev.length ? '<p class="small">' + ev.slice(0, 4).map((e) => loc(e)).join('<span class="sep">·</span>') + "</p>" : "");
   }
   function routeRow(r, m) {
     const iss = issuesByRoute.get(r.id) || [];
@@ -416,7 +372,7 @@
       "<dt>Code</dt><dd>" + loc(r.handler) + "</dd>" +
       (r.evidence.length ? "<dt>Why</dt><dd>" + r.evidence.slice(0, 4).map((x) => esc(x.kind.replace(/_/g, " ")) + " at " + loc(x.at)).join("<br>") + (r.evidence.length > 4 ? '<br><span class="muted">and ' + (r.evidence.length - 4) + " more</span>" : "") + "</dd>" : "") +
       "</dl>";
-    for (const f of iss) h += '<div class="fix"><b>' + esc(f.title) + ".</b> " + esc(f.why) + (f.fix ? " <span class=\"muted\">Fix: " + esc(f.fix) + "</span>" : "") + '<div style="margin-top:6px">' + textBtn("Copy fix prompt", promptFor(f), "accent") + "</div></div>";
+    for (const f of iss) h += '<div class="fix"><b>' + esc(f.title) + ".</b> " + esc(f.why) + (f.fix ? " <span class=\"muted\">Fix: " + esc(f.fix) + "</span>" : "") + "</div>";
     return h;
   }
 
@@ -444,7 +400,7 @@
   function noSpecPane(m) {
     return '<div class="nospec"><span class="sico ' + (m.stats.money ? "high" : "med") + '" style="width:48px;height:48px">' + ic("doc") + '</span><div class="main"><div class="title" style="font-size:17px">' + esc(m.name) + ' has no rules yet</div><div class="muted">' +
       plural(m.stats.routes, "route") + (m.stats.money ? ", moves money" : m.stats.destructive ? ", deletes data" : m.stats.writes ? ", changes data" : "") + ". Without written rules, nothing can tell a bug from an intended change.</div>" +
-      '<div class="actions">' + btn("Copy for Claude", promptModuleSpec(m), "primary") + '<button class="btn quiet" data-mod="' + esc(m.id) + '">Open module</button></div><div class="faint small" style="margin-top:8px">Claude reads the module\'s code and writes specs/' + esc(m.id) + "/spec.md, each rule tied to the lines that do it.</div></div></div>";
+      '<div class="actions"><button class="btn" data-mod="' + esc(m.id) + '">Open module</button></div></div></div>';
   }
   function specPane(s, si) {
     const rs = specReqs(s), other = s.requirements.filter((r) => !r.requirement), doc = s.doc || { meta: {}, stories: [], tables: [], notes: [] };
@@ -454,7 +410,6 @@
     h += '<div class="inds" style="margin-top:16px">' + '<div class="ind">' + ring(100, "faint", 56, String(rs.length)) + '<div><div class="ik">' + ic("doc", "sm") + 'Rules</div><div class="id2">' + plural(doc.stories.length, "story", "stories") + "</div></div></div>" +
       '<div class="ind">' + ring(tp, cl(tp), 56, tp + "%") + '<div><div class="ik">' + ic("flask", "sm") + 'Tested</div><div class="id2">' + nT + " of " + rs.length + "</div></div></div>" +
       '<div class="ind">' + ring(mp, cl(mp), 56, mp + "%") + '<div><div class="ik">' + ic("check", "sm") + 'Match the code</div><div class="id2">' + (nStale ? nStale + " changed" : "all current") + "</div></div></div></div>";
-    if (nT < rs.length || nStale) h += '<div class="actions">' + btn("Copy for Claude: close the gaps", promptSpec(s), "primary") + "</div>";
     if (doc.stories.length) {
       h += section("stories", "What should happen", doc.stories.length);
       h += '<div class="list">' + doc.stories.map((st) => '<div class="story"><div class="title" style="font-weight:500">' + md(st.title) + "</div>" + (st.why ? '<div class="muted small">' + md(st.why) + "</div>" : "") +
@@ -478,7 +433,7 @@
     if (!onlyCode) {
       if (r.checks && r.checks.length) h += '<dl class="kv"><dt>What proves it</dt><dd>' + r.checks.map((v) => '<span class="mono faint">' + esc(v.id) + "</span> " + md(v.text)).join("<br>") + "</dd></dl>";
       h += '<dl class="kv"><dt>Checked by</dt><dd>' + (r.tests.length ? r.tests.map((t) => loc(t)).join("<br>") : '<span class="t-med">no test yet</span>') + "</dd></dl>";
-      const acts = (!tested(r) ? textBtn("Copy prompt to write the test", promptTest(s, r), "accent") : "") + (r.stale ? textBtn("Copy prompt to re-check it", promptStale(s, r), "accent") : "");
+      const acts = r.stale ? '<span class="t-med small">The code it cites changed since it was written.</span>' : "";
       if (acts) h += '<div class="actions" style="margin:0 0 12px;gap:16px">' + acts + "</div>";
     }
     h += r.cites.map((c) => '<div style="margin-top:10px">' + (c.resolves ? loc(c.file + ":" + c.start + (c.end !== c.start ? "-" + c.end : "")) : '<span class="mono t-high">' + esc(c.cite) + "</span> <span class=\"small t-high\">" + esc(c.problem) + "</span>") + (c.code != null ? codeBlock(c) : "") + "</div>").join("");
@@ -488,10 +443,10 @@
 
   // ---- Overview: everything app-wide, for when one module isn't the question ----
   function vOverview() {
-    const subs = [["summary", "Summary"], ["findings", "Findings", F.filter((f) => f.severity !== "low").length], ["routes", "Routes", ROUTES.length], ["tests", "Tests", T ? T.tests : null]];
+    const subs = [["summary", "Summary"], ["findings", "Findings", F.filter((f) => f.severity !== "low").length], ["routes", "Routes", ROUTES.length], ["tests", "Tests", T ? T.tests : null], ["structure", "Structure", null]];
     let h = "<h1>Overview</h1><p class=\"lead\">The whole app at once: every finding, route and test.</p>";
     h += '<div class="tabs">' + subs.map(([k, t, n]) => '<button class="tab" data-f="sub" data-v="' + k + '" aria-pressed="' + (state.sub === k) + '">' + t + (n ? '<span class="n">' + n.toLocaleString() + "</span>" : "") + "</button>").join("") + "</div>";
-    return h + ({ summary: oSummary, findings: oFindings, routes: oRoutes, tests: oTests }[state.sub] || oSummary)();
+    return h + ({ summary: oSummary, findings: oFindings, routes: oRoutes, tests: oTests, structure: oStructure }[state.sub] || oSummary)();
   }
   function oSummary() {
     const r = D.readiness || {};
@@ -502,7 +457,7 @@
     let h = '<div class="facts">' + fact(ROUTES.length, "routes, " + ((r.writes || 0) + (r.destructive || 0)) + " change data") +
       fact(r.move_money || 0, "move money") + fact(pct(ROUTES.length - unsafe, ROUTES.length) + "%", "safe for AI agents", pct(ROUTES.length - unsafe, ROUTES.length)) +
       (T ? fact(pct(T.strong + T.weak, T.tests) + "%", "of tests check something", pct(T.strong + T.weak, T.tests)) : "") + "</div>";
-    h += section("fix", hi ? plural(hi, "high-risk issue") : "Fix first", null, top.length ? textBtn("Copy prompt to fix all " + top.length, promptAll(top)) : "");
+    h += section("fix", hi ? plural(hi, "high-risk issue") : "Fix first", null, "");
     const g = GROUPS.filter((x) => x.severity !== "low").slice(0, 6);
     h += g.length ? '<div class="list">' + g.map((x) => liBtn('<div style="display:flex;gap:12px;align-items:baseline">' + dot(SEVC[x.severity]) + '<div style="min-width:0">' + two(esc(x.title), esc(x.why)) + "</div></div>", plural(x.items.length, "place"), ' data-group="' + esc(x.key) + '"')).join("") + "</div>" : empty("Nothing high or medium.");
     if (D.errors && D.errors.length) h += section("errors", "Couldn't check") + '<p class="muted small">' + D.errors.map(esc).join("<br>") + "</p>";
@@ -518,8 +473,7 @@
   }
   function groupDetail(g) {
     let h = g.fix ? '<div class="fix"><b>Fix.</b> ' + esc(g.fix) + "</div>" : "";
-    h += '<div class="actions" style="margin:6px 0 10px">' + btn(g.items.length === 1 ? "Copy fix prompt" : "Copy prompt to fix all " + g.items.length, g.items.length === 1 ? promptFor(g.items[0]) : promptAll(g.items), "primary") + "</div>";
-    h += '<div class="list compact">' + g.items.slice(0, 100).map((f) => li((LOC.test(f.where) ? loc(f.where) : '<span class="mono">' + esc(f.where) + "</span>") + '<div class="sub wrap">' + esc(f.text) + (f.module && MOD.get(f.module) ? '<span class="sep">·</span>' + modLink(f.module) : "") + "</div>", '<span class="hover-only">' + textBtn("Copy fix prompt", promptFor(f)) + "</span>")).join("") + "</div>" + (g.items.length > 100 ? '<p class="muted small">and ' + (g.items.length - 100) + " more</p>" : "");
+    h += '<div class="list compact">' + g.items.slice(0, 100).map((f) => li((LOC.test(f.where) ? loc(f.where) : '<span class="mono">' + esc(f.where) + "</span>") + '<div class="sub wrap">' + esc(f.text) + (f.module && MOD.get(f.module) ? '<span class="sep">·</span>' + modLink(f.module) : "") + "</div>")).join("") + "</div>" + (g.items.length > 100 ? '<p class="muted small">and ' + (g.items.length - 100) + " more</p>" : "");
     return h;
   }
   function oRoutes() {
@@ -530,6 +484,20 @@
     const list = ROUTES.filter((rt) => FL[state.rf](rt) && match(rt.id + " " + rt.handler));
     return h + (few("routes", list, 40, (r) => routeRow(r, null)) || empty("Nothing matches."));
   }
+  // Structure: modules that reach into each other's data or depend on each other, and copied code.
+  function oStructure() {
+    let h = indRow(indicators(null).filter((i) => i.k === "Modularity" || i.k === "Duplication"));
+    const ps = MODU.problems.filter((p) => p.kind !== "hub");
+    h += section("mod", "Between modules", ps.length || null);
+    h += ps.length ? few("modp", ps, 8, (p) => p.kind === "shared-writes"
+      ? liOpen(two('<span class="mono">' + esc(p.table) + "</span> is written outside " + esc(p.names[0]), "by " + esc(p.names.slice(1).join(", "))), "", '<dl class="kv"><dt>Owner</dt><dd>' + modLink(p.owner) + "</dd>" + Object.entries(p.at).map(([o, locs]) => "<dt>Written by " + esc(nameOf(o)) + "</dt><dd>" + locs.map((l) => loc(l)).join("<br>") + "</dd>").join("") + "</dl>")
+      : liOpen(two(esc(p.names.join(" and ")) + " depend on each other", "A change to either can break the other"), "", '<dl class="kv">' + Object.entries(p.via).map(([o, files]) => "<dt>" + esc(nameOf(o)) + " uses the other through</dt><dd>" + files.map((f) => loc(f + ":1")).join("<br>") + "</dd>").join("") + "</dl>")) : empty("Every module keeps to its own tables, and none depend on each other in a loop.");
+    const hubs = MODU.problems.filter((p) => p.kind === "hub");
+    if (hubs.length) h += '<p class="muted small" style="margin-top:10px">Most of the app depends on ' + hubs.map((p) => modLink(p.modules[0])).join(", ") + ": a change there reaches far.</p>";
+    h += section("dup", "Copied code", DUP.blocks.length || null);
+    h += DUP.blocks.length ? few("dups", DUP.blocks.filter((b) => match(b.a.file + b.b.file)), 10, (b) => li(two(loc(b.a.file + ":" + b.a.start, base(b.a.file) + ":" + b.a.start) + '<span class="sep">=</span>' + loc(b.b.file + ":" + b.b.start, base(b.b.file) + ":" + b.b.start), (b.a.module ? esc(nameOf(b.a.module)) : "shared") + (b.a.module !== b.b.module ? " and " + (b.b.module ? esc(nameOf(b.b.module)) : "shared") : "") + (b.copies > 2 ? '<span class="sep">·</span>' + b.copies + " copies" : "")), '<span class="tag">' + b.lines + " lines</span>")) : empty("No copied blocks found.");
+    return h;
+  }
   function oTests() {
     if (!T) return empty("No tests found. Veridic looks for *.test.* and *.spec.* files.");
     const nothing = T.unasserted + T.empty;
@@ -539,7 +507,7 @@
     const rows = [...(fl.empty || []).map((t) => ({ ...t, k: "empty", c: "high" })), ...(fl.unasserted || []).map((t) => ({ ...t, k: "checks nothing", c: "high" })), ...(fl.weak || []).map((t) => ({ ...t, k: "loose checks", c: "" }))].filter((t) => match(t.at + " " + t.title));
     if (rows.length) {
       h += section("fixtests", "Tests to fix", rows.length);
-      h += few("tests", rows, 20, (t) => { const f = F.find((x) => x.where === t.at) || { area: "Tests", where: t.at, text: t.title, fix: "", why: "" }; return li(two(esc(t.title), loc(t.at)), '<span class="hover-only">' + textBtn("Copy fix prompt", promptFor(f)) + '</span><span class="tag ' + t.c + '">' + t.k + "</span>"); });
+      h += few("tests", rows, 20, (t) => li(two(esc(t.title), loc(t.at)), '<span class="tag ' + t.c + '">' + t.k + "</span>"));
     }
     return h;
   }
@@ -548,7 +516,6 @@
   function vChange() {
     const c = D.change;
     let h = "<h1>" + (c.done ? "Done" : "Not done yet") + '</h1><p class="lead">' + (c.done ? "The change stays within its claim, and the routes it changed have tests that check them." : "Your uncommitted change, checked against what the task claimed. " + plural(c.problems.length, "thing") + " to finish.") + "</p>";
-    if (c.problems.length) h += '<div class="actions">' + btn("Copy prompt to finish it", "Finish the current change in " + D.name + ". `veridic done` reports:\n\n" + c.problems.map((p) => "- " + p).join("\n") + "\n\nFix each, then run `veridic done` again until it says DONE.", "primary") + "</div>";
     h += section("claim", "Claimed", c.claims.length || null);
     h += c.claims.length ? '<p class="mono small">' + c.claims.map(esc).join("<br>") + "</p>" : empty("Nothing claimed. Run <code>veridic claim &lt;route&gt;</code> before editing, so stray edits can be caught.");
     if (c.problems.length) h += section("problems", "To finish", c.problems.length) + '<div class="list">' + c.problems.map((p) => li('<div style="display:flex;gap:12px;align-items:baseline">' + dot("high") + "<span>" + esc(p) + "</span></div>")).join("") + "</div>";
@@ -566,7 +533,7 @@
       '<label class="search">' + ic("search", "sm") + '<input id="q" placeholder="Search" autocomplete="off" spellcheck="false"><kbd>/</kbd></label>' +
       '<nav class="nav" id="nav"></nav><div class="mods" id="mods"></div>' +
       '<div class="sidefoot"><span class="grow" title="' + esc(new Date(D.generated).toLocaleString()) + '">' + esc(ago(D.generated)) + '</span><select class="pick" id="editor" title="Where file links open"><option value="vscode">VS Code</option><option value="cursor">Cursor</option><option value="none">No links</option></select>' +
-      '<button class="iconbtn" id="refresh" title="Copy the command that refreshes this report">' + ic("refresh", "sm") + '</button><button class="iconbtn" id="theme" aria-label="Toggle light or dark"></button></div></aside>' +
+      '<button class="iconbtn" id="theme" aria-label="Toggle light or dark"></button></div></aside>' +
       '<div class="content"><main class="page" id="main"></main></div></div>';
     $("#editor").value = ED;
   }
@@ -576,7 +543,6 @@
     $("#mods").innerHTML = MODS.length ? '<div class="label">Modules</div>' + MODS.map((m) => { const st = statusOf(m); return '<button class="item' + (state.view === "module" && state.mod === m.id ? " on" : "") + '" data-mod="' + esc(m.id) + '"><span class="grow">' + esc(m.name) + "</span>" + (st && st.c ? dot(st.c) : "") + "</button>"; }).join("") : "";
   }
   function render(keepScroll) {
-    CLIP.length = 0;
     seq = 0;
     const main = $("#main");
     main.className = "page fade" + (state.view !== "change" ? " wide" : "");
@@ -625,10 +591,6 @@
   }
   const toastEl = $("#toast");
   function toast(msg) { toastEl.innerHTML = ic("check", "sm") + esc(msg); toastEl.classList.add("on"); clearTimeout(toast.t); toast.t = setTimeout(() => toastEl.classList.remove("on"), 1800); }
-  async function copy(text, msg) {
-    try { await navigator.clipboard.writeText(text); } catch { const a = document.createElement("textarea"); a.value = text; document.body.appendChild(a); a.select(); document.execCommand("copy"); a.remove(); }
-    toast(msg || "Copied. Paste it into Claude Code.");
-  }
 
   shell();
   applyTheme();
@@ -637,10 +599,6 @@
 
   document.addEventListener("click", (e) => {
     const t = e.target;
-    const c = t.closest("[data-copy]");
-    if (c) { e.preventDefault(); e.stopPropagation(); copy(CLIP[+c.dataset.copy]); return; }
-    const cp = t.closest("[data-compose]");
-    if (cp) { const k = cp.dataset.compose, box = document.getElementById("ask-" + k), ask = box && box.value.trim(); if (!ask) { toast("Describe the change first."); if (box) box.focus(); return; } copy(promptChange(MOD.get(k) || null, ask)); return; }
     const md0 = t.closest("[data-mod]");
     if (md0) { openModule(md0.dataset.mod, md0.dataset.to); return; }
     const sp = t.closest("[data-spec]");
@@ -677,7 +635,6 @@
   $("#q").addEventListener("input", (e) => { state.q = e.target.value; state.pages = {}; render(true); });
   $("#editor").addEventListener("change", (e) => { ED = e.target.value; store.set("editor", ED); render(true); });
   $("#theme").addEventListener("click", () => { store.set("theme", effective() === "dark" ? "light" : "dark"); applyTheme(); });
-  $("#refresh").addEventListener("click", () => copy("cd " + JSON.stringify(D.repo) + " && veridic report", "Command copied. Run it in a terminal."));
   matchMedia("(prefers-color-scheme: dark)").addEventListener("change", applyTheme);
   document.addEventListener("keydown", (e) => {
     const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement && document.activeElement.tagName);

@@ -244,20 +244,24 @@ table.plain td { padding: 7px 10px 7px 0; border-bottom: 1px solid var(--line); 
 }
 
 /* ---- indicators: a ring gauge each ---- */
-.inds { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin-top: 28px; }
-.ind { display: flex; gap: 14px; align-items: center; padding: 14px 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); text-align: left; }
+.inds { display: grid; grid-template-columns: repeat(auto-fit, minmax(176px, 1fr)); gap: 10px; margin-top: 28px; }
+.ind { display: flex; gap: 12px; align-items: center; padding: 12px 14px; min-width: 0; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); text-align: left; }
 button.ind:hover { border-color: var(--faint); }
 .ring { flex: none; }
 .ring text { font: 600 14px var(--sans); fill: var(--text); }
 .ring .arc { transition: stroke-dasharray 0.9s cubic-bezier(0.2, 0.7, 0.2, 1); }
 .ik { color: var(--muted); font-size: 12.5px; display: flex; gap: 6px; align-items: center; }
 .iv { font-weight: 600; font-size: 14.5px; margin-top: 1px; }
-.id2 { color: var(--faint); font-size: 12px; }
+.id2 { color: var(--faint); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ind > div { min-width: 0; }
+.iv { white-space: nowrap; }
 
 /* ---- next steps: an icon, a line, one button ---- */
 .steps { display: grid; gap: 8px; }
 .stepc { display: flex; gap: 14px; align-items: center; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); min-width: 0; }
 .stepc .main { flex: 1; min-width: 0; }
+button.stepc { width: 100%; text-align: left; cursor: pointer; }
+button.stepc:hover { border-color: var(--faint); }
 .stepc .title { font-weight: 550; }
 .stepc .sub { color: var(--muted); font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sico { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; flex: none; background: var(--hover); color: var(--muted); }
@@ -265,12 +269,6 @@ button.ind:hover { border-color: var(--faint); }
 .sico.med { color: var(--med); background: color-mix(in srgb, var(--med) 14%, transparent); }
 .sico.ok { color: var(--ok); background: color-mix(in srgb, var(--ok) 14%, transparent); }
 .btn .i { margin-left: -2px; }
-
-/* ---- composer: describe a change, get a prompt ---- */
-.composer { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); padding: 12px 12px 10px; }
-.composer:focus-within { border-color: var(--faint); box-shadow: var(--ring); }
-.composer textarea { width: 100%; border: 0; outline: none; resize: vertical; background: none; color: var(--text); font: inherit; font-size: 14.5px; min-height: 48px; }
-.composer .row { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
 
 /* ---- module tiles ---- */
 .tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
