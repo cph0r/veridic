@@ -1,18 +1,30 @@
 #!/usr/bin/env node
 // Gather a feature's context before a spec session: scope, contract comparison
 // and all relevant code as one Markdown document. Prints it, or writes it with
-// --out <file>. Seeds as for scope.
+// --out <file>. Seeds as for scope, or --module <id> for one of the modules
+// `veridic modules` lists: its routes as the seeds, and its full context
+// (what each route really does, tables, screens, tests, rules, findings) first.
 
 import fs from "node:fs";
 import { prepare } from "../../core/prepare.mjs";
+import { loadModules, findModule, moduleMarkdown } from "../../core/modulectx.mjs";
 import { parseArgs, emit, fail, run, writeAll } from "./_cli.mjs";
 
-const usage = 'prepare.mjs --repo <path> "<METHOD /path>" | <file> | <symbol> ... [--out <context.md>] [--all] [--entry <app file>]';
+const usage = 'prepare.mjs --repo <path> ("<METHOD /path>" | <file> | <symbol> ... | --module <id>) [--out <context.md>] [--all] [--entry <app file>]';
 
-run(() => {
-  const a = parseArgs(process.argv.slice(2), { flags: ["repo", "out", "entry"], bools: ["all"] });
-  if (!a.repo || !a._.length) fail("need --repo and at least one seed", usage);
-  const r = prepare(a.repo, a._, { entry: a.entry, all: !!a.all });
+run(async () => {
+  const a = parseArgs(process.argv.slice(2), { flags: ["repo", "out", "entry", "module"], bools: ["all"] });
+  if (!a.repo || (!a._.length && !a.module)) fail("need --repo and at least one seed, or --module <id>", usage);
+  let head = "", seeds = a._;
+  if (a.module) {
+    const { data, modules } = await loadModules(a.repo);
+    const m = findModule(modules, a.module);
+    if (!m) fail(`no module "${a.module}"; run \`veridic modules\` for the list (${modules.map((x) => x.id).join(", ")})`, usage);
+    head = moduleMarkdown(data, m) + "\n---\n\n";
+    seeds = [...m.routes, ...seeds];
+  }
+  const r = prepare(a.repo, seeds, { entry: a.entry, all: !!a.all });
+  r.markdown = head + r.markdown;
   if (a.out) {
     fs.writeFileSync(a.out, r.markdown);
     emit({ repo: a.repo, wrote: a.out, ...r.stats });

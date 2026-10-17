@@ -321,3 +321,16 @@ test("data: tables from each kind of schema, and which module owns each", async 
   assert.deepEqual(d.byModule.get("kitchen").owns, []);
   fs.rmSync(repo, { recursive: true, force: true });
 });
+
+test("modules: the list and one module's context for an agent", async () => {
+  const { moduleList, moduleMarkdown, findModule } = await import("../core/modulectx.mjs");
+  const m = { id: "orders", name: "Orders", does: ["create order"], stats: { routes: 1, high: 1, medium: 0, money: 1 }, tests: { untested: ["POST /orders"], files: [] }, specs: [], specified: 0, files: ["src/orders.ts"], code: [], shared: [], usedBy: [], uses: [], screens: [], data: { owns: [{ table: "orders", at: "db.ts:3", reads: 0, writes: 1, deletes: 0, alsoWrittenBy: [] }], uses: [] } };
+  const data = { name: "shop", modules: [m], routes: [{ id: "POST /orders", module: "orders", effect: "write", moves_money: true, access: "public", scoped: "no", handler: "src/orders.ts:1-9", tables: [{ table: "orders", op: "write" }] }], specs: [], findings: [{ module: "orders", severity: "high", title: "Acts on any record by ID", where: "POST /orders", text: "no owner check" }] };
+  assert.equal(findModule([m], "ORDERS"), m);
+  assert.equal(moduleList(data)[0].spec_path, "specs/orders/spec.md");
+  const md = moduleMarkdown(data, m);
+  assert.match(md, /`POST \/orders`: changes data, moves money; callable by anyone; tables: write orders; \*\*no test\*\*/);
+  assert.match(md, /owns `orders`/);
+  assert.match(md, /never as MUST requirements/);
+  assert.match(md, /Acts on any record by ID/);
+});

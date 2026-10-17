@@ -41,7 +41,13 @@ Every tool call re-reads the whole conversation, so the cost of a run is mostly
 its number of turns. Follow this order and don't repeat steps.
 
 1. **Gather.** If the prompt already contains a "Feature context" document, use
-   it and skip to step 3. Otherwise, once:
+   it and skip to step 3. **For a module, or a spec per module:** Veridic has
+   already split the app. `veridic modules` lists them (with each one's
+   `spec_path`); `veridic prepare --module <id> --out <folder>/context.md`
+   gathers one, with what each route really does, its tables, screens, tests,
+   existing rules and open findings. Use that split, write to the module's
+   `spec_path` (extend a spec that already covers it), and put open findings
+   under risks or open questions, never as MUST requirements. Otherwise, once:
    ```bash
    veridic routes order payment                      # pick the feature's entry routes
    veridic prepare --out <folder>/context.md "POST /api/orders" "GET /api/orders/:id" …
