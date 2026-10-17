@@ -40,7 +40,7 @@ export function changedFiles(repo, range) {
     if (h && cur) {
       const start = Number(h[1]);
       const n = h[2] == null ? 1 : Number(h[2]);
-      hunks[cur].push(n ? [start, start + n - 1] : [Math.max(1, start), Math.max(1, start)]); // a pure deletion touches the line it sat beside
+      hunks[cur].push(n ? [start, start + n - 1] : [start + 0.5, start + 0.5]); // a pure deletion sits between two lines: it is inside what spans both
     }
   }
   for (const f of untracked) hunks[f] = null; // a new file: all of it
@@ -111,6 +111,29 @@ export function doneCheck(repo, specPath, opts = {}) {
  * change outside it is a stray. Either way, every changed file a route depends on
  * needs a test that reaches it and asserts, and changed tests must assert.
  */
+// The function a line sits in, read from the source, for code the index doesn't list as a
+// function (a method shorthand in an object literal: `statics = { removeByUser(id) { … } }`).
+const HEADER = /^\s*(?:(?:export\s+)?(?:async\s+)?function\s*\*?\s*([A-Za-z_$][\w$]*)|(?:static\s+)?(?:async\s+)?([A-Za-z_$][\w$]*)\s*\([^)]*\)\s*\{|(?:const|let|var)?\s*([A-Za-z_$][\w$.]*)\s*[:=]\s*(?:async\s+)?(?:function\b|\([^)]*\)\s*=>|[A-Za-z_$][\w$]*\s*=>))/;
+const NOT_NAMES = new Set(["if", "for", "while", "switch", "catch", "with", "return", "function"]);
+// `file:12` or `file:12-14`; a deletion between lines 12 and 13 reads `file:12`.
+const at = (f, [a, b]) => `${f}:${Math.floor(a)}${Math.floor(b) !== Math.floor(a) && b < Number.MAX_SAFE_INTEGER ? `-${Math.floor(b)}` : ""}`;
+
+export function enclosingByText(lines, line) {
+  // Walking up from the line: once more `{` than `}` have been seen, that line opened a
+  // block still open at the line, so a function header there encloses it.
+  let open = 0;
+  for (let i = Math.min(line, lines.length) - 1; i >= 0 && i >= line - 120; i--) {
+    const l = lines[i];
+    open += (l.match(/\{/g) ?? []).length - (l.match(/\}/g) ?? []).length;
+    if (open <= 0) continue;
+    const m = l.match(HEADER);
+    const name = m && (m[1] ?? m[2] ?? m[3]?.split(".").pop());
+    if (name && !NOT_NAMES.has(name)) return [name];
+    open = 0; // a block that isn't a function (an if, an object): keep looking outward
+  }
+  return [];
+}
+
 export async function doneWithoutSpec(repo, { claims = [], range } = {}) {
   const { openGraph } = await import("./graph.mjs");
   const { routeInventory } = await import("./routes.mjs");
@@ -176,10 +199,13 @@ export async function doneWithoutSpec(repo, { claims = [], range } = {}) {
         if (inSeam(f, r)) continue;
         const others = affectedRoutes(g, inv, [{ file: f, start: r[0], end: r[1] }]).map((x) => x.route).filter((id) => !claimedRoutes.has(id));
         if (others.length) strayHunks.push({ file: f, range: r, routes: others });
-        else outsideRoutes.push(`${f}:${r[0]}${r[1] !== r[0] && r[1] < Number.MAX_SAFE_INTEGER ? `-${r[1]}` : ""}`);
+        else outsideRoutes.push(at(f, r));
       }
     // Names of the functions the change sits in, for matching tests by name.
-    const fns = h ? [...new Set(h.flatMap(([a, b]) => [...g.nodes.values()].filter((n) => n.file === f && (n.kind === "function" || n.kind === "method") && n.start <= b && n.end >= a).map((n) => n.name)))] : [];
+    const fns = h ? [...new Set(h.flatMap(([a, b]) => {
+      const indexed = [...g.nodes.values()].filter((n) => n.file === f && (n.kind === "function" || n.kind === "method") && n.start <= b && n.end >= a).map((n) => n.name);
+      return indexed.length ? indexed : enclosingByText(g.lines(f) ?? [], Math.ceil(a));
+    }))] : [];
     const reaching = (reachChanged.get(f) ?? []).filter((t) => t.asserting > 0);
     // A route is tested if a test that reaches the change names it or the changed function,
     // or if any asserting test calls the route by its URL (supertest, e2e): `/v1/users/${id}`.
@@ -191,7 +217,7 @@ export async function doneWithoutSpec(repo, { claims = [], range } = {}) {
   });
   const testAudit = tests.map((f) => auditFile(repo, f)).filter((a) => a.tests);
   // Tests are never strays: adding or fixing tests is part of any change.
-  const strays = claims.length ? strayHunks.map((x) => `${x.file}:${x.range[0]}${x.range[1] !== x.range[0] && x.range[1] < Number.MAX_SAFE_INTEGER ? `-${x.range[1]}` : ""} (behind ${x.routes.slice(0, 2).join(", ")})`) : [];
+  const strays = claims.length ? strayHunks.map((x) => `${at(x.file, x.range)} (behind ${x.routes.slice(0, 2).join(", ")})`) : [];
   const untested = files.filter((f) => f.untested_routes.length);
   const nothing = testAudit.flatMap((a) => [...a.flagged.unasserted, ...a.flagged.empty].map((x) => x.at));
   const problems = [

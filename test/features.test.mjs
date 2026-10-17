@@ -110,7 +110,7 @@ test("card: fixed layout with a mark per row and a verdict", () => {
 
 // --- done without a spec, claims, and the Stop hook -------------------------
 import { makeRepo, FILES } from "./fixture.mjs";
-import { doneWithoutSpec, saveClaim, loadClaim } from "../core/seam.mjs";
+import { doneWithoutSpec, saveClaim, loadClaim, changedFiles } from "../core/seam.mjs";
 import { spawnSync } from "node:child_process";
 
 function fixtureGit() {
@@ -182,5 +182,40 @@ test("done: changes no route runs (schemas, imports) and test files aren't stray
   const d = await doneWithoutSpec(r.repo, { claims: ["POST /api/orders"] });
   assert.deepEqual(d.seam.strays, [], JSON.stringify(d.problems));
   assert.equal(d.done, true, JSON.stringify(d.problems));
+  r.done();
+});
+
+test("done: the function a change sits in is found from the source when the index doesn't list it", async () => {
+  const { enclosingByText } = await import("../core/seam.mjs");
+  const src = [
+    "const schema = new Schema({});",
+    "schema.statics = {",
+    "  removeSessionByUserId(userId) {",
+    "    if (!valid(userId)) {",
+    "      return none();",
+    "    }",
+    "    return this.deleteMany({ session: userId });",
+    "  },",
+    "  other() {",
+    "    return 1;",
+    "  },",
+    "};",
+  ];
+  assert.deepEqual(enclosingByText(src, 5), ["removeSessionByUserId"]);
+  assert.deepEqual(enclosingByText(src, 7), ["removeSessionByUserId"]);
+  assert.deepEqual(enclosingByText(src, 10), ["other"]);
+  assert.deepEqual(enclosingByText(src, 1), []);
+});
+
+test("done: deleting a route between two others changes neither of them", () => {
+  const r = fixtureGit();
+  const file = "src/routes/hooks.ts";
+  const src = fs.readFileSync(path.join(r.repo, file), "utf8");
+  fs.writeFileSync(path.join(r.repo, file), src.replace(/\n/, "\nconst gone = 1;\n"));
+  r.g("add", "-A");
+  r.g("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "add a line");
+  fs.writeFileSync(path.join(r.repo, file), src);
+  const c = changedFiles(r.repo);
+  assert.deepEqual(c.hunks[file], [[1.5, 1.5]]);
   r.done();
 });
