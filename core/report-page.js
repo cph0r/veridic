@@ -303,13 +303,25 @@
     let h = '<button class="back" data-nav="modules">' + ic("back", "sm") + "Home</button>";
     h += "<h1>" + esc(m.name) + "</h1>";
     if (m.does.length) h += '<p class="lead">Lets callers ' + m.does.slice(0, 4).map(esc).join(", ") + (m.does.length > 4 ? ", and more" : "") + ".</p>";
-    h += indRow(indicators(m));
+    h += '<div class="mgrid"><div class="mcol">' + indRow(indicators(m));
     const steps = nextSteps(m);
     h += section("next", "Next steps");
     h += stepList(steps, 4);
     h += section("build", "Change something here");
-    h += composer(m.id, "What should change in " + m.name + "?");
+    h += composer(m.id, "What should change in " + m.name + "?") + '</div><aside class="mside">' + shape(m) + "</aside></div>";
     h += '<details class="details"' + (state.open.has("details") ? " open" : "") + ' data-details><summary>Details<span class="faint"> · ' + plural(m.stats.routes, "route") + ((m.data && m.data.owns.length) ? ", " + plural(m.data.owns.length, "table") : "") + ((m.screens || []).length ? ", " + plural(m.screens.length, "screen") : "") + "</span></summary>" + moduleDetails(m) + "</details>";
+    return h;
+  }
+  // The module's shape, as pictures: what its routes do, its data, its screens, its neighbours.
+  function shape(m) {
+    const st = m.stats, d = m.data || { owns: [], uses: [] };
+    const segs = [["money", st.money, "high", "move money"], ["del", st.destructive, "med", "delete"], ["write", Math.max(0, st.writes - st.money), "text-2", "change data"], ["read", st.reads, "faint", "read"]].filter((x) => x[1]);
+    const tot = segs.reduce((n, x) => n + x[1], 0) || 1;
+    let h = '<div class="card"><div class="ik">' + ic("route", "sm") + plural(st.routes, "route") + '</div><div class="sbar">' + segs.map((x) => '<span style="background:var(--' + x[2] + ')" data-w="' + (x[1] / tot) * 100 + '" title="' + x[1] + " " + x[3] + '"></span>').join("") + '</div><div class="slegend">' + segs.map((x) => '<span>' + '<i style="background:var(--' + x[2] + ')"></i>' + x[1] + " " + x[3] + "</span>").join("") + "</div></div>";
+    if (d.owns.length || d.uses.length) h += '<div class="card"><div class="ik">' + ic("db", "sm") + "Data</div>" + '<div class="chips">' + d.owns.map((t) => '<span class="chip own" title="Owns: read by ' + t.reads + ", written by " + t.writes + ", deleted by " + t.deletes + (t.alsoWrittenBy.length ? "; also changed by " + t.alsoWrittenBy.map(nameOf).join(", ") : "") + '">' + esc(t.table) + (t.alsoWrittenBy.length ? '<b class="t-med">●</b>' : "") + "</span>").join("") + d.uses.slice(0, 10).map((t) => '<span class="chip" title="Reads; owned by ' + esc(nameOf(t.owner)) + '">' + esc(t.table) + "</span>").join("") + (d.uses.length > 10 ? '<span class="chip faint">+' + (d.uses.length - 10) + "</span>" : "") + '</div><div class="slegend"><span><i class="solid"></i>owns</span><span><i class="hollow"></i>reads</span>' + (d.owns.some((t) => t.alsoWrittenBy.length) ? '<span><b class="t-med">●</b> shared writes</span>' : "") + "</div></div>";
+    const sc = m.screens || [];
+    if (sc.length) { const by = {}; for (const x of sc) by[x.kind] = (by[x.kind] || 0) + 1; h += '<div class="card"><div class="ik">' + ic("monitor", "sm") + "Screens</div>" + '<div class="bignums">' + Object.entries(by).map(([k, n]) => '<div><div class="v">' + n + '</div><div class="k">' + k + (n > 1 ? "s" : "") + "</div></div>").join("") + "</div></div>"; }
+    if (m.usedBy.length || m.uses.length) h += '<div class="card"><div class="ik">' + ic("branch", "sm") + "Connected</div>" + (m.usedBy.length ? '<div class="clabel">Used by</div><div class="chips">' + m.usedBy.map((u) => '<button class="chip link2" data-mod="' + esc(u.module) + '">' + esc(nameOf(u.module)) + "</button>").join("") + "</div>" : "") + (m.uses.length ? '<div class="clabel">Uses</div><div class="chips">' + m.uses.map((u) => '<button class="chip link2" data-mod="' + esc(u.module) + '">' + esc(nameOf(u.module)) + "</button>").join("") + "</div>" : "") + "</div>";
     return h;
   }
   function moduleDetails(m) {
@@ -408,22 +420,41 @@
     return h;
   }
 
-  // ---- Specs ----
+  // ---- Specs: a map of which modules have written rules, and the one picked below it ----
   function vSpec() {
-    const sel = SPECS[state.spec] ? state.spec : 0;
-    const without = MODS.filter((m) => !m.specified);
-    let h = "<h1>Specs</h1><p class=\"lead\">The rules the code must follow, each tied to the lines that do it and the tests that check it.</p>";
-    h += '<div class="split"><nav class="toc">' + (SPECS.length ? '<div class="label">Specs</div>' + SPECS.map((s, i) => '<button class="item' + (i === sel ? " on" : "") + '" data-spec="' + i + '"><span class="grow">' + esc(specTitle(s)) + "</span></button>").join("") : "") +
-      (without.length ? '<div class="label">No spec yet</div>' + without.slice(0, 12).map((m) => '<button class="item" data-mod="' + esc(m.id) + '"><span class="grow muted">' + esc(m.name) + "</span></button>").join("") + (without.length > 12 ? '<div class="label">and ' + (without.length - 12) + " more</div>" : "") : "") +
-      '</nav><section style="min-width:0">' + (SPECS.length ? specPane(SPECS[sel], sel) : empty("No spec yet. Open a module and use <b>Draft a spec</b>; it copies a prompt that writes one from the code.")) + "</section></div>";
+    const covered = ROUTES.filter((r) => r.specs && r.specs.length).length;
+    const without = MODS.filter((m) => !m.specified).sort(riskOrder);
+    // What's open below the map: a spec, or a module with none (state.specMod).
+    if (!state.specMod && !SPECS[state.spec] && without[0]) state.specMod = without[0].id;
+    let h = "<h1>Specs</h1><p class=\"lead\">Written rules for what the app must do. A change that breaks one gets caught.</p>";
+    const p = pct(covered, ROUTES.length), c = p >= 50 ? "ok" : p ? "med" : "high";
+    h += '<div class="inds">' + '<div class="ind">' + ring(p, c, 64, p + "%") + '<div><div class="ik">' + ic("doc", "sm") + 'Coverage</div><div class="iv t-' + c + '">' + (p >= 50 ? "Good" : p ? "Needs work" : "None yet") + '</div><div class="id2">of routes have rules</div></div></div>' +
+      '<div class="ind">' + ring(pct(MODS.length - without.length, MODS.length), c, 64, String(MODS.length - without.length)) + '<div><div class="ik">' + ic("route", "sm") + 'Modules</div><div class="iv">' + (MODS.length - without.length) + " of " + MODS.length + '</div><div class="id2">have a spec</div></div></div>' +
+      (SPECS.length ? (() => { const all = SPECS.flatMap(specReqs), t = pct(all.filter(tested).length, all.length), cc = t >= 70 ? "ok" : t >= 30 ? "med" : "high"; return '<div class="ind">' + ring(t, cc, 64, t + "%") + '<div><div class="ik">' + ic("flask", "sm") + 'Rules tested</div><div class="iv t-' + cc + '">' + plural(all.length, "rule") + '</div><div class="id2">have a test</div></div></div>'; })() : "") + "</div>";
+    // The map: every spec, then every module still without one.
+    h += section("map", "Pick one", null, '<span class="legend" style="margin:0">' + dot("ok") + "has rules" + '<span class="dot none" style="border:1px dashed var(--faint)"></span>no rules yet</span>');
+    h += '<div class="tiles">' + SPECS.map((sp, i) => { const rs = specReqs(sp), t = pct(rs.filter(tested).length, rs.length), st = rs.filter((r) => r.stale).length, w = st || t < 50 ? "med" : "ok";
+      const mods = MODS.filter((m) => m.specs.includes(sp.path)).map((m) => m.name);
+      return '<button class="tile two ' + w + (!state.specMod && state.spec === i ? " on" : "") + '" data-spec="' + i + '"><div class="tname">' + esc(specTitle(sp)) + '</div><div class="tsub">' + (mods.length ? '<span style="margin-right:6px">' + esc(mods.join(", ")) + "</span>" : "") + ic("doc", "sm") + rs.length + ic("flask", "sm") + t + "%" + (st ? '<span class="t-med" style="margin-left:6px">' + st + " changed</span>" : "") + "</div></button>"; }).join("") +
+      without.map((m) => '<button class="tile ghost' + (state.specMod === m.id ? " on" : "") + '" data-specmod="' + esc(m.id) + '"><div class="tname">' + esc(m.name) + '</div><div class="tsub">' + ic("route", "sm") + m.stats.routes + (m.stats.money ? '<span class="t-high" style="margin-left:6px">money</span>' : m.stats.destructive ? '<span class="t-med" style="margin-left:6px">deletes</span>' : "") + "</div></button>").join("") + "</div>";
+    const m = state.specMod && MOD.get(state.specMod);
+    h += '<div class="pane" id="sec-pane">' + (m ? noSpecPane(m) : SPECS[state.spec] ? specPane(SPECS[state.spec], state.spec) : "") + "</div>";
     return h;
+  }
+  function noSpecPane(m) {
+    return '<div class="nospec"><span class="sico ' + (m.stats.money ? "high" : "med") + '" style="width:48px;height:48px">' + ic("doc") + '</span><div class="main"><div class="title" style="font-size:17px">' + esc(m.name) + ' has no rules yet</div><div class="muted">' +
+      plural(m.stats.routes, "route") + (m.stats.money ? ", moves money" : m.stats.destructive ? ", deletes data" : m.stats.writes ? ", changes data" : "") + ". Without written rules, nothing can tell a bug from an intended change.</div>" +
+      '<div class="actions">' + btn("Copy for Claude", promptModuleSpec(m), "primary") + '<button class="btn quiet" data-mod="' + esc(m.id) + '">Open module</button></div><div class="faint small" style="margin-top:8px">Claude reads the module\'s code and writes specs/' + esc(m.id) + "/spec.md, each rule tied to the lines that do it.</div></div></div>";
   }
   function specPane(s, si) {
     const rs = specReqs(s), other = s.requirements.filter((r) => !r.requirement), doc = s.doc || { meta: {}, stories: [], tables: [], notes: [] };
     const nT = rs.filter(tested).length, nStale = rs.filter((r) => r.stale).length;
     let h = '<p class="faint small mono">' + esc(s.path) + '</p><h2 style="font-size:20px;margin:4px 0 6px">' + esc(specTitle(s)) + "</h2>" + (doc.meta.status ? '<p class="muted small">' + md(doc.meta.status) + "</p>" : "");
-    h += '<div class="facts" style="margin-top:18px"><div class="fact"><div class="v">' + rs.length + '</div><div class="k">rules</div></div><div class="fact"><div class="v">' + pct(nT, rs.length) + '%</div><div class="k">have a test</div></div><div class="fact"><div class="v">' + pct(rs.length - nStale, rs.length) + '%</div><div class="k">match the code</div></div></div>';
-    if (nT < rs.length || nStale) h += '<div class="actions">' + btn("Copy prompt to close the gaps", promptSpec(s), "primary") + "</div>";
+    const tp = pct(nT, rs.length), mp = pct(rs.length - nStale, rs.length), cl = (x) => (x >= 70 ? "ok" : x >= 30 ? "med" : "high");
+    h += '<div class="inds" style="margin-top:16px">' + '<div class="ind">' + ring(100, "faint", 56, String(rs.length)) + '<div><div class="ik">' + ic("doc", "sm") + 'Rules</div><div class="id2">' + plural(doc.stories.length, "story", "stories") + "</div></div></div>" +
+      '<div class="ind">' + ring(tp, cl(tp), 56, tp + "%") + '<div><div class="ik">' + ic("flask", "sm") + 'Tested</div><div class="id2">' + nT + " of " + rs.length + "</div></div></div>" +
+      '<div class="ind">' + ring(mp, cl(mp), 56, mp + "%") + '<div><div class="ik">' + ic("check", "sm") + 'Match the code</div><div class="id2">' + (nStale ? nStale + " changed" : "all current") + "</div></div></div></div>";
+    if (nT < rs.length || nStale) h += '<div class="actions">' + btn("Copy for Claude: close the gaps", promptSpec(s), "primary") + "</div>";
     if (doc.stories.length) {
       h += section("stories", "What should happen", doc.stories.length);
       h += '<div class="list">' + doc.stories.map((st) => '<div class="story"><div class="title" style="font-weight:500">' + md(st.title) + "</div>" + (st.why ? '<div class="muted small">' + md(st.why) + "</div>" : "") +
@@ -433,7 +464,7 @@
     h += section("reqs", "Rules", rs.length);
     h += '<div class="filters">' + [["all", "All", rs.length], ["untested", "Need a test", rs.length - nT], ["stale", "Code changed", nStale]].map(([k, t, n]) => '<button class="filter" data-f="sf" data-v="' + k + '" aria-pressed="' + (state.sf === k) + '">' + t + '<span class="n">' + n + "</span></button>").join("") + "</div>";
     const list = rs.filter((r) => match(r.id + " " + r.text) && (state.sf === "all" || (state.sf === "untested" ? !tested(r) : r.stale)));
-    h += few("reqs" + si, list, 30, (r) => { const st = REQ[r.status] || REQ.none; const c = r.stale ? "med" : st[1]; return liOpen('<div style="display:flex;gap:12px;align-items:baseline"><span class="req"><span class="id">' + esc(r.id) + "</span></span><span>" + md(r.text) + "</span></div>", '<span class="tag ' + (c === "ok" ? "" : c) + ' hide-sm">' + (r.stale ? "code changed" : st[0].toLowerCase()) + "</span>", reqDetail(s, r), "req-" + cssId(r.id)); }) || empty("Nothing matches.");
+    h += few("reqs" + si, list, 30, (r) => { const st = REQ[r.status] || REQ.none; const c = r.stale ? "med" : st[1]; return liOpen('<div style="display:flex;gap:12px;align-items:baseline"><span class="req"><span class="id">' + esc(r.id) + "</span></span><span>" + md(r.text) + "</span></div>", '<span class="pip ' + (tested(r) ? "ok" : st[1] || "med") + '" title="' + esc(st[0]) + '">' + ic("flask", "sm") + '</span><span class="pip ' + (r.stale ? "med" : "ok") + '" title="' + (r.stale ? "Code changed since written" : "Matches the code") + '">' + ic("check", "sm") + "</span>", reqDetail(s, r), "req-" + cssId(r.id)); }) || empty("Nothing matches.");
     for (const t of doc.tables) {
       const note = doc.notes.find((x) => x.section === t.section);
       h += section("t" + cssId(t.heading), md(t.heading)) + (note ? '<p class="muted small">' + md(note.text) + "</p>" : "") + '<div class="tablewrap"><table class="plain"><thead><tr>' + t.header.map((c) => "<th>" + md(c) + "</th>").join("") + "</tr></thead><tbody>" + t.rows.map((r) => "<tr>" + r.map((c) => "<td>" + md(c) + "</td>").join("") + "</tr>").join("") + "</tbody></table></div>";
@@ -548,7 +579,7 @@
     CLIP.length = 0;
     seq = 0;
     const main = $("#main");
-    main.className = "page fade" + (state.view !== "module" && state.view !== "change" ? " wide" : "");
+    main.className = "page fade" + (state.view !== "change" ? " wide" : "");
     main.innerHTML = VIEWS[state.view]();
     void main.offsetWidth;
     requestAnimationFrame(() => { $$("#main [data-w]").forEach((el) => (el.style.width = el.dataset.w + "%")); $$("#main [data-dash]").forEach((el) => el.setAttribute("stroke-dasharray", el.dataset.dash)); });
@@ -613,7 +644,9 @@
     const md0 = t.closest("[data-mod]");
     if (md0) { openModule(md0.dataset.mod, md0.dataset.to); return; }
     const sp = t.closest("[data-spec]");
-    if (sp) { state.spec = +sp.dataset.spec; state.sf = "all"; if (state.view !== "spec") setView("spec"); else { state.pages = {}; state.open = new Set(); render(); } return; }
+    const sm = t.closest("[data-specmod]");
+    if (sm) { state.specMod = sm.dataset.specmod; render(true); const el = $("#sec-pane"); if (el) el.scrollIntoView({ block: "start", behavior: "smooth" }); return; }
+    if (sp) { state.spec = +sp.dataset.spec; state.specMod = null; state.sf = "all"; if (state.view !== "spec") setView("spec"); else { state.pages = {}; state.open = new Set(); render(true); const el = $("#sec-pane"); if (el) el.scrollIntoView({ block: "start", behavior: "smooth" }); } return; }
     if (t.closest("[data-about]")) { state.aboutOpen = !state.aboutOpen; render(true); return; }
     const op = t.closest("[data-open]");
     if (op) { state.open.add(op.dataset.open); render(true); return; }
