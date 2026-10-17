@@ -43,21 +43,21 @@ its number of turns. Follow this order and don't repeat steps.
 1. **Gather.** If the prompt already contains a "Feature context" document, use
    it and skip to step 3. **For a module, or a spec per module:** Veridic has
    already split the app. `veridic modules` lists them (with each one's
-   `spec_path`); `veridic prepare --module <id> --out <folder>/context.md`
+   `spec_path`); `veridic prepare --module <id> --out .veridic/context/<id>.md`
    gathers one, with what each route really does, its tables, screens, tests,
    existing rules and open findings. Use that split, write to the module's
    `spec_path` (extend a spec that already covers it), and put open findings
    under risks or open questions, never as MUST requirements. Otherwise, once:
    ```bash
    veridic routes order payment                      # pick the feature's entry routes
-   veridic prepare --out <folder>/context.md "POST /api/orders" "GET /api/orders/:id" …
+   veridic prepare --out .veridic/context/orders.md "POST /api/orders" "GET /api/orders/:id" …
    ```
-   then read `context.md` in full. It holds the scope (routes, webhooks, timers,
+   then read that file in full. It holds the scope (routes, webhooks, timers,
    callers, tables), the contract comparison, and every relevant code range,
    numbered. Read all of it: handlers *and* services, webhooks, timers. The bugs worth finding live in
    the code a route list doesn't show. Open other files only for what the
    bundle doesn't show (a type, a test, a config value).
-2. **Contract**: `context.md` already compares the OpenAPI file (if any) with
+2. **Contract**: the context file already compares the OpenAPI file (if any) with
    the code. Add only what you confirm by reading (codes set in helpers aren't
    scanned). Field meanings: `references/drift.md`.
 3. **Write `spec.md` once**, complete, in one Write (rules below). Don't build it

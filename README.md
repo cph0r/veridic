@@ -40,6 +40,8 @@ veridic init              # builds the code index; checks your routes are found
 veridic init --enforce    # optional: Claude can't finish while Veridic says NOT DONE
 ```
 
+`init` also splits your app into its modules (orders, menu, auth…), found from the code. If they have no specs yet, it offers to start Claude Code on `/veridic:specs`, which writes one spec per module, riskiest first, and asks before starting.
+
 That's all. From now on Claude uses Veridic on its own when it changes, reviews or documents your code.
 
 ## Try it
@@ -58,13 +60,15 @@ Claude claims the refund route, sees what that code reaches before touching it, 
 
 > Write a spec for the checkout flow, with every requirement backed by the code.
 
+> Write specs for every module (or run `/veridic:specs`).
+
 Or see everything at once:
 
 ```bash
 veridic report      # or: veridic ui, or /veridic:report in Claude Code
 ```
 
-One page opens in your browser, with tabs for specs (each requirement with its cited code and tests), routes (what each one really does and who can call it), findings (each with a suggested fix), tests (which ones check nothing), and the change in progress. Every `file:line` opens in your editor, and each finding has a **Copy fix prompt** button: paste it into Claude Code and the agent claims, fixes, tests and runs `veridic done`. It's one local file, `.veridic/report.html` (git-ignored): no server, nothing uploaded.
+One page opens in your browser: the app's health at a glance (safety, tests, written rules, modularity, copied code, the change in progress), what needs attention, and each module as a tile. A module's page shows what it does, the tables it owns, the screens that call it, its rules, tests and neighbours. It also finds UI calls to endpoints that don't exist and endpoints nothing calls. Every `file:line` opens in your editor. It only shows: it never changes anything. It's one local file, `.veridic/report.html` (git-ignored): no server, nothing uploaded.
 
 ## How it works
 
@@ -85,6 +89,7 @@ flowchart LR
 | Finishing | `veridic done` | **DONE**, or exactly which change strayed outside the claim, which changed route has no real test, which new test asserts nothing |
 | Checking an API for agents | `veridic agent-ready` | What every route really does: reads, writes, deletes, moves money, and which act on ids the caller doesn't own |
 | Writing a spec | `/veridic:spec checkout` | Spec Kit–format requirements, each citing the lines that implement it and checked against them |
+| Writing specs for the whole app | `/veridic:specs` | One spec per module (`veridic modules`), riskiest first, each from `veridic prepare --module <id>`: what every route really does, its tables, screens, tests and open findings |
 | Asked "why is it like this?" | `veridic why FR-002` | The commits that wrote that code |
 
 **No model decides any of it.** Every verdict is computed from your code, the git diff and your tests, with the line that proves it, so it can't be talked into passing.

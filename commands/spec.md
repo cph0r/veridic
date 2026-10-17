@@ -12,7 +12,7 @@ the feature's context once, before reading anything else.
 
 0. **A module, or every module?** Use Veridic's split, not your own:
    `veridic modules --md` lists the modules and where each spec goes. For each
-   one, `veridic prepare --module <id> --out specs/<id>/context.md`, then step 2
+   one, `veridic prepare --module <id> --out .veridic/context/<id>.md`, then step 2
    onwards, writing to that module's `spec_path` (extend a spec that already
    covers it). Its open findings are risks or open questions, never MUST
    requirements. For several modules, start with those that move money or have
@@ -21,12 +21,13 @@ the feature's context once, before reading anything else.
    matching routes. Choose the feature's entry routes (several is normal: create,
    status, payment, webhook…). If the user named a file or function, seed with
    that instead.
-2. **Gather once** into the output folder (default `specs/<feature>/` in the
-   current project, never inside the target repo):
+2. **Gather once.** The spec goes in `specs/<feature>/spec.md` in this repo
+   (or the folder the user named); the context goes in `.veridic/context/`,
+   which git ignores:
    ```bash
-   veridic prepare --out <folder>/context.md "<METHOD /path>" "<METHOD /path>" …
+   veridic prepare --out .veridic/context/<feature>.md "<METHOD /path>" "<METHOD /path>" …
    ```
-   It prints a one-line summary. Then **read `<folder>/context.md` in full**
+   It prints a one-line summary. Then **read that context file in full**
    (scope, contract comparison, every relevant code range with real line
    numbers). Read other files only for what it doesn't show; if the feature can
    unlock or limit other parts of the app, check those parts yourself.
