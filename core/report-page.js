@@ -225,34 +225,71 @@
     const mods = scope ? [scope] : [...MODS].sort(riskOrder);
     const go = (m) => (scope ? "" : ' data-mod="' + esc(m.id) + '"');
     const c = D.change;
-    if (!scope && c && !c.done) out.push({ i: "branch", c: "high", t: "The change in progress isn't done", why: c.problems.slice(0, 2).join("; ") + " · run veridic done for the details" });
+    if (!scope && c && !c.done) out.push({ k: "change", i: "branch", c: "high", t: "The change in progress isn't done", why: c.problems.slice(0, 2).join("; ") + " · run veridic done for the details" });
     for (const m of mods) {
       const fs = modFindings(m).filter((f) => f.severity === "high");
-      if (fs.length) out.push({ i: "shield", c: "high", t: plural(fs.length, "serious issue") + (scope ? "" : " in " + m.name), why: [...new Set(fs.map((f) => f.title || f.kind))].join("; "), go: go(m), d: scope && DETAIL.issues(fs) });
+      if (fs.length) out.push({ k: "high", i: "shield", c: "high", t: plural(fs.length, "serious issue") + (scope ? "" : " in " + m.name), why: [...new Set(fs.map((f) => f.title || f.kind))].join("; "), go: go(m), d: scope && DETAIL.issues(fs) });
     }
-    for (const [sp, si] of SPECS.map((x, i) => [x, i]).filter(([x]) => !scope || specsOf(scope).includes(x))) {
+    for (const [sp, si] of SPECS.map((x, i) => [x, i]).filter(([x]) => !scope || specOwner(x) === scope)) {
       const st = specReqs(sp).filter((r) => r.stale);
-      if (st.length) out.push({ i: "doc", c: "med", t: plural(st.length, "rule") + " out of date", why: specTitle(sp) + ": the code behind " + st.map((r) => r.id).join(", ") + " changed since they were written", go: scope || !specOwner(sp) ? "" : ' data-mod="' + esc(specOwner(sp).id) + '" data-to="rules"', d: scope && DETAIL.stale(st) });
+      if (st.length) out.push({ k: "stale", i: "doc", c: "med", t: plural(st.length, "rule") + " out of date", why: specTitle(sp) + ": the code behind " + st.map((r) => r.id).join(", ") + " changed since they were written", go: scope || !specOwner(sp) ? "" : ' data-mod="' + esc(specOwner(sp).id) + '" data-to="rules"', d: scope && DETAIL.stale(st) });
     }
     for (const m of mods) {
       const fs = modFindings(m).filter((f) => f.severity === "medium" && f.area !== "Spec");
-      if (fs.length && !modFindings(m).some((f) => f.severity === "high")) out.push({ i: "shield", c: "med", t: plural(fs.length, "issue") + " to review" + (scope ? "" : " in " + m.name), why: [...new Set(fs.map((f) => f.title || f.kind))].join("; "), go: go(m), d: scope && DETAIL.issues(fs) });
+      if (fs.length && !modFindings(m).some((f) => f.severity === "high")) out.push({ k: "med", i: "shield", c: "med", t: plural(fs.length, "issue") + " to review" + (scope ? "" : " in " + m.name), why: [...new Set(fs.map((f) => f.title || f.kind))].join("; "), go: go(m), d: scope && DETAIL.issues(fs) });
     }
     for (const p of MODU.problems.filter((p) => p.kind !== "hub" && (!scope || p.modules.includes(scope.id))).slice(0, scope ? 4 : 3)) {
-      if (p.kind === "shared-writes") { const locs = Object.values(p.at).flat(); out.push({ i: "branch", c: "med", t: p.names.slice(1).join(", ") + " also write" + (p.names.length > 2 ? "" : "s") + " " + p.table, why: "Owned by " + p.names[0] + "; written outside it at " + locs.slice(0, 2).map(base).join(", "), go: go(MOD.get(p.owner)), d: scope && DETAIL.writes(p) }); }
-      else out.push({ i: "branch", c: "med", t: p.names.join(" and ") + " depend on each other", why: "A change to either can break the other", go: go(MOD.get(p.modules[0])), d: scope && DETAIL.cycle(p) });
+      if (p.kind === "shared-writes") { const locs = Object.values(p.at).flat(); out.push({ k: "writes", i: "branch", c: "med", t: p.names.slice(1).join(", ") + " also write" + (p.names.length > 2 ? "" : "s") + " " + p.table, why: "Owned by " + p.names[0] + "; written outside it at " + locs.slice(0, 2).map(base).join(", "), go: go(MOD.get(p.owner)), d: scope && DETAIL.writes(p) }); }
+      else out.push({ k: "cycle", i: "branch", c: "med", t: p.names.join(" and ") + " depend on each other", why: "A change to either can break the other", go: go(MOD.get(p.modules[0])), d: scope && DETAIL.cycle(p) });
     }
     const br = BROKEN.filter((b) => !scope || b.module === scope.id);
-    if (br.length) out.push({ i: "route", c: "high", t: plural(br.length, "call") + " to endpoints that don't exist", why: [...new Set(br.map((b) => b.url))].slice(0, 3).join(", ") + " · in " + [...new Set(br.map((b) => base(b.file)))].slice(0, 2).join(", "), go: scope ? "" : ' data-sub="structure"', d: scope && DETAIL.broken(br) });
+    if (br.length) out.push({ k: "broken", i: "route", c: "high", t: plural(br.length, "call") + " to endpoints that don't exist", why: [...new Set(br.map((b) => b.url))].slice(0, 3).join(", ") + " · in " + [...new Set(br.map((b) => base(b.file)))].slice(0, 2).join(", "), go: scope ? "" : ' data-sub="structure"', d: scope && DETAIL.broken(br) });
     const un = UNCALLED.filter((u) => !scope || u.module === scope.id);
-    if (un.length) out.push({ i: "route", c: "", t: plural(un.length, "endpoint") + " nothing in the repo calls", why: un.slice(0, 3).map((u) => u.route).join(", ") + (un.length > 3 ? ", …" : "") + " · no screen or test uses them", go: scope ? "" : ' data-sub="structure"', d: scope && DETAIL.uncalled(un) });
+    if (un.length) out.push({ k: "uncalled", i: "route", c: "", t: plural(un.length, "endpoint") + " nothing in the repo calls", why: un.slice(0, 3).map((u) => u.route).join(", ") + (un.length > 3 ? ", …" : "") + " · no screen or test uses them", go: scope ? "" : ' data-sub="structure"', d: scope && DETAIL.uncalled(un) });
     const blocks = (scope ? dupsOf(scope) : DUP.blocks).filter((b) => b.lines >= 10);
-    if (blocks.length) { const b = blocks[0]; out.push({ i: "copy", c: "", t: plural(blocks.length, "block") + " of copied code" + (scope ? "" : ", " + DUP.pct + "% of the code"), why: "Largest: " + b.lines + " lines in " + base(b.a.file) + " and " + base(b.b.file), go: scope ? "" : ' data-sub="structure"', d: scope && DETAIL.copies(blocks) }); }
+    if (blocks.length) { const b = blocks[0]; out.push({ k: "copies", i: "copy", c: "", t: plural(blocks.length, "block") + " of copied code" + (scope ? "" : ", " + DUP.pct + "% of the code"), why: "Largest: " + b.lines + " lines in " + base(b.a.file) + " and " + base(b.b.file), go: scope ? "" : ' data-sub="structure"', d: scope && DETAIL.copies(blocks) }); }
     const needTests = mods.filter((m) => m.tests.untested.length && m.stats.writes + m.stats.destructive + m.stats.money).slice(0, scope ? 1 : 2);
-    for (const m of needTests) out.push({ i: "flask", c: m.stats.money ? "high" : "med", t: (scope ? "" : m.name + ": ") + m.tests.untested.length + " of " + plural(m.stats.routes, "route") + " untested", why: m.stats.money ? "It moves money" : m.stats.destructive ? "It deletes data" : "It changes data", go: go(m), d: scope && DETAIL.untested(m) });
-    for (const m of mods.filter((m) => !m.specified).slice(0, 1)) out.push({ i: "doc", c: "", t: (scope ? "No" : m.name + " has no") + " written rules", why: "Nothing says what its routes must do, so a bug and an intended change look the same", go: scope ? "" : ' data-mod="' + esc(m.id) + '"' });
-    if (!scope && T && T.unasserted + T.empty) out.push({ i: "flask", c: "med", t: plural(T.unasserted + T.empty, "test") + " check nothing", why: "They pass even when the code is broken", go: ' data-sub="tests"' });
+    for (const m of needTests) out.push({ k: "untested", i: "flask", c: m.stats.money ? "high" : "med", t: (scope ? "" : m.name + ": ") + m.tests.untested.length + " of " + plural(m.stats.routes, "route") + " untested", why: m.stats.money ? "It moves money" : m.stats.destructive ? "It deletes data" : "It changes data", go: go(m), d: scope && DETAIL.untested(m) });
+    for (const m of mods.filter((m) => !m.specified).slice(0, 1)) out.push({ k: "norules", i: "doc", c: "", t: (scope ? "No" : m.name + " has no") + " written rules", why: "Nothing says what its routes must do, so a bug and an intended change look the same", go: scope ? "" : ' data-mod="' + esc(m.id) + '"' });
+    if (!scope && T && T.unasserted + T.empty) out.push({ k: "tests", i: "flask", c: "med", t: plural(T.unasserted + T.empty, "test") + " check nothing", why: "They pass even when the code is broken", go: ' data-sub="tests"' });
     return out;
+  }
+  // Home's list: one card per module with problems (its items in one line, worst first), then
+  // the few things that belong to no module. The module's page has each item in detail.
+  const RANKC = { high: 0, med: 1, "": 2 };
+  // A module's problems as short counts, in the order they matter.
+  function summary(m, items) {
+    const n = (k) => items.filter((x) => x.k === k).length;
+    const f = (sev) => modFindings(m).filter((x) => x.severity === sev && x.area !== "Spec").length;
+    const st = SPECS.filter((x) => specOwner(x) === m).flatMap(specReqs).filter((r) => r.stale).length;
+    const parts = [
+      n("high") && f("high") + " serious",
+      n("med") && f("medium") + " to review",
+      n("broken") && plural(BROKEN.filter((b) => b.module === m.id).length, "broken call"),
+      n("stale") && plural(st, "rule") + " out of date",
+      n("writes") && plural(n("writes"), "shared table"),
+      n("cycle") && "a dependency loop",
+      n("uncalled") && plural(UNCALLED.filter((u) => u.module === m.id).length, "uncalled endpoint"),
+      n("copies") && plural(dupsOf(m).filter((b) => b.lines >= 10).length, "copied block"),
+      n("untested") && m.tests.untested.length + "/" + m.stats.routes + " untested",
+      n("norules") && "no rules",
+    ];
+    return parts.filter(Boolean).join(" · ");
+  }
+  function homeAttention() {
+    const out = [];
+    const c = D.change;
+    if (c && !c.done) out.push({ i: "branch", c: "high", t: "The change in progress isn't done", why: c.problems.slice(0, 2).join("; ") + " · run veridic done for the details", w: -1 });
+    for (const m of MODS) {
+      const items = attention(m);
+      if (!items.length) continue;
+      const worst = items.reduce((a, x) => (RANKC[x.c || ""] < RANKC[a.c || ""] ? x : a), items[0]);
+      out.push({ i: worst.i, c: worst.c, t: m.name, why: summary(m, items), go: ' data-mod="' + esc(m.id) + '"', w: RANKC[worst.c || ""] * 1000 - items.length * 10 - (m.risk || 0) / 1e4 });
+    }
+    const loose = BROKEN.filter((b) => !b.module);
+    if (loose.length) out.push({ i: "route", c: "high", t: plural(loose.length, "call") + " to endpoints that don't exist, in shared code", why: [...new Set(loose.map((b) => b.url))].slice(0, 3).join(", ") + " · in " + [...new Set(loose.map((b) => base(b.file)))].slice(0, 2).join(", "), go: ' data-sub="structure"', w: 500 });
+    if (T && T.unasserted + T.empty) out.push({ i: "flask", c: "med", t: plural(T.unasserted + T.empty, "test") + " check nothing", why: "They pass even when the code is broken", go: ' data-sub="tests"', w: 1500 });
+    return out.sort((a, b) => a.w - b.w);
   }
   const attList = (items, n) => items.length
     ? '<div class="steps">' + items.slice(0, n).map((s) => {
@@ -269,10 +306,10 @@
     h += A ? '<div class="about clamp">' + mdBlock(A.about.split(/\n\s*\n/)[0]) + "</div>" : '<p class="lead">No README describes this app yet.</p>';
     h += indRow(indicators(null));
     // Everything app-wide, one tab at a time; what needs attention first.
-    const items = attention(null);
+    const items = homeAttention();
     const subs = [["attention", "Needs attention", items.length || null], ["modules", "Modules", MODS.length || null], ["findings", "Findings", F.filter((f) => f.severity !== "low").length], ["routes", "Routes", ROUTES.length], ["tests", "Tests", T ? T.tests : null], ["structure", "Structure", null]];
     h += '<div class="tabs" id="sec-tabs">' + subs.map(([k, t, n]) => '<button class="tab" data-f="sub" data-v="' + k + '" aria-pressed="' + (state.sub === k) + '">' + t + (n ? '<span class="n">' + n.toLocaleString() + "</span>" : "") + "</button>").join("") + "</div>";
-    const tab = { attention: () => attList(items, state.open.has("steps") ? 99 : 8) + (items.length > 8 && !state.open.has("steps") ? '<button class="more" data-open="steps">Show all ' + items.length + "</button>" : "") + (D.errors && D.errors.length ? section("errors", "Couldn't check") + '<p class="muted small">' + D.errors.map(esc).join("<br>") + "</p>" : ""), modules: oModules, findings: oFindings, routes: oRoutes, tests: oTests, structure: oStructure };
+    const tab = { attention: () => attList(items, state.open.has("steps") ? 99 : 6) + (items.length > 6 && !state.open.has("steps") ? '<button class="more" data-open="steps">Show all ' + items.length + "</button>" : "") + (D.errors && D.errors.length ? section("errors", "Couldn't check") + '<p class="muted small">' + D.errors.map(esc).join("<br>") + "</p>" : ""), modules: oModules, findings: oFindings, routes: oRoutes, tests: oTests, structure: oStructure };
     return h + (tab[state.sub] || tab.attention)();
   }
 
