@@ -120,6 +120,7 @@
   const two = (title, sub) => '<div class="title">' + title + "</div>" + (sub ? '<div class="sub">' + sub + "</div>" : "");
   // A list shows a few rows; "Show all" opens the rest, paged.
   let PAGE = Number(store.get("page-size")) || 25;
+  const PAGE_SIZE = PAGE;
   function few(key, list, n, render, cls) {
     if (!list.length) return "";
     const open = state.open.has(key) || list.length <= n + 1;
@@ -283,6 +284,21 @@
   }
   // The module's rules, from its spec (and any other spec citing its code): status at a glance,
   // the whole spec one click away.
+  // A spec's rules as a table: the rule (clamped; full text, checks, tests and code on open),
+  // whether a test checks it, whether its code changed, and any open question it carries.
+  const QUESTION = /\s*\[NEEDS CLARIFICATION:\s*([^\]]+)\]/i;
+  function rulesTable(key, s, list, size) {
+    return pagedTable(key, list, [["ID", "76px"], "Rule", ["Test", "96px"], ["Code", "80px"], ["", "112px"]], (r) => {
+      const st = REQ[r.status] || REQ.none, q = String(r.text).match(QUESTION);
+      return [
+        '<span class="id mono">' + esc(r.id) + "</span>",
+        '<div class="rtext">' + md(String(r.text).replace(QUESTION, "")) + "</div>",
+        tested(r) ? '<span class="t-ok">' + ic("check", "sm") + " tested</span>" : '<span class="' + (st[1] === "high" ? "t-high" : "faint") + '">' + esc(st[0] === "No test yet" ? "no test" : st[0].toLowerCase()) + "</span>",
+        r.stale ? '<span class="t-med">changed</span>' : '<span class="faint">current</span>',
+        q ? '<span class="t-med" title="' + esc(q[1]) + '">open question</span>' : "",
+      ];
+    }, (r) => { const q = String(r.text).match(QUESTION); return '<p class="rfull">' + md(String(r.text).replace(QUESTION, "")) + "</p>" + (q ? '<div class="fix"><b>Open question.</b> ' + md(q[1]) + "</div>" : "") + reqDetail(s, r); }, size, (r) => "req-" + cssId(r.id));
+  }
   function moduleRules(m) {
     const specs = SPECS.map((sp, i) => [sp, i]).filter(([sp]) => m.specs.includes(sp.path)).sort(([a], [b]) => (b.path.includes("/" + m.id + "/") ? 1 : 0) - (a.path.includes("/" + m.id + "/") ? 1 : 0));
     if (!specs.length) return section("rules", "Rules") + empty("No spec yet. Nothing written says what these routes must do, so nothing can tell a bug from an intended change." + (m.stats.money ? " It moves money, so it's a good one to start with." : "") + " <code>/veridic:specs " + esc(m.id) + "</code> in Claude Code writes one.");
@@ -292,7 +308,7 @@
       const reqs = specReqs(sp).filter((r) => r.cites.some((c) => mine.has(c.file)));
       const shown = reqs.length ? reqs : specReqs(sp);
       h += section("rules-" + si, specs.length > 1 ? "Rules · " + esc(specName(sp)) : "Rules", shown.length, '<button class="text-btn" data-spec="' + si + '">Open the spec →</button>');
-      h += few("rules-" + si, shown, 6, (r) => { const st = REQ[r.status] || REQ.none; return li('<div class="req" style="display:flex;gap:12px;align-items:baseline"><span class="id">' + esc(r.id) + "</span><span>" + md(r.text) + "</span></div>", '<span class="pip ' + (tested(r) ? "ok" : st[1] || "med") + '" title="' + esc(st[0]) + '">' + ic("flask", "sm") + '</span><span class="pip ' + (r.stale ? "med" : "ok") + '" title="' + (r.stale ? "Code changed since written" : "Matches the code") + '">' + ic("check", "sm") + "</span>"); }, "compact");
+      h += rulesTable("rules-" + si, sp, shown, 10);
     }
     return h;
   }
@@ -432,7 +448,7 @@
     h += section("reqs", "Rules", rs.length);
     h += '<div class="filters">' + [["all", "All", rs.length], ["untested", "Need a test", rs.length - nT], ["stale", "Code changed", nStale]].map(([k, t, n]) => '<button class="filter" data-f="sf" data-v="' + k + '" aria-pressed="' + (state.sf === k) + '">' + t + '<span class="n">' + n + "</span></button>").join("") + "</div>";
     const list = rs.filter((r) => match(r.id + " " + r.text) && (state.sf === "all" || (state.sf === "untested" ? !tested(r) : r.stale)));
-    h += few("reqs" + si, list, 30, (r) => { const st = REQ[r.status] || REQ.none; const c = r.stale ? "med" : st[1]; return liOpen('<div style="display:flex;gap:12px;align-items:baseline"><span class="req"><span class="id">' + esc(r.id) + "</span></span><span>" + md(r.text) + "</span></div>", '<span class="pip ' + (tested(r) ? "ok" : st[1] || "med") + '" title="' + esc(st[0]) + '">' + ic("flask", "sm") + '</span><span class="pip ' + (r.stale ? "med" : "ok") + '" title="' + (r.stale ? "Code changed since written" : "Matches the code") + '">' + ic("check", "sm") + "</span>", reqDetail(s, r), "req-" + cssId(r.id)); }) || empty("Nothing matches.");
+    h += list.length ? rulesTable("reqs" + si, s, list) : empty("Nothing matches.");
     for (const t of doc.tables) {
       const note = doc.notes.find((x) => x.section === t.section);
       h += section("t" + cssId(t.heading), md(t.heading)) + (note ? '<p class="muted small">' + md(note.text) + "</p>" : "") + '<div class="tablewrap"><table class="plain"><thead><tr>' + t.header.map((c) => "<th>" + md(c) + "</th>").join("") + "</tr></thead><tbody>" + t.rows.map((r) => "<tr>" + r.map((c) => "<td>" + md(c) + "</td>").join("") + "</tr>").join("") + "</tbody></table></div>";
@@ -499,7 +515,7 @@
     const untested = new Set(MODS.flatMap((m) => m.tests.untested));
     const WHO = { public: "Anyone", auth: "Signed in", role: "Admins" };
     const own = (r) => (r.access === "public" && r.effect === "read") || !r.scoped ? '<span class="faint">—</span>' : r.scoped === "yes" ? "checked" : r.scoped === "weak" ? '<span class="t-med">client values</span>' : '<span class="t-high">not checked</span>';
-    return h + pagedTable("routes", list, ["Method", "Path", "Does", "Who can call", "Whose data", "Module", "Test"], (r) => {
+    return h + pagedTable("routes", list, [["Method", "70px"], "Path", ["Does", "120px"], ["Who can call", "104px"], ["Whose data", "112px"], ["Module", "130px"], ["Test", "56px"]], (r) => {
       const iss = issuesByRoute.get(r.id) || [];
       return [
         '<span class="method">' + esc(r.method) + "</span>",
@@ -513,14 +529,17 @@
     }, (r) => routeDetail(r, issuesByRoute.get(r.id) || [], untested.has(r.id)));
   }
   // A table with numbered pages; a row opens to its detail.
-  function pagedTable(key, list, cols, cells, detail) {
+  function pagedTable(key, list, cols, cells, detail, size, rowCls) {
+    const PAGE = size || PAGE_SIZE;
     const pages = Math.max(1, Math.ceil(list.length / PAGE)), p = Math.min(state.pages[key] || 0, pages - 1);
-    const rows = list.slice(p * PAGE, (p + 1) * PAGE).map((x) => { const id = "d" + seq++; return '<tr class="trow" data-d="' + id + '">' + cells(x).map((c) => "<td>" + c + "</td>").join("") + '<td class="chevcell">' + ic("chev", "sm chev") + '</td></tr><tr class="tdetail" id="' + id + '" hidden><td colspan="' + (cols.length + 1) + '"><div class="detail">' + detail(x) + "</div></td></tr>"; }).join("");
+    const rows = list.slice(p * PAGE, (p + 1) * PAGE).map((x) => { const id = "d" + seq++; return '<tr class="trow ' + (rowCls ? rowCls(x) : "") + '" data-d="' + id + '">' + cells(x).map((c) => "<td>" + c + "</td>").join("") + '<td class="chevcell">' + ic("chev", "sm chev") + '</td></tr><tr class="tdetail" id="' + id + '" hidden><td colspan="' + (cols.length + 1) + '"><div class="detail">' + detail(x) + "</div></td></tr>"; }).join("");
     const shown = [...new Set([0, pages - 1, p - 1, p, p + 1].filter((i) => i >= 0 && i < pages))].sort((a, b) => a - b);
     let nums = "", prev = -1;
     for (const i of shown) { if (i - prev > 1) nums += '<span class="gap">…</span>'; nums += '<button data-page="' + key + '" data-p="' + i + '"' + (i === p ? ' aria-current="page"' : "") + ">" + (i + 1) + "</button>"; prev = i; }
     const pager = pages > 1 ? '<div class="pager"><span>' + (p * PAGE + 1) + "–" + Math.min(list.length, (p + 1) * PAGE) + " of " + list.length + '</span><span class="grow"></span><button data-page="' + key + '" data-p="' + (p - 1) + '"' + (p ? "" : " disabled") + ' aria-label="Previous page">←</button>' + nums + '<button data-page="' + key + '" data-p="' + (p + 1) + '"' + (p < pages - 1 ? "" : " disabled") + ' aria-label="Next page">→</button></div>' : "";
-    return '<div class="tablewrap"><table class="plain dtable"><thead><tr>' + cols.map((c) => "<th>" + c + "</th>").join("") + "<th></th></tr></thead><tbody>" + rows + "</tbody></table></div>" + pager;
+    // Columns are "Label" or ["Label", width]; fixed widths keep an opened row from widening the table.
+    const head = cols.map((c) => (Array.isArray(c) ? '<th style="width:' + c[1] + '">' + c[0] + "</th>" : "<th>" + c + "</th>")).join("");
+    return '<div class="tablewrap"><table class="plain dtable"><thead><tr>' + head + '<th style="width:28px"></th></tr></thead><tbody>' + rows + "</tbody></table></div>" + pager;
   }
   // Every module side by side: one row each, a dot and a number per indicator, riskiest first.
   function oModules() {
@@ -658,7 +677,7 @@
     const op = t.closest("[data-open]");
     if (op) { state.open.add(op.dataset.open); render(true); return; }
     const rq = t.closest("[data-req]");
-    if (rq) { state.sf = "all"; state.q = ""; $("#q").value = ""; state.open.add("reqs" + state.spec); render(true); const r = $("#main .req-" + cssId(rq.dataset.req)); if (r) { if (!r.classList.contains("open")) toggle(r); r.scrollIntoView({ block: "center", behavior: "smooth" }); r.classList.add("flash"); setTimeout(() => r.classList.remove("flash"), 1400); } return; }
+    if (rq) { state.sf = "all"; state.q = ""; $("#q").value = ""; const all = SPECS[state.spec] ? specReqs(SPECS[state.spec]) : []; const at = all.findIndex((x) => x.id === rq.dataset.req); if (at >= 0) state.pages["reqs" + state.spec] = Math.floor(at / PAGE_SIZE); render(true); const r = $("#main .req-" + cssId(rq.dataset.req)); if (r) { if (!r.classList.contains("open")) toggle(r); r.scrollIntoView({ block: "center", behavior: "smooth" }); r.classList.add("flash"); setTimeout(() => r.classList.remove("flash"), 1400); } return; }
     const pg = t.closest("[data-page]");
     if (pg) { if (pg.disabled) return; state.pages[pg.dataset.page] = +pg.dataset.p; render(true); return; }
     const sb = t.closest("[data-sub]");
