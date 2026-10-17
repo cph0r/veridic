@@ -3,243 +3,107 @@
 </p>
 
 <p align="center">
-  <strong>Know what your code really does, with proof, before you change it.</strong>
+  <strong>Your AI agent changes code it doesn't understand, then tells you it's done.<br>
+  Veridic gives it proof of what the code does, and checks the work before it says "done".</strong>
 </p>
 
 <p align="center">
   <a href="https://www.npmjs.com/package/veridic"><img src="https://img.shields.io/npm/v/veridic?style=flat-square&color=0E7490&label=npm" alt="npm"></a>
   <img src="https://img.shields.io/badge/Claude%20Code-plugin-0E7490?style=flat-square" alt="Claude Code plugin">
   <img src="https://img.shields.io/badge/checks-deterministic%20%C2%B7%20no%20LLM-111111?style=flat-square" alt="Deterministic checks">
-  <img src="https://img.shields.io/badge/node-%E2%89%A5%2022.5-111111?style=flat-square" alt="Node 22.5+">
   <img src="https://img.shields.io/badge/license-MIT-111111?style=flat-square" alt="MIT">
 </p>
 
 ---
 
-Your agent can write a thousand lines an hour. Nobody can tell you what the
-*existing* code does: the docs drifted, the spec was aspirational, half the
-tests assert nothing, and that innocent `GET /payment-status` quietly marks
-orders paid.
-
-**Veridic reads your codebase and hands you facts with receipts.** Every
-requirement it writes cites `file:line`. Every citation is checked by a script:
-does the line exist, and does it actually say what the requirement claims?
-Models read and reason; deterministic code gathers the facts and does the
-checking. Nothing in the verdict can be talked into passing.
-
-> **Why "Veridic"?** *Veridic* means truthful: corresponding to the facts. A
-> Veridic spec says only what the code can prove, and the proof is a line number.
-> (Formerly *Plumb*; `plumbcode` on npm now points here.)
-
 ## What you get
 
-| | | |
-|---|---|---|
-| 📜 **Evidence-backed specs** | `/veridic:spec checkout` | Spec Kit–style requirements for code that already exists. Each one cites the lines that implement it, and `veridic check` proves the cited lines hold the facts the requirement states. |
-| 🔁 **Specs that stay true** | `veridic stale --fix` | When code moves, citations follow it. When cited code *changes*, the requirement is flagged. Runs as a git pre-commit hook, a Claude Code Stop hook, or a GitHub Action. |
-| 🧪 **Honest test coverage** | `veridic tests --run` | A requirement counts as tested only if a test named for it reaches the cited code **and asserts something**. Empty tests, `expect(true).toBe(true)`, `xit` and `describe.skip` don't count; `toBeTruthy`-only tests are called out as weak. |
-| 🤖 **Agent readiness** | `veridic agent-ready` | What each route *really* does (read, write, destructive, moves money, notifies someone), traced through the code it calls. Finds GETs that write and money routes that act on ids the caller doesn't own, before you hand your API to an AI agent. |
-| ✅ **"Done" means done** | `veridic done FR-002` | When an agent says it implemented a requirement, check it: every changed file is inside that requirement's *seam* (the files it cites or declares, plus its tests), and every verification criterion has an asserting, passing test. Stray edits are named. |
-| 🧾 **Decisions with receipts** | `veridic why FR-002` | Finds the commits that wrote a requirement's lines, so the spec can record *why* the code is the way it is, citing the commit. Decisions are append-only and checked against git. |
-| 🔒 **Results tied to the code** | `veridic metrics --card` | Stored results carry a fingerprint of the code they checked. Change the code and the old "passing" is reported outdated, never green. One-screen verdict cards for every check. |
-| 🔎 **Risk finders** | `veridic scope`, `states`, `access`, `drift` | Everything that belongs to a feature (webhooks and timers included), timer races in state machines, routes missing ownership or paywall checks, and where your OpenAPI contract and the code disagree. |
+- **Changes that don't break what was already working.** Before your agent edits a feature, Veridic hands it the facts: every route, webhook and timer involved, and what each one really does, each with the exact line that proves it.
+- **"Done" that is actually done.** After the edit, Veridic checks the agent's claim: did it only touch what it said it would, and does every requirement have a test that really checks something? If not, the agent gets told what's missing and keeps going.
+- **No dangerous surprises.** It finds the code that will hurt you: a `GET` that moves money, an endpoint anyone can use to delete someone else's data, tests that pass but check nothing.
 
-## See it
+You don't run Veridic. Your agent does. Install it once, and Claude uses it whenever it writes, changes or reviews code.
 
-A tiny Express app. One handler looks harmless:
+## What it looks like
 
-```ts
-// Polled by the checkout page.
-ordersRouter.get("/orders/:id/payment-status", async (req, res) => {
-  const [order] = await db.select().from(ordersTable).where(eq(ordersTable.id, Number(req.params.id)));
-  const intent = await stripe.paymentIntents.retrieve(order.paymentIntentId);
-  if (intent.status === "succeeded") await markPaid(order.id);
-  res.json({ status: intent.status });
-});
+Your agent finishes a change and runs the check. Real output:
+
+```text
+VERIDIC · done? specs/refunds/spec.md
+
+  · claimed  FR-001
+  ✖ seam     1 stray file(s) outside the claimed requirements
+  ✖ FR-001   its named test asserts nothing
+
+  VERDICT ✖ NOT DONE
+
+  → stray: src/stripe.ts
+    FR-001: its named test asserts nothing
 ```
 
-```console
-$ veridic agent-ready --md
+So the agent undoes the unrelated edit, writes a test that asserts, and checks again:
+
+```text
+VERIDIC · done? specs/refunds/spec.md
+
+  · claimed  FR-001
+  ● seam     held: 2 changed file(s), all in the seam of what was claimed
+  ● FR-001   covered
+
+  VERDICT ● DONE
 ```
 
-> 5 routes: 1 read, 3 write, 1 destructive; 2 move money; 1 GETs that write. **40%** have no medium or high issue.
->
-> | Severity | Issue | Route | What | Evidence |
-> |---|---|---|---|---|
-> | high | get-that-writes | `GET /api/orders/:id/payment-status` | GET that writes and moves money: a tool scanner going by method would call it a safe read | `src/routes/orders.ts:40 via markPaid`, `src/routes/orders.ts:22` |
-> | high | id-param-without-caller-scope | `GET /api/orders/:id/payment-status` | write, moves money, and acts on an id the caller isn't checked to own | `src/routes/orders.ts:20-25` |
-> | high | id-param-without-caller-scope | `POST /api/orders/:id/refund` | write, moves money, and acts on an id the caller isn't checked to own | `src/routes/orders.ts:27-32` |
-> | high | id-param-without-caller-scope | `DELETE /api/orders/:id` | destructive, and acts on an id the caller isn't checked to own | `src/routes/orders.ts:34-37` |
+No model decides that verdict. It's computed from the code, the git diff and the tests, so it can't be talked into passing.
 
-Every finding points at a line. `--manifest` emits the full per-route tool
-manifest (effect, money, notifications, auth, body fields, responses) as JSON.
+## Proof it works
 
-## Measured, not vibes
+Measured on 10 public Express apps (OWASP Juice Shop, NodeGoat, hackathon-starter, RealWorld and six more), pinned to exact commits. Reproduce with `node bench/run.mjs`; full results in [bench/RESULTS.md](bench/RESULTS.md).
 
-### On 10 public Express apps (reproducible)
-
-OWASP Juice Shop, OWASP NodeGoat, hackathon-starter, RealWorld and six more, pinned
-to exact commits. Four were *holdouts*, first run only after development was done.
-Full table: [bench/RESULTS.md](bench/RESULTS.md). Reproduce with `node bench/run.mjs`.
-
-| Measure | Result |
+| | |
 |---|---|
-| **Routes found** | **353 of 353** counted by an independent scanner, matching file by file in all 10 apps |
-| Holdout apps, first run | 27 of 55 routes before the one fix they prompted; 55 of 55 after |
-| **Agent-readiness issues** (high + medium) | **37 of 39 confirmed by hand (95% precision)**, every verdict and reason in [bench/verdicts.json](bench/verdicts.json) |
-| **Tests that assert nothing** | 9 found in 3,105 tests; **9 of 9 confirmed** |
-| Speed | under 4 s per app, indexing included |
+| Routes found | **353 of 353**, matching an independent scan in every app |
+| Problems flagged | **37 of 39 confirmed real by hand** (95%), each verdict in [bench/verdicts.json](bench/verdicts.json) |
+| Tests that check nothing | **9 of 9 confirmed** among 3,105 tests |
+| Speed | under 4 seconds per app |
 
-What it caught, for example: Juice Shop changes passwords on a `GET`; hackathon-starter
-**captures PayPal payments on a `GET`** and unlinks accounts on one; ProShop lets any
-signed-in user mark any order paid; a REST starter deletes users with no authentication.
+Some of what it caught: Juice Shop changes passwords on a `GET`; hackathon-starter **captures PayPal payments on a `GET`**; ProShop lets any signed-in user mark any order paid; a popular REST starter deletes users with no login at all.
 
-### Writing specs, against plain Claude Code
-
-On two private production Express apps, compared with a plain Claude Code session
-(Opus, no Veridic) writing the same feature spec:
-
-| | Baseline | Veridic (`/veridic:spec`, Sonnet) |
-|---|---|---|
-| **App A** (153 routes, payments): cost per spec | $2.46 | **$0.94** |
-| time | 6.6 min | **4.3 min** |
-| requirement facts actually in the cited lines | 89% | **100%** |
-| known money-losing bugs surfaced | 2 of 2 | **2 of 2, every run** |
-| **App B** (57 routes, subscriptions): cost per spec | $1.13 | **$0.42** |
-| time | 3.0 min | **1.8 min** |
-| requirement facts actually in the cited lines | 79% | **100%** |
-
-Also hand-checked there: all 12 high and medium agent-readiness issues are real, and 8 of 8
-planted fake tests were caught. Small samples (one or two runs per method), verified by
-the author. Run it on your code and see.
+Writing a feature spec with Veridic, against plain Claude Code on two production apps: **$0.94 instead of $2.46, 4.3 instead of 6.6 minutes**, and 100% of stated facts found in the cited code (versus 79–89%), with the known money-losing bugs found in every run.
 
 ## Install
-
-**Requirements:** Node ≥ 22.5 (Veridic reads its code index with the built-in `node:sqlite`).
-The index comes from [CodeGraph](https://github.com/colbymchenry/codegraph), which installs
-with Veridic from npm and Homebrew. Then, in your repo:
-
-```bash
-veridic init        # builds the code index and checks routes are found
-```
-
-After that the index keeps itself up to date: when the code has moved on, the
-next command syncs it first (usually under a second), so line numbers are never
-stale. With the plugin only, `veridic init --install` installs CodeGraph for you.
-
-**As a Claude Code plugin** (recommended: adds the skill, `/veridic:*` commands and the `veridic` CLI):
 
 ```text
 /plugin marketplace add cph0r/veridic
 /plugin install veridic@veridic
 ```
 
-**As a CLI only:**
+Then, once per repo: `veridic init` (or ask Claude to set it up). That's it.
 
-```bash
-npm i -g veridic            # npm: installs the `veridic` command
-brew install cph0r/tap/veridic  # or Homebrew
-```
+Needs Node 22.5 or newer. Works on Express apps (JavaScript and TypeScript). Without Claude Code: `npm i -g veridic` or `brew install cph0r/tap/veridic`.
 
-## Quick start
+## What your agent does with it
 
-```bash
-veridic init                             # once per repo
-veridic routes payment                 # find the routes for a feature
-veridic scope "POST /api/orders"       # everything that belongs to it, and what to read
-veridic agent-ready --md               # is this API safe to hand to an agent?
-veridic access --intended policy.csv   # who can call what, vs. who should
-```
+| When the agent is… | It runs | And gets |
+|---|---|---|
+| Starting on a feature | `veridic prepare <routes>` | Everything that belongs to the feature, with code and line numbers |
+| Writing a spec | `/veridic:spec <feature>` | Requirements that each cite the code, checked by `veridic check` |
+| Finishing a change | `veridic done FR-002` | **DONE**, or exactly which file or test is wrong |
+| Asked "is this API safe for agents?" | `veridic agent-ready` | What every route really does: reads, writes, deletes, moves money |
+| Keeping specs in step | `veridic stale --fix` (or the git hook) | Citations follow moved code; changed code flags its requirement |
+| Asked "why is it like this?" | `veridic why FR-002` | The commits that wrote that code |
 
-In Claude Code:
+Commands print compact JSON for the agent; `done`, `metrics` and `init` also print a one-screen card for you. `veridic help` lists them all.
 
-```text
-/veridic:spec the checkout flow        # write an evidence-backed spec (gathers context first)
-/veridic:check specs/checkout/spec.md  # do the citations hold?
-/veridic:tests                         # which requirements have real tests
-/veridic:metrics                       # one verdict card per spec
-/veridic:done specs/checkout/spec.md FR-002   # is it really done?
-/veridic:hooks                         # keep specs in sync on every commit
-```
+## Safety
 
-## Commands
-
-| Command | What it does |
-|---|---|
-| `veridic init` | Set a repo up: build the code index, check routes (`--install` installs CodeGraph) |
-| `veridic metrics` | Every number in one call (`--card` for a verdict card, `--md` for a table) |
-| `veridic check` | `cite` + `claims`: are the citations right? |
-| `veridic routes` | The app's routes, filtered by words |
-| `veridic scope` | What belongs to a feature, and what to read |
-| `veridic prepare` | Scope + contract + code for a feature as one document |
-| `veridic read` | All the code to read for a feature in one call |
-| `veridic states` | The feature's state machine and bug-shaped patterns in it |
-| `veridic access` | Who can call each route, plan checks, caller scoping (`--intended <csv>`) |
-| `veridic agent-ready` | Real effect per route, GETs that write, unscoped money routes (`--manifest`) |
-| `veridic drift` | Where the OpenAPI contract and the code disagree |
-| `veridic render` | `spec.json` → `spec.md` + `traceability.md` (validates first) |
-| `veridic cite` | Do citations resolve; the text they point at |
-| `veridic claims` | Do cited lines hold the facts each requirement states |
-| `veridic anchor` | Add symbol anchors so citations survive code moving |
-| `veridic stale` | Requirements a change touched (`--fix`, `--pr`) |
-| `veridic done` | Is it done: the change stayed in the claimed seam and every criterion has an asserting test (`--run`, `--card`) |
-| `veridic why` | The commits behind a requirement's cited lines, as decision evidence |
-| `veridic mutate` | Would the guard notice the code behind a requirement changing |
-| `veridic tests` | Which requirements have a real test (`--run` for pass/fail, `--table`) |
-| `veridic scaffold` | A test skeleton: one placeholder per requirement |
-| `veridic install-hook` | Install the git pre-commit hook |
-
-## How it works
-
-```text
- your repo ──▶ CodeGraph index ──▶ veridic: routes · scope · states · effects
-                                        │  (facts, with file:line)
-                                        ▼
-                     Claude writes spec.json from the gathered context
-                                        │
-                                        ▼
-         veridic render · cite · claims · tests   ◀── deterministic verdict
-                                        │
-                                        ▼
-            pre-commit / Stop hook / CI: stale --fix keeps it true
-```
-
-The rule that shaped every part: **models read and reason; scripts gather facts and
-verify.** Veridic never asks a model whether a spec is right. It checks.
-
-## What Veridic runs and touches
-
-Veridic runs locally and sends nothing anywhere: no telemetry, no network calls,
-no model calls from its scripts. It runs CodeGraph with CodeGraph's own anonymous
-telemetry switched off (`CODEGRAPH_TELEMETRY=0`).
-
-- **Reads:** your repo's files, `git` metadata (`git ls-files`, `git diff`, `git show`), and the CodeGraph index at `.codegraph/codegraph.db`.
-- **Runs:** `git`, Node, `codegraph init`/`sync` to build and refresh the index in `.codegraph/` (which ignores itself in git), and, only with `veridic tests --run` / `render --run-tests`, your own tests through `npx --no-install vitest` (never downloads a package). `veridic mutate` works in a temporary `git clone --shared` and deletes it afterwards.
-- **Writes:** the index in `.codegraph/`, and otherwise only what you ask for: spec files from `render` and `stale --fix`, a test skeleton from `scaffold`, and files named with `--out`. Generated test harnesses call your app on `127.0.0.1` only.
-- **Installs nothing on its own:** `veridic init --install` runs `npm i -g @colbymchenry/codegraph@1.6.0` only when you pass `--install`.
-- **Hooks are opt-in:** `veridic install-hook` writes `.git/hooks/pre-commit` (it refuses to overwrite an existing one); it updates citations that only moved, stages the spec, and blocks a commit whose cited code changed without the spec. `/veridic:hooks` explains each hook and asks before writing `.claude/settings.json` or a CI workflow.
+Veridic runs locally and sends nothing anywhere: no telemetry, no network calls, no model calls. It reads your code, git history and a local code index (`.codegraph/`, built by [CodeGraph](https://github.com/colbymchenry/codegraph), which it runs with telemetry off). It writes only the index and the spec files you ask for, and runs your tests only when asked (`--run`). Git and Claude hooks are opt-in.
 
 ## Limits
 
-- Route discovery understands **Express** (JS/TS). Other frameworks aren't supported yet.
-- `--run` executes tests with **vitest**.
-- Effects (writes, money, notifications) are found by patterns on the code a route reaches: SQL, Drizzle, MongoDB/Mongoose, Sequelize and Prisma. Other data layers can slip past.
-- Who-can-call checks read middleware by name (`protect`, `admin`, `authorize(…)`, `isAccounting()`); a guard with an unusual name, or one that sets data the handler then ignores, can be misread. See the known misses in [bench/RESULTS.md](bench/RESULTS.md).
-- A mount prefix computed at run time (`app.use(config.prefix, routes)`) is left out of the route path.
-- Index freshness is judged by file modification times; set `VERIDIC_NO_SYNC=1` to turn automatic syncing off.
-
-## Roadmap
-
-- Run `veridic done` from the Claude Code Stop hook, so an agent can't finish with a stray edit or an untested requirement.
-- More frameworks (Fastify, Hono, Next.js route handlers).
-- Export the agent-readiness manifest as an MCP tool config with approval flags.
-
-## Related
-
-- [Spec Kit](https://github.com/github/spec-kit): the spec format Veridic writes.
-- [CodeGraph](https://github.com/colbymchenry/codegraph): the code index Veridic reads.
-- [Groundtruth](https://github.com/akahkhanna/groundtruth): checks an agent's own claims against its diff. Complementary: Groundtruth asks *"did the agent do what it said?"*, Veridic asks *"what does the code do?"*
+- Express (JS/TS) only for now; Fastify, Hono and Next.js are next.
+- Effect detection knows SQL, Drizzle, MongoDB/Mongoose, Sequelize and Prisma.
+- Access checks read middleware by name, so an oddly named guard can be misread. Known misses are listed in [bench/RESULTS.md](bench/RESULTS.md).
 
 ## License
 
-[MIT](LICENSE) © Chirag Phor
+[MIT](LICENSE) © Chirag Phor. Formerly *Plumb*.

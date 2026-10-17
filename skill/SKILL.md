@@ -1,6 +1,6 @@
 ---
 name: veridic
-description: Write or update an evidence-backed spec for existing code, and keep it honest. Use when asked to "spec this feature", "recover a spec", "document how X works" for a brownfield codebase, to check a spec's citations, to compare an OpenAPI contract with the code, or to find which requirements a change made stale. Every requirement cites file:line evidence that scripts verify.
+description: Facts and checks for changing existing code safely. Use before changing a feature in an existing codebase (get every route, webhook, timer and table involved, with line numbers), after changing it (`veridic done`: did the change stay in scope, and does every requirement have a test that really asserts), when writing, updating or checking a spec ("spec this feature", "document how X works"), when code changes may have made a spec stale, and when asked whether an API is safe to expose to AI agents. Every fact cites file:line and is verified by scripts, not a model.
 ---
 
 # veridic
@@ -14,6 +14,15 @@ defaults to it; `veridic help` lists them). Without the plugin they are
 If `R/.codegraph` is missing, ask the user to run `veridic init` (it builds the
 code index); don't run it yourself. Commands keep an existing index up to date
 on their own. Never write into the target repo. Write the spec where the user points.
+
+## Changing existing code
+
+Before editing a feature, get its facts once: `veridic routes <word>` to find
+its entry routes, then `veridic prepare "<METHOD /path>" …` for everything
+involved (routes, webhooks, timers, callers, tables) with numbered code. Read
+it before you edit; the code a route list doesn't show is where changes break.
+After editing, if the repo has a spec, run `veridic done` (below) before you
+say you're finished.
 
 ## Writing a spec: the sequence
 
