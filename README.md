@@ -70,12 +70,12 @@ No model decides that verdict. It's computed from the code, the git diff and the
 
 ## Proof it works
 
-Measured on 10 public Express apps (OWASP Juice Shop, NodeGoat, hackathon-starter, RealWorld and six more), pinned to exact commits. Reproduce with `node bench/run.mjs`; full results in [bench/RESULTS.md](bench/RESULTS.md).
+Measured on 10 public Express apps (OWASP Juice Shop, NodeGoat, hackathon-starter, RealWorld and six more), pinned to exact commits. Full results and the one-command reproduction: [veridic-bench](https://github.com/cph0r/veridic-bench).
 
 | | |
 |---|---|
 | Routes found | **353 of 353**, matching an independent scan in every app |
-| Problems flagged | **37 of 39 confirmed real by hand** (95%), each verdict in [bench/verdicts.json](bench/verdicts.json) |
+| Problems flagged | **37 of 39 confirmed real by hand** (95%), each verdict in [verdicts.json](https://github.com/cph0r/veridic-bench/blob/main/verdicts.json) |
 | Tests that check nothing | **9 of 9 confirmed** among 3,105 tests |
 | Speed | under 4 seconds per app |
 
@@ -115,7 +115,7 @@ Veridic runs locally and sends nothing anywhere: no telemetry, no network calls,
 
 - Express (JS/TS) only for now; Fastify, Hono and Next.js are next.
 - Effect detection knows SQL, Drizzle, MongoDB/Mongoose, Sequelize and Prisma.
-- Access checks read middleware by name, so an oddly named guard can be misread. Known misses are listed in [bench/RESULTS.md](bench/RESULTS.md).
+- Access checks read middleware by name, so an oddly named guard can be misread. Known misses are listed in [RESULTS.md](https://github.com/cph0r/veridic-bench/blob/main/RESULTS.md).
 
 ## License
 
