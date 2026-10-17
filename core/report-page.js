@@ -145,7 +145,7 @@
 
   // ---- state ----
   const NAV = [
-    { k: "modules", t: "Modules" },
+    { k: "modules", t: "Home" },
     { k: "spec", t: "Specs" },
     ...(D.change ? [{ k: "change", t: "Current task", dot: D.change.done ? "ok" : "high" }] : []),
     { k: "overview", t: "Overview" },
@@ -153,6 +153,14 @@
   const fromHash = () => { const h = location.hash.slice(1).split("/"); return h[0] === "module" && h[1] ? { view: "module", mod: decodeURIComponent(h[1]), jump: h[2] } : NAV.some((n) => n.k === h[0]) ? { view: h[0] } : { view: "modules" }; };
   const state = { ...fromHash(), sub: "summary", q: "", sev: ["high", "medium"], area: "all", rf: "all", spec: 0, sf: "all", aboutOpen: false, openGroup: null, pages: {}, open: new Set() };
 
+  // The sidebar's dot: only a module's own problems. Red: a serious issue or a call to an endpoint
+  // that doesn't exist. Amber: issues to review, or it shares a table or a loop with another module.
+  // App-wide gaps (no tests anywhere) are the home page's to say, not every module's.
+  const sideDot = (m) => {
+    if (m.stats.high || BROKEN.some((b) => b.module === m.id)) return "high";
+    if (m.stats.medium || MODU.problems.some((p) => p.kind !== "hub" && p.modules.includes(m.id))) return "med";
+    return null;
+  };
   // A module's one status: its worst open issue, else "no tests" when it changes data untested. Most have none.
   const statusOf = (m) => {
     const s = m.stats;
@@ -181,7 +189,7 @@
       { k: "Rules", i: "doc", s: sp >= 50 && !stale ? "good" : "care", p: sp, v: stale ? stale + " out of date" : sp ? "routes covered" : "none written" },
       ...(!m && ST.modularity ? [{ k: "Modularity", i: "blocks", s: MODU.pct >= 80 ? "good" : MODU.pct >= 50 ? "care" : "risk", p: MODU.pct, v: MODU.clean + "/" + MODU.modules + " separate" }] : []),
       ...(!m && ST.duplication ? [{ k: "Duplication", i: "copy", s: DUP.pct < 5 ? "good" : DUP.pct < 12 ? "care" : "risk", p: Math.round(DUP.pct), big: DUP.pct + "%", v: "of code copied" }] : []),
-      ...(m && ST.modularity ? (() => { const ps = MODU.problems.filter((p) => p.kind !== "hub" && p.modules.includes(m.id)), ds = dupsOf(m).filter((b) => b.lines >= 10); const n = ps.length + ds.length; return [{ k: "Structure", i: "blocks", s: ps.some((p) => p.kind === "cycle") ? "risk" : n ? "care" : "good", p: n ? Math.max(10, 100 - n * 20) : 100, big: n ? String(n) : "✓", v: n ? plural(n, "problem") : "separate" }]; })() : []),
+      ...(m && ST.modularity ? (() => { const ps = MODU.problems.filter((p) => p.kind !== "hub" && p.modules.includes(m.id)), ds = dupsOf(m).filter((b) => b.lines >= 10); const n = ps.length + ds.length; return [{ k: "Structure", i: "blocks", s: ps.some((p) => p.kind === "cycle") ? "risk" : n ? "care" : "good", p: n ? Math.max(10, 100 - n * 20) : 100, big: n ? String(n) : "✓", v: n ? (n === 1 ? "problem" : "problems") : "separate" }]; })() : []),
       ...(!m && D.change ? [{ k: "Change", i: "branch", s: D.change.done ? "good" : "risk", p: D.change.done ? 100 : 0, big: D.change.done ? "✓" : String(D.change.problems.length), v: D.change.done ? "done" : "to finish", nav: "change" }] : []),
     ];
   }
@@ -243,19 +251,7 @@
     const items = attention(null);
     h += section("next", "Needs attention", items.length || null, items.length > 6 ? '<button class="text-btn" data-open="steps">Show all</button>' : "");
     h += attList(items, state.open.has("steps") ? 99 : 6);
-    h += section("modules", "Modules", MODS.length);
-    if (!MODS.length) return h + empty("Veridic finds modules from the app's routes. Run <code>veridic init</code> in the repo so it can index the code.");
-    const list = MODS.filter((m) => match(m.name + " " + m.does.join(" ")));
-    h += list.length ? '<div class="tiles">' + list.map(tile).join("") + "</div>" + '<div class="legend">' + dot("ok") + "good" + dot("med") + "needs work" + dot("high") + "at risk</div>" : empty("Nothing matches.");
     return h;
-  }
-
-  // A module as a tile: its health at a glance. Three pips: safety, tests, rules.
-  function tile(m) {
-    const [sf, ts, rl, sr] = indicators(m);
-    const worst = [sf, ts, rl].some((x) => x.s === "risk") ? "high" : [sf, ts, rl].some((x) => x.s === "care") ? "med" : "ok";
-    const pip = (x) => '<span class="pip ' + IND[x.s][0] + '" title="' + x.k + ": " + IND[x.s][1] + '">' + ic(x.i, "sm") + "</span>";
-    return '<button class="tile ' + worst + '" data-mod="' + esc(m.id) + '"><div class="tname">' + esc(m.name) + '</div><div class="tsub">' + ic("route", "sm") + m.stats.routes + ((m.data && m.data.owns.length) ? ic("db", "sm") + m.data.owns.length : "") + ((m.screens || []).length ? ic("monitor", "sm") + m.screens.length : "") + '</div><div class="pips">' + pip(sf) + pip(ts) + pip(rl) + (sr ? pip(sr) : "") + "</div></button>";
   }
 
   // ---- A module: a glance, its next steps, and a box to change it. The detail is the agent's, behind "Details" ----
@@ -454,10 +450,10 @@
 
   // ---- Overview: everything app-wide, for when one module isn't the question ----
   function vOverview() {
-    const subs = [["summary", "Summary"], ["findings", "Findings", F.filter((f) => f.severity !== "low").length], ["routes", "Routes", ROUTES.length], ["tests", "Tests", T ? T.tests : null], ["structure", "Structure", null]];
+    const subs = [["summary", "Summary"], ["modules", "Modules", MODS.length || null], ["findings", "Findings", F.filter((f) => f.severity !== "low").length], ["routes", "Routes", ROUTES.length], ["tests", "Tests", T ? T.tests : null], ["structure", "Structure", null]];
     let h = "<h1>Overview</h1><p class=\"lead\">The whole app at once: every finding, route and test.</p>";
     h += '<div class="tabs">' + subs.map(([k, t, n]) => '<button class="tab" data-f="sub" data-v="' + k + '" aria-pressed="' + (state.sub === k) + '">' + t + (n ? '<span class="n">' + n.toLocaleString() + "</span>" : "") + "</button>").join("") + "</div>";
-    return h + ({ summary: oSummary, findings: oFindings, routes: oRoutes, tests: oTests, structure: oStructure }[state.sub] || oSummary)();
+    return h + ({ summary: oSummary, modules: oModules, findings: oFindings, routes: oRoutes, tests: oTests, structure: oStructure }[state.sub] || oSummary)();
   }
   function oSummary() {
     const r = D.readiness || {};
@@ -494,6 +490,17 @@
     let h = '<div class="filters">' + Object.keys(FL).map((k) => '<button class="filter" data-f="rf" data-v="' + k + '" aria-pressed="' + (state.rf === k) + '">' + names[k] + '<span class="n">' + ROUTES.filter(FL[k]).length + "</span></button>").join("") + "</div>";
     const list = ROUTES.filter((rt) => FL[state.rf](rt) && match(rt.id + " " + rt.handler));
     return h + (few("routes", list, 40, (r) => routeRow(r, null)) || empty("Nothing matches."));
+  }
+  // Every module side by side: one row each, a dot and a number per indicator, riskiest first.
+  function oModules() {
+    if (!MODS.length) return empty("No modules found.");
+    const cell = (i) => '<td><span class="mcell">' + dot(IND[i.s][0]) + '<span class="mv">' + esc(i.big != null ? i.big : i.p + "%") + '</span><span class="faint hide-sm">' + esc(i.v) + "</span></span></td>";
+    const rows = MODS.filter((m) => match(m.name)).map((m) => {
+      const [sf, ts, rl, sr] = indicators(m);
+      return '<tr class="mrow" data-mod="' + esc(m.id) + '"><td><div class="title" style="font-weight:550">' + esc(m.name) + '</div><div class="faint small">' + plural(m.stats.routes, "route") + "</div></td>" + cell(sf) + cell(ts) + cell(rl) + (sr ? cell(sr) : "<td></td>") + "</tr>";
+    }).join("");
+    return '<div class="tablewrap"><table class="plain mtable"><thead><tr><th>Module</th><th>' + ic("shield", "sm") + ' Safety</th><th>' + ic("flask", "sm") + ' Tests</th><th>' + ic("doc", "sm") + ' Rules</th><th>' + ic("blocks", "sm") + " Structure</th></tr></thead><tbody>" + rows + "</tbody></table></div>" +
+      '<div class="legend">' + dot("ok") + "good" + dot("med") + "needs work" + dot("high") + "at risk</div>";
   }
   // Structure: modules that reach into each other's data or depend on each other, and copied code.
   function oStructure() {
@@ -546,16 +553,22 @@
   function shell() {
     $("#app").innerHTML = '<div class="shell"><button class="iconbtn menu-btn" id="menu" aria-label="Menu">' + ic("menu") + '</button><aside class="side"><div class="brand"><span class="mark">' + ic("logo") + '</span><span>Veridic</span><span class="repo">' + esc(D.name) + "</span></div>" +
       '<label class="search">' + ic("search", "sm") + '<input id="q" placeholder="Search" autocomplete="off" spellcheck="false"><kbd>/</kbd></label>' +
-      '<nav class="nav" id="nav"></nav><div class="mods" id="mods"></div>' +
+      '<nav class="nav" id="nav"></nav>' +
       '<div class="sidefoot"><span class="grow" title="' + esc(new Date(D.generated).toLocaleString()) + '">' + esc(ago(D.generated)) + '</span><select class="pick" id="editor" title="Where file links open"><option value="vscode">VS Code</option><option value="cursor">Cursor</option><option value="none">No links</option></select>' +
       '<button class="iconbtn" id="theme" aria-label="Toggle light or dark"></button></div></aside>' +
       '<div class="content"><main class="page" id="main"></main></div></div>';
     $("#editor").value = ED;
   }
+  // The sidebar: Home, then Modules with every module nested under it (collapsible), then the rest.
+  let modsOpen = store.get("mods-open") !== "0";
   function nav() {
-    const cur = state.view === "module" ? "modules" : state.view;
-    $("#nav").innerHTML = NAV.map((n) => '<button class="item" data-nav="' + n.k + '"' + (n.k === cur && !(state.view === "module") ? ' aria-current="page"' : "") + '><span class="grow">' + n.t + "</span>" + (n.dot ? dot(n.dot) : "") + "</button>").join("");
-    $("#mods").innerHTML = MODS.length ? '<div class="label">Modules</div>' + MODS.map((m) => { const st = statusOf(m); return '<button class="item' + (state.view === "module" && state.mod === m.id ? " on" : "") + '" data-mod="' + esc(m.id) + '"><span class="grow">' + esc(m.name) + "</span>" + (st && st.c ? dot(st.c) : "") + "</button>"; }).join("") : "";
+    const cur = state.view;
+    const item = (n) => '<button class="item" data-nav="' + n.k + '"' + (n.k === cur ? ' aria-current="page"' : "") + '><span class="grow">' + n.t + "</span>" + (n.dot ? dot(n.dot) : "") + "</button>";
+    const group = MODS.length
+      ? '<button class="item group" data-modtoggle aria-expanded="' + modsOpen + '">' + ic("chev", "sm chev") + '<span class="grow">Modules</span><span class="meta">' + MODS.length + "</span></button>" +
+        (modsOpen ? '<div class="sublist">' + MODS.map((m) => '<button class="item sub' + (cur === "module" && state.mod === m.id ? " on" : "") + '" data-mod="' + esc(m.id) + '"><span class="grow">' + esc(m.name) + "</span>" + (sideDot(m) ? dot(sideDot(m)) : "") + "</button>").join("") + "</div>" : "")
+      : "";
+    $("#nav").innerHTML = item(NAV[0]) + group + NAV.slice(1).map(item).join("");
   }
   function render(keepScroll) {
     seq = 0;
@@ -642,6 +655,7 @@
     }
     const g = t.closest("[data-group]");
     if (g) { state.openGroup = g.dataset.group; state.sev = ["high", "medium", "low"]; state.area = "all"; state.sub = "findings"; state.open.add("findings"); render(true); return; }
+    if (t.closest("[data-modtoggle]")) { modsOpen = !modsOpen; store.set("mods-open", modsOpen ? "1" : "0"); nav(); return; }
     if (t.closest("#menu")) { $(".shell").classList.toggle("menu"); return; }
     if (t.closest("a, button, select, input, label, pre, textarea, summary")) return;
     const row = t.closest(".li[data-d]");
