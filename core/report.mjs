@@ -64,8 +64,92 @@ const readLines = (repo, file) => {
   }
 };
 
+// The parts of a spec a reader needs, from its Markdown: title and status, user
+// stories with their scenarios, each requirement's section and verification
+// checks, and its tables (decision tables, state machine, risks).
+const REQ_ID = "(?:FR|SC|NFR|R|AC|INV|D)-?\\d+[a-z]?";
+export function specDoc(text) {
+  const lines = text.split("\n");
+  const doc = { title: null, meta: {}, stories: [], tables: [], notes: [], reqs: {} };
+  let h2 = null, h3 = null, cur = null, story = null;
+  const cells = (row) => row.trim().replace(/^\||\|$/g, "").split("|").map((c) => c.trim());
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i];
+    let m;
+    if ((m = l.match(/^#\s+(.*)/))) { doc.title = m[1].replace(/^(?:feature\s+)?spec(?:ification)?\s*:\s*/i, "").trim(); continue; }
+    if ((m = l.match(/^##\s+(.*)/))) { h2 = m[1].trim(); h3 = null; cur = null; story = null; continue; }
+    if ((m = l.match(/^###\s+(.*)/))) {
+      h3 = m[1].trim();
+      cur = null;
+      const st = h3.match(/^user story\s*(\d+)\s*[-–:]\s*(.*?)\s*(?:\(priority:\s*(P\d)\))?\s*$/i);
+      story = st ? { n: Number(st[1]), title: st[2], priority: st[3] ?? null, why: "", scenarios: [] } : null;
+      if (story) doc.stories.push(story);
+      continue;
+    }
+    // Before the first section: "**Status**: … · **Seeds**: …".
+    if (!h2) {
+      for (const mm of l.matchAll(/\*\*([\w ]+)\*\*:\s*([^·]+)/g)) doc.meta[mm[1].trim().toLowerCase()] = mm[2].trim();
+      continue;
+    }
+    if (/^\s*\|/.test(l) && /^\s*\|[\s:|-]+\|\s*$/.test(lines[i + 1] ?? "")) {
+      const header = cells(l), rows = [];
+      for (i += 2; i < lines.length && /^\s*\|/.test(lines[i]); i++) rows.push(cells(lines[i]));
+      i--;
+      doc.tables.push({ heading: h3 ?? h2, section: h2, header, rows });
+      continue;
+    }
+    if (story) {
+      if ((m = l.match(/^\*\*why this priority\*\*:\s*(.*)/i))) story.why = m[1].trim();
+      else if ((m = l.match(/^\s*\d+\.\s*\*\*given\*\*\s*(.*?),?\s*\*\*when\*\*\s*(.*?),?\s*\*\*then\*\*\s*(.*)$/i))) {
+        const refs = [...m[3].matchAll(new RegExp(REQ_ID, "g"))].map((x) => x[0]);
+        story.scenarios.push({ given: m[1].trim(), when: m[2].trim(), then: m[3].replace(new RegExp(`\\s*\\((?:${REQ_ID}(?:,\\s*)?)+\\)\\s*$`), "").trim(), refs });
+      }
+      continue;
+    }
+    if ((m = l.match(new RegExp(`^\\s*[-*]\\s*\\*\\*(${REQ_ID})\\*\\*\\s*(?:\\(holds:\\s*([\\w-]+)\\))?`)))) { cur = m[1]; doc.reqs[cur] = { section: h3 ?? h2, holds: m[2] ?? null, vcs: [] }; continue; }
+    if (cur && (m = l.match(/^\s+[-*]\s*(VC\d+)\.\s*(.*)/))) { doc.reqs[cur].vcs.push({ id: m[1], text: m[2].trim() }); continue; }
+    // A section's lead sentence (e.g. the contract summary), once per section.
+    if (l.trim() && !/^[-*>_]|^\d+\.|^\*\*/.test(l.trim()) && !doc.notes.some((n) => n.section === h2) && !/^requirements$|^user scenarios/i.test(h2)) doc.notes.push({ section: h2, text: l.trim() });
+  }
+  return doc;
+}
+
+// What the app is, in its authors' words: the README's (or a similar file's)
+// title and first paragraph, plus the list that follows it.
+function appOverview(repo) {
+  for (const f of ["README.md", "readme.md", "Readme.md", "replit.md", "AGENTS.md", "CLAUDE.md", "docs/README.md"]) {
+    let text;
+    try {
+      text = fs.readFileSync(path.join(repo, f), "utf8");
+    } catch {
+      continue;
+    }
+    const title = text.match(/^#\s+(.+)$/m)?.[1].replace(/[*_`]/g, "").trim() ?? null;
+    const blocks = text.replace(/```[\s\S]*?```/g, "").split(/\n\s*\n/).map((b) => b.split("\n").filter((l) => !/^\s*#/.test(l) && !/^\s*(!\[|<|\[!\[)/.test(l)).join("\n").trim()).filter(Boolean);
+    const i = blocks.findIndex((b) => !/^\s*([-*]|\d+\.)\s/.test(b) && b.replace(/\s+/g, " ").length > 40);
+    if (i < 0) continue;
+    const about = [blocks[i], ...(/^\s*([-*]|\d+\.)\s/.test(blocks[i + 1] ?? "") ? [blocks[i + 1]] : [])].join("\n\n");
+    return { title, about: about.length > 1500 ? about.slice(0, 1500).replace(/\s+\S*$/, "") + "…" : about, source: f };
+  }
+  try {
+    const p = JSON.parse(fs.readFileSync(path.join(repo, "package.json"), "utf8"));
+    if (p.description) return { title: p.name, about: p.description, source: "package.json" };
+  } catch {}
+  return null;
+}
+
+// The app's areas, from its route paths: /api/public/orders/:id/pay -> public/orders.
+const SCOPE = new Set(["admin", "public", "internal", "private", "me", "account"]);
+export function areaOf(p) {
+  const segs = p.split("/").filter((x) => x && !/^[:{*]/.test(x));
+  while (segs.length > 1 && /^(?:api|v\d+|rest)$/i.test(segs[0])) segs.shift();
+  if (!segs.length) return "/";
+  return SCOPE.has(segs[0]) && segs[1] ? `${segs[0]}/${segs[1]}` : segs[0];
+}
+
 function specSection(repo, file, m) {
   const text = fs.readFileSync(file, "utf8");
+  const doc = specDoc(text);
   const cite = checkCitations(repo, text);
   let cov = { requirements: [] };
   try {
@@ -96,9 +180,11 @@ function specSection(repo, file, m) {
     // Citations under a heading (a decision table, a contract section) aren't requirements.
     const requirement = /^(?:FR|SC|NFR|R|AC|INV|D)-?\d+[a-z]?$/.test(id);
     const text = (r.text ?? "").replace(/^\*\*[\w-]+\*\*\s*(?:\([^)]*\))?\s*:?\s*/, "");
-    return { id, requirement, text, status: r.status ?? "none", tests: (r.tests ?? []).map((t) => (typeof t === "string" ? t : t.at ?? `${t.file}:${t.line}`)), stale: stale.has(id), cites };
+    const extra = doc.reqs[id] ?? {};
+    return { id, requirement, text, section: extra.section ?? null, holds: extra.holds ?? null, checks: extra.vcs ?? [], status: r.status ?? "none", tests: (r.tests ?? []).map((t) => (typeof t === "string" ? t : t.at ?? `${t.file}:${t.line}`)), stale: stale.has(id), cites };
   });
-  return { spec: m.spec, path: path.relative(repo, file), numbers: m, requirements: reqs };
+  const { reqs: _, ...rest } = doc;
+  return { spec: m.spec, path: path.relative(repo, file), numbers: m, doc: rest, requirements: reqs };
 }
 
 function untrackedSpecs(repo) {
@@ -159,11 +245,32 @@ export async function collectReport(repo, { specs: specFiles } = {}) {
         }
       });
       out.coverage = m.coverage;
+      // Which spec covers each route: it cites the handler's lines, or names the route as a seed.
+      for (const r of out.routes) {
+        const h = r.handler.match(/^(.*):(\d+)-(\d+)$/);
+        r.specs = out.specs.filter((s) => (s.doc.meta.seeds ?? "").includes(`\`${r.id}\``) || (h && s.requirements.some((q) => q.cites.some((c) => c.resolves && c.file === h[1] && c.start <= Number(h[3]) && c.end >= Number(h[2]))))).map((s) => s.path);
+      }
       out.attention = m.attention;
     } catch (e) {
       note("specs", e);
     }
   }
+
+  // What the app is, and its areas: what each does, its issues, and whether a spec covers it.
+  out.app = appOverview(repo);
+  const areas = new Map();
+  for (const r of out.routes) {
+    const k = (r.area = areaOf(r.path));
+    const a = areas.get(k) ?? areas.set(k, { area: k, routes: 0, writes: 0, destructive: 0, money: 0, issues: 0, specified: 0, specs: [] }).get(k);
+    a.routes++;
+    if (r.effect !== "read") a.writes++;
+    if (r.effect === "destructive") a.destructive++;
+    if (r.moves_money) a.money++;
+    a.issues += out.findings.filter((f) => f.area === "API" && f.where === r.id && f.severity !== "low").length;
+    if (r.specs?.length) a.specified++;
+    for (const s of r.specs ?? []) if (!a.specs.includes(s)) a.specs.push(s);
+  }
+  out.areas = [...areas.values()].sort((a, b) => (a.specified === a.routes) - (b.specified === b.routes) || b.money - a.money || b.issues - a.issues || b.writes - a.writes || b.routes - a.routes);
 
   // The change in progress: what the working tree changes against HEAD, checked against the claim.
   try {

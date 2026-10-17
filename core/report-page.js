@@ -50,6 +50,7 @@
     refresh: '<path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5"/>',
     changed: '<path d="M3.05 11a9 9 0 1 1 .5 4M3 4v5h5"/><path d="M12 8v4l2 2"/>',
     file: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/>',
+    table: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18M9 10v10M15 10v10"/>',
     logo: '<path d="m5 12.5 4.5 4.5L19 7.5"/>',
   };
   const ic = (n, cls) => '<svg class="i ' + (cls || "") + '" viewBox="0 0 24 24" aria-hidden="true">' + (P[n] || "") + "</svg>";
@@ -195,12 +196,12 @@
 
   // ---- state ----
   const NAV = [
-    ...(SPECS.length ? [{ k: "spec", t: "Spec", i: "spec", n: SPECS.reduce((n, s) => n + specReqs(s).length, 0) }] : []),
+    ...(SPECS.length ? [{ k: "spec", t: "Specs", i: "spec", n: SPECS.length }] : []),
     { k: "health", t: "Health", i: "health" },
     { k: "findings", t: "Findings", i: "alert", n: F.filter((f) => f.severity !== "low").length, hot: F.some((f) => f.severity === "high") },
     { k: "routes", t: "Routes", i: "route", n: ROUTES.length },
     { k: "tests", t: "Tests", i: "flask", n: T ? T.tests : null },
-    ...(SPECS.length ? [] : [{ k: "spec", t: "Spec", i: "spec", n: 0 }]),
+    ...(SPECS.length ? [] : [{ k: "spec", t: "Specs", i: "spec", n: 0 }]),
     ...(D.change ? [{ k: "change", t: "Current change", i: "branch", n: D.change.problems.length || null, hot: !D.change.done }] : []),
   ];
   const state = {
@@ -209,57 +210,150 @@
     sev: ["high", "medium"],
     area: "all",
     rf: "all",
-    spec: 0,
+    sel: SPECS.length ? "spec:0" : "app",
+    aboutOpen: false,
     sf: "all",
     openGroup: null,
     pages: {},
   };
 
   // ---- views ----
+  // ---- Specs: what the app is, a tree to pick a spec or an area, and the pick ----
+  const AREAS = D.areas || [];
+  const specTitle = (s) => (s.doc && s.doc.title) || specName(s);
+  // Markdown, the little the specs and READMEs use: `code` (file:line becomes a link), **bold**, lists.
+  const md = (t) => String(t ?? "").split(/`([^`]+)`/).map((p, i) => (i % 2 ? (LOC.test(p) ? loc(p) : "<code>" + esc(p) + "</code>") : esc(p).replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>"))).join("");
+  const mdBlock = (t) => String(t ?? "").split(/\n\s*\n/).map((b) => {
+    const ls = b.split("\n");
+    if (ls.every((l) => /^\s*([-*]|\d+\.)\s/.test(l))) { const ol = /^\s*\d+\./.test(ls[0]); return "<" + (ol ? "ol" : "ul") + ' class="mdlist">' + ls.map((l) => "<li>" + md(l.replace(/^\s*([-*]|\d+\.)\s+/, "")) + "</li>").join("") + "</" + (ol ? "ol" : "ul") + ">"; }
+    return "<p>" + md(b) + "</p>";
+  }).join("");
+  const areaIcon = (a) => (a.money ? "coins" : a.destructive ? "trash" : a.writes ? "pencil" : "eye");
+  const areaTone = (a) => (a.specified === a.routes ? "ok" : a.money || a.issues ? "high" : a.specified ? "med" : "low");
+  const promptArea = (a) => "Use veridic to write a spec for the " + a.area + " area of " + D.name + ". Its routes:\n" + ROUTES.filter((r) => r.area === a.area).map((r) => "- " + r.id + " (" + (EFF[r.effect] || EFF.read).t.toLowerCase() + (r.moves_money ? ", moves money" : "") + ") " + r.handler).join("\n") +
+    "\n\nStart with the riskiest behavior (money, deletes, writes). Write user stories with Given/When/Then scenarios, requirements backed by [evidence: file:line] citations to the code that does them, and the invariants that must always hold. Save it as specs/" + a.area.replace(/[^\w]+/g, "-") + "/spec.md, then run `veridic check` and `veridic tests`.";
+
   function vSpec() {
-    if (!SPECS.length)
-      return head(ic("spec", "lg") + "Spec", "What the code must do, each requirement tied to the lines that do it.") +
-        empty("spec", "No spec yet", "A spec lists what a feature must do. Veridic ties every requirement to the exact lines that do it and the tests that check it, and tells you when code and spec drift apart.", '<div class="mt">' + btn("Copy prompt: write a spec", "Use veridic to write a spec for the most important feature in " + D.name + " (for example checkout or orders). Back every requirement with [evidence: file:line] citations to the code that does it, save it as specs/<feature>/spec.md, then run `veridic check`.", "primary", "sparkle") + "</div>");
-    const s = SPECS[Math.min(state.spec, SPECS.length - 1)];
-    const rs = specReqs(s), other = s.requirements.filter((r) => !r.requirement);
-    const nT = rs.filter(tested).length, nStale = rs.filter((r) => r.stale).length;
-    const n = s.numbers || {};
-    let h = head(ic("spec", "lg") + esc(specName(s)), '<span class="mono">' + esc(s.path) + "</span> · what this part of the code must do, each requirement tied to the code that does it and the tests that check it.", btn("Copy prompt: close the gaps", promptSpec(s), "primary", "sparkle"));
-    if (SPECS.length > 1) h += chipRow("spec", SPECS.map((x, i) => ({ k: i, t: specName(x), i: "file", n: specReqs(x).length })), state.spec);
-    h += '<div class="grid kpis">' + kpi("spec", "info", rs.length, "requirements") + kpiRing(nT, rs.length, "have a test that checks them", "flask") + kpiRing(rs.length - nStale, rs.length, "still match the code", "code") +
+    return appHeader() + '<div class="split"><aside class="tree card in" aria-label="Specs and areas">' + tree() + '</aside><section class="pane">' + pane() + "</section></div>";
+  }
+  function appHeader() {
+    const A = D.app;
+    const covered = ROUTES.filter((r) => r.specs && r.specs.length).length, p = pctOf(covered, ROUTES.length);
+    const stat = (v, k, icon, tone) => '<div class="astat"><span class="ic bg-' + tone + '">' + ic(icon) + '</span><div><div class="v">' + num(v) + '</div><div class="k">' + k + "</div></div></div>";
+    return '<div class="card apphead in"><div class="appmain"><div class="eyebrow">' + ic("spec", "sm") + "Specs · " + esc(D.name) + "</div><h1>" + esc((A && A.title) || D.name) + "</h1>" +
+      (A ? '<div class="about' + (state.aboutOpen ? "" : " clamp") + '">' + mdBlock(A.about) + '</div><div class="row-flex small muted">' + (A.about.length > 200 ? '<button class="btn ghost" data-more>' + ic("chev", "sm" + (state.aboutOpen ? " up" : " down")) + (state.aboutOpen ? "Less" : "More") + "</button>" : "") + "From <span class=\"mono\">" + esc(A.source) + "</span></div>"
+        : '<p class="muted">No README describes this app yet. A short one helps people and agents alike.</p>') +
+      '</div><div class="appstats">' + stat(ROUTES.length, "routes", "route", "info") + stat(AREAS.length, "areas", "branch", "violet") + stat(SPECS.length, SPECS.length === 1 ? "spec" : "specs", "spec", "ok") +
+      '<div class="covring">' + ring(p, toneOf(p), 64) + '<div><div class="v">' + num(p, "%") + '</div><div class="k">of routes have a spec</div></div></div></div></div>';
+  }
+  const node = (key, icon, label, meta, extra, tone) => '<button class="node' + (state.sel === key ? " on" : "") + '" data-sel="' + esc(key) + '"><span class="nico">' + ic(icon) + '</span><span class="nbody"><span class="nlabel">' + esc(label) + '</span><span class="nmeta">' + esc(meta) + "</span>" + (extra || "") + "</span>" + (tone ? '<span class="dot tone-' + tone + '"></span>' : "") + "</button>";
+  function tree() {
+    let h = node("app", "health", "About this app", plural(AREAS.length, "area") + " · " + plural(SPECS.length, "spec"));
+    h += '<div class="tree-g">' + ic("spec", "sm") + 'Specs<span class="n">' + SPECS.length + "</span></div>";
+    h += SPECS.length ? SPECS.map((s, i) => {
+      const rs = specReqs(s), t = rs.filter(tested).length, st = rs.filter((r) => r.stale).length;
+      return node("spec:" + i, "file", specTitle(s), plural(rs.length, "requirement") + " · " + pctOf(t, rs.length) + "% tested" + (st ? " · " + st + " changed" : ""), bar([{ c: "var(--ok)", p: pctOf(t, rs.length) }], true), st || t < rs.length ? "med" : "ok");
+    }).join("") : '<div class="tree-empty">None yet. Pick an area below to write one.</div>';
+    const list = AREAS.filter((a) => match(a.area));
+    h += '<div class="tree-g">' + ic("branch", "sm") + 'Areas<span class="n">' + AREAS.length + '</span><span class="legend-mini"><i class="dot tone-ok"></i>spec <i class="dot tone-high"></i>risky, none</span></div>';
+    h += list.map((a) => node("area:" + a.area, areaIcon(a), a.area, plural(a.routes, "route") + (a.specified ? " · " + pctOf(a.specified, a.routes) + "% specified" : " · no spec"), "", areaTone(a))).join("");
+    return h;
+  }
+  function pane() {
+    const sel = state.sel;
+    if (sel.startsWith("spec:") && SPECS[+sel.slice(5)]) return specPane(SPECS[+sel.slice(5)], +sel.slice(5));
+    if (sel.startsWith("area:")) { const a = AREAS.find((x) => "area:" + x.area === sel); if (a) return areaPane(a); }
+    return appPane();
+  }
+
+  function appPane() {
+    const missing = AREAS.filter((a) => a.specified < a.routes);
+    let h = '<div class="pane-h in"><div><h2>' + ic("branch", "sm") + "Spec coverage by area</h2><p>Each area of the API, what it does, and whether a spec says what it must do. Areas that move money, delete or have open issues come first.</p></div>" +
+      (missing.length ? btn("Copy prompt: spec the riskiest area", promptArea(missing[0]), "primary", "sparkle") : "") + "</div>";
+    if (!AREAS.length) return h + empty("route", "No routes found", "Run <code>veridic init</code> so Veridic can index the code.");
+    const pg = paginate("areas", AREAS.filter((a) => match(a.area)));
+    h += '<div class="card in"><div class="tablewrap"><table class="t"><thead><tr><th>Area</th><th>Routes</th><th>Does</th><th>Issues</th><th>Spec</th></tr></thead><tbody>' +
+      pg.items.map((a) => '<tr class="row" data-sel="area:' + esc(a.area) + '"><td><span class="lbl">' + icoBox(areaIcon(a), areaTone(a) === "ok" ? "ok" : "low") + '<span class="mono" style="font-weight:600">' + esc(a.area) + "</span></span></td><td class=\"num\">" + a.routes + "</td><td>" + doesIcons(a) + "</td><td>" +
+        (a.issues ? '<span class="pill bg-high">' + ic("alert", "sm") + a.issues + "</span>" : '<span class="tone-ok">' + ic("check2", "sm") + "</span>") + "</td><td>" + coverCell(a) + "</td></tr>").join("") + "</tbody></table></div>" + pg.html + "</div>";
+    return h;
+  }
+  const doesIcons = (a) => '<span class="cellicons">' + (a.money ? '<span class="pill bg-high" data-tip="Move money">' + ic("coins", "sm") + a.money + "</span>" : "") + (a.destructive ? '<span class="pill bg-high" data-tip="Delete">' + ic("trash", "sm") + a.destructive + "</span>" : "") + (a.writes - a.destructive > 0 ? '<span class="pill bg-med" data-tip="Change data">' + ic("pencil", "sm") + (a.writes - a.destructive) + "</span>" : "") + (a.routes - a.writes > 0 ? '<span class="pill bg-info" data-tip="Read">' + ic("eye", "sm") + (a.routes - a.writes) + "</span>" : "") + "</span>";
+  const coverCell = (a) => { const p = pctOf(a.specified, a.routes); return a.specified ? '<div class="row-flex" style="flex-wrap:nowrap;min-width:150px"><div style="flex:1">' + bar([{ c: "var(--" + (p === 100 ? "ok" : "med") + ")", p }], true) + '</div><span class="small">' + a.specified + "/" + a.routes + "</span></div>" : '<span class="pill bg-low">' + ic("minus", "sm") + "No spec</span>"; };
+
+  function areaPane(a) {
+    const rs = ROUTES.filter((r) => r.area === a.area && match(r.id));
+    const specs = SPECS.map((s, i) => [s, i]).filter(([s]) => a.specs.includes(s.path));
+    let h = '<div class="pane-h in"><div><div class="eyebrow">' + ic("branch", "sm") + "Area</div><h2 class=\"mono\">" + esc(a.area) + "</h2><p>" + plural(a.routes, "route") + " · " + doesIcons(a) + "</p></div>" + btn(a.specified ? "Copy prompt: spec the rest" : "Copy prompt: write its spec", promptArea(a), "primary", "sparkle") + "</div>";
+    h += a.specified
+      ? '<div class="callout ok in">' + ic("check", "sm") + "<div><b>" + pctOf(a.specified, a.routes) + "% of this area is specified</b> by " + specs.map(([s, i]) => '<button class="linkbtn" data-sel="spec:' + i + '">' + esc(specTitle(s)) + "</button>").join(", ") + ". " + (a.specified < a.routes ? plural(a.routes - a.specified, "route") + " still have no spec." : "") + "</div></div>"
+      : '<div class="callout warn in">' + ic("alert", "sm") + "<div><b>No spec covers this area yet.</b> Nothing written says what these routes must do, so nothing can tell when a change breaks them." + (a.money ? " It moves money, so it should come first." : "") + "</div></div>";
+    const pg = paginate("area:" + a.area, rs);
+    h += table(["Method", "Path", "Does", "Who can call", "Issues", "Spec"], pg.items.map((rt) => {
+      const iss = issuesByRoute.get(rt.id) || [], e = EFF[rt.effect] || EFF.read;
+      return row(['<span class="method m-' + esc(rt.method) + '">' + esc(rt.method) + "</span>", '<span class="path">' + esc(rt.path) + "</span>",
+        '<span class="cellicons">' + icoBox(e.i, e.c, e.t) + (rt.moves_money ? icoBox("coins", "high", "Moves money") : "") + "</span>",
+        ACC[rt.access] ? icoBox(ACC[rt.access].i, ACC[rt.access].c, ACC[rt.access].t) : esc(rt.access),
+        iss.length ? '<span class="pill bg-high">' + ic("alert", "sm") + iss.length + "</span>" : '<span class="tone-ok">' + ic("check2", "sm") + "</span>",
+        rt.specs && rt.specs.length ? '<span class="pill bg-ok">' + ic("check2", "sm") + "Specified</span>" : '<span class="pill bg-low">' + ic("minus", "sm") + "None</span>"], routeDetail(rt, iss));
+    }), pg.html);
+    return h;
+  }
+
+  function specPane(s, si) {
+    const rs = specReqs(s), other = s.requirements.filter((r) => !r.requirement), doc = s.doc || { meta: {}, stories: [], tables: [], notes: [] };
+    const nT = rs.filter(tested).length, nStale = rs.filter((r) => r.stale).length, n = s.numbers || {};
+    const seeds = [...String(doc.meta.seeds || "").matchAll(/`([^`]+)`/g)].map((m) => m[1]);
+    let h = '<div class="pane-h in"><div><div class="eyebrow">' + ic("spec", "sm") + '<span class="mono">' + esc(s.path) + "</span></div><h2>" + esc(specTitle(s)) + "</h2>" +
+      (doc.meta.status ? '<div class="row-flex" style="margin-top:6px"><span class="pill bg-ok">' + ic("check", "sm") + "Status</span><span class=\"small\">" + md(doc.meta.status) + "</span></div>" : "") +
+      (seeds.length ? '<div class="row-flex" style="margin-top:8px"><span class="muted small">Starts from</span>' + seeds.map((x) => '<span class="pill bg-info mono">' + esc(x) + "</span>").join("") + "</div>" : "") +
+      "</div>" + btn("Copy prompt: close the gaps", promptSpec(s), "primary", "sparkle") + "</div>";
+    h += '<div class="grid kpis">' + kpi("spec", "info", rs.length, "requirements") + kpiRing(nT, rs.length, "have a test", "flask") + kpiRing(rs.length - nStale, rs.length, "match the code", "code") +
       kpi("lock", n.citations_resolving_pct === 100 ? "ok" : "med", n.citations_resolving_pct != null ? n.citations_resolving_pct + "%" : "—", "of cited lines exist") + "</div>";
-    h += chipRow("sf", [
-      { k: "all", t: "All", n: rs.length },
-      { k: "untested", t: "Needs a test", i: "minus", n: rs.length - nT },
-      { k: "stale", t: "Code changed", i: "changed", n: nStale },
-      { k: "tested", t: "Tested", i: "check", n: nT },
-    ], state.sf);
+    // Who it is for: the user stories and their scenarios.
+    if (doc.stories.length)
+      h += '<h3 class="sec in">' + ic("user", "sm") + "What should happen</h3>" + doc.stories.map((st) => '<div class="card story in"><div class="row-flex">' + (st.priority ? '<span class="pill bg-violet">' + esc(st.priority) + "</span>" : "") + "<b>" + md(st.title) + "</b></div>" + (st.why ? '<div class="muted small" style="margin-top:4px">' + md(st.why) + "</div>" : "") +
+        (st.scenarios.length ? '<div class="tablewrap"><table class="gwt"><thead><tr><th>Given</th><th>When</th><th>Then</th><th></th></tr></thead><tbody>' + st.scenarios.map((sc) => "<tr><td>" + md(sc.given) + "</td><td>" + md(sc.when) + "</td><td><b>" + md(sc.then) + "</b></td><td>" + sc.refs.map((r) => '<button class="pill bg-info mono linkbtn" data-req="' + esc(r) + '">' + esc(r) + "</button>").join(" ") + "</td></tr>").join("") + "</tbody></table></div>" : "") + "</div>").join("");
+    // The requirements, by section (functional requirements, invariants, …).
+    h += '<h3 class="sec in">' + ic("check", "sm") + "Requirements</h3>";
+    h += chipRow("sf", [{ k: "all", t: "All", n: rs.length }, { k: "untested", t: "Needs a test", i: "minus", n: rs.length - nT }, { k: "stale", t: "Code changed", i: "changed", n: nStale }, { k: "tested", t: "Tested", i: "check", n: nT }], state.sf);
     const list = rs.filter((r) => match(r.id + " " + r.text) && (state.sf === "all" || (state.sf === "tested" ? tested(r) : state.sf === "untested" ? !tested(r) : r.stale)));
-    const pg = paginate("spec" + state.spec, list);
-    h += list.length
-      ? table(["ID", "Requirement", "Test", "Code"], pg.items.map((r) => {
+    const sections = [...new Set(list.map((r) => r.section || "Requirements"))];
+    h += list.length ? sections.map((sec) => {
+      const items = list.filter((r) => (r.section || "Requirements") === sec);
+      const pg = paginate("spec" + si + sec, items);
+      return (sections.length > 1 ? '<div class="subsec in">' + esc(sec) + ' <span class="n">' + items.length + "</span></div>" : "") +
+        table(["ID", "Requirement", "Checks", "Test", "Code"], pg.items.map((r) => {
           const st = REQ[r.status] || REQ.none;
           return row([
-            '<span class="mono" style="font-weight:700">' + esc(r.id) + "</span>",
-            '<div class="reqtext">' + esc(r.text) + "</div>",
+            '<span class="mono" style="font-weight:700">' + esc(r.id) + "</span>" + (r.holds ? '<div style="margin-top:4px">' + pill("shield", r.holds === "yes" ? "Holds" : "Holds: " + r.holds, r.holds === "yes" ? "ok" : "high") + "</div>" : ""),
+            '<div class="reqtext">' + md(r.text) + "</div>",
+            r.checks && r.checks.length ? '<span class="pill bg-info" data-tip="Verification criteria">' + ic("check2", "sm") + r.checks.length + "</span>" : '<span class="muted">—</span>',
             pill(st.i, st.t, st.c),
             (r.stale ? pill("changed", "Changed", "med") : pill("check2", "Matches", "ok")) + ' <span class="muted small">' + plural(r.cites.length, "place") + "</span>",
-          ], reqDetail(s, r), r.stale || !tested(r) ? "attn" : "");
-        }), pg.html)
-      : empty("search", "Nothing matches", "Try another filter or search.");
-    if (other.length)
-      h += '<h3 class="sec in">Also cited in this spec</h3>' + table(["Section", "Code"], other.filter((r) => match(r.id + r.text)).map((r) => row(['<span class="title">' + esc(r.id) + "</span>", (r.stale ? pill("changed", "Changed", "med") : pill("check2", "Matches", "ok")) + ' <span class="muted small">' + plural(r.cites.length, "place") + "</span>"], reqDetail(s, r, true))));
+          ], reqDetail(s, r), (r.stale || !tested(r) ? "attn " : "") + "req-" + cssId(r.id));
+        }), pg.html);
+    }).join("") : empty("search", "Nothing matches", "Try another filter or search.");
+    // Tables the spec carries: decision tables, the state machine, risks.
+    for (const t of doc.tables) {
+      const icon = /decision/i.test(t.heading) ? "table" : /state/i.test(t.heading) ? "branch" : /risk|question/i.test(t.heading) ? "alert" : "file";
+      const note = doc.notes.find((x) => x.section === t.section);
+      h += '<div class="card in mt"><div class="panel-h">' + ic(icon, "sm") + md(t.heading) + "</div>" + (note ? '<div class="panel-note">' + md(note.text) + "</div>" : "") +
+        '<div class="tablewrap"><table class="t plain"><thead><tr>' + t.header.map((c) => "<th>" + md(c) + "</th>").join("") + "</tr></thead><tbody>" + t.rows.map((r) => "<tr>" + r.map((c) => "<td>" + md(c) + "</td>").join("") + "</tr>").join("") + "</tbody></table></div></div>";
+    }
+    for (const x of doc.notes.filter((x) => !doc.tables.some((t) => t.section === x.section))) h += '<div class="callout info in mt">' + ic("file", "sm") + "<div><b>" + md(x.section) + ".</b> " + md(x.text) + "</div></div>";
+    if (other.length) h += '<h3 class="sec in">' + ic("code", "sm") + "Other evidence in this spec</h3>" + table(["Section", "Code"], other.filter((r) => match(r.id + r.text)).map((r) => row(['<span class="title">' + md(r.id) + "</span>", (r.stale ? pill("changed", "Changed", "med") : pill("check2", "Matches", "ok")) + ' <span class="muted small">' + plural(r.cites.length, "place") + "</span>"], reqDetail(s, r, true))));
     return h;
   }
   function reqDetail(s, r, section) {
     let h = "";
     if (!section) {
-      h += '<div class="row-flex" style="margin-bottom:10px"><b>' + ic("flask", "sm") + " Checked by</b>" + (r.tests.length ? "" : '<span class="muted">no test yet</span>') + '<span class="sp"></span>' +
+      if (r.checks && r.checks.length) h += '<div class="row-flex" style="margin-bottom:8px"><b>' + ic("check2", "sm") + " What proves it</b></div><div class=\"vcs\">" + r.checks.map((v) => '<div class="vc"><span class="pill bg-info mono">' + esc(v.id) + "</span>" + md(v.text) + "</div>").join("") + "</div>";
+      h += '<div class="row-flex" style="margin:12px 0 8px"><b>' + ic("flask", "sm") + " Checked by</b>" + (r.tests.length ? "" : '<span class="muted">no test yet</span>') + '<span class="sp"></span>' +
         (!tested(r) ? btn("Copy prompt: write the test", promptTest(s, r), "primary", "sparkle") : "") + (r.stale ? btn("Copy prompt: re-check it", promptStale(s, r), "", "changed") : "") + "</div>";
       if (r.tests.length) h += '<div style="display:grid;gap:4px;margin-bottom:14px">' + r.tests.map((t) => '<div class="row-flex">' + ic("check2", "sm tone-ok") + loc(t) + "</div>").join("") + "</div>";
     }
     h += '<div class="row-flex"><b>' + ic("code", "sm") + " Backed by this code</b>" + (r.stale ? '<span class="muted small">changed since the spec was written</span>' : "") + "</div>";
-    h += r.cites.map((c) => '<div class="mt" style="margin-top:10px"><div class="row-flex">' + (c.resolves ? ic("file", "sm") + loc(c.file + ":" + c.start + (c.end !== c.start ? "-" + c.end : "")) + openBtn(c.file + ":" + c.start) : ic("x", "sm tone-high") + '<span class="mono">' + esc(c.cite) + '</span><span class="tone-high small">' + esc(c.problem) + "</span>") + "</div>" + (c.code != null ? codeBlock(c) : "") + "</div>").join("");
+    h += r.cites.map((c) => '<div style="margin-top:10px"><div class="row-flex">' + (c.resolves ? ic("file", "sm") + loc(c.file + ":" + c.start + (c.end !== c.start ? "-" + c.end : "")) + openBtn(c.file + ":" + c.start) : ic("x", "sm tone-high") + '<span class="mono">' + esc(c.cite) + '</span><span class="tone-high small">' + esc(c.problem) + "</span>") + "</div>" + (c.code != null ? codeBlock(c) : "") + "</div>").join("");
     return h;
   }
 
@@ -493,6 +587,11 @@
     const t = e.target;
     const c = t.closest("[data-copy]");
     if (c) { e.preventDefault(); e.stopPropagation(); copy(CLIP[+c.dataset.copy]); return; }
+    const sl = t.closest("[data-sel]");
+    if (sl && !t.closest("a, [data-copy]")) { state.sel = sl.dataset.sel; state.sf = "all"; state.pages = {}; render(); const pn = $(".pane"); if (pn && innerWidth < 900) pn.scrollIntoView({ block: "start" }); return; }
+    if (t.closest("[data-more]")) { state.aboutOpen = !state.aboutOpen; render(true); return; }
+    const rq = t.closest("[data-req]");
+    if (rq) { state.sf = "all"; state.q = ""; $("#q").value = ""; render(true); const r = $("#main tr.req-" + cssId(rq.dataset.req)); if (r) { if (r.classList.contains("open") === false) toggle(r); r.scrollIntoView({ block: "center", behavior: "smooth" }); r.classList.add("flash"); setTimeout(() => r.classList.remove("flash"), 1400); } return; }
     const pg = t.closest("[data-page]");
     if (pg) { if (pg.disabled) return; state.pages[pg.dataset.page] = +pg.dataset.p; render(true); const m = $("#main .tablewrap"); if (m) m.closest(".card").scrollIntoView({ block: "start", behavior: "smooth" }); return; }
     const n = t.closest("[data-nav]");
