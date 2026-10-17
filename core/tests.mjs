@@ -161,6 +161,25 @@ function closeParen(code, from) {
   return code.length;
 }
 
+// Test cases in a file: `it("…", fn)`, and table-driven `test.each([…])("…", fn)` /
+// test.each`table`("…", fn), each counted once.
+const EACH = /(?<![\w$.])(x?)(?:it|test)(?:\.(skip|only|concurrent))?\.each\s*(?:<[^()]*?>)?\s*([(`])/g;
+function* testCases(src, code) {
+  for (const t of src.matchAll(TITLE)) {
+    if (code[t.index] === " " || /^x?describe/.test(t[0])) continue;
+    yield { index: t.index, x: t[1] === "x", mod: t[2], title: t[4], bodyStart: t.index + t[0].length, bodyEnd: closeParen(code, t.index + t[0].indexOf("(") + 1) };
+  }
+  for (const m of code.matchAll(EACH)) {
+    const tableOpen = m.index + m[0].length;
+    const tableEnd = m[3] === "(" ? closeParen(code, tableOpen) : code.indexOf("`", tableOpen);
+    if (tableEnd < 0) continue;
+    const call = src.slice(tableEnd + 1).match(/^\s*\(\s*(["'`])((?:(?!\1)[^\n])*)\1/);
+    if (!call) continue;
+    const titleCall = tableEnd + 1 + call[0].indexOf("(") + 1;
+    yield { index: m.index, x: m[1] === "x", mod: m[2], title: call[2], bodyStart: tableEnd + 1 + call[0].length, bodyEnd: closeParen(code, titleCall) };
+  }
+}
+
 /** How much a test body checks: empty | unasserted | weak | strong. */
 export function testStrength(body, helpers = null) {
   if (!body.replace(/\basync\b|\bfunction\b|=>|[(){},;\s]|\b(?:done|ctx|t)\b/g, "")) return "empty";
@@ -237,8 +256,10 @@ function localHelpers(code) {
       defs.push({ name: m[2], body: code.slice(after, after + Math.max(0, code.slice(after).search(/;|\n\s*\n|$/))) });
       continue;
     }
-    const brace = code.indexOf("{", after);
-    if (brace < 0 || /;/.test(code.slice(after, brace))) continue;
+    // Past the parameters, which may destructure (`function check({ a, b }) {`).
+    const params = m[1] || /\($/.test(m[0]) ? closeParen(code, after) : after;
+    const brace = code.indexOf("{", params);
+    if (brace < 0 || /;/.test(code.slice(params, brace))) continue;
     let depth = 0, end = brace;
     for (; end < code.length; end++) {
       if (code[end] === "{") depth++;
@@ -255,7 +276,8 @@ function localHelpers(code) {
       grew = true;
     }
   }
-  return asserting.size ? new RegExp(`(?<![\\w$.])(?:${[...asserting].map((n) => n.replace(/\$/g, "\\$")).join("|")})\\s*\\(`, "g") : null;
+  const re = asserting.size ? new RegExp(`(?<![\\w$.])(?:${[...asserting].map((n) => n.replace(/\$/g, "\\$")).join("|")})\\s*\\(`, "g") : null;
+  return { re, bodies: new Map(defs.map((d) => [d.name, d.body])) };
 }
 
 export function auditFile(repo, file) {
@@ -266,19 +288,20 @@ export function auditFile(repo, file) {
     const src = safeRead(repo, file);
     const code = codeOnly(src);
     const skipped = [...code.matchAll(/\b(?:xdescribe|describe\.skip)\s*\(/g)].map((m) => [m.index, closeParen(code, m.index + m[0].length)]);
-    const helpers = localHelpers(code);
-    for (const t of src.matchAll(TITLE)) {
-      if (code[t.index] === " " || /^x?describe/.test(t[0])) continue;
+    const { re: helpers, bodies } = localHelpers(code);
+    for (const t of testCases(src, code)) {
       tests++;
-      const skip = t[2] === "todo" || t[2] === "skip" || t[1] === "x" || skipped.some(([x, y]) => t.index > x && t.index < y);
+      const skip = t.mod === "todo" || t.mod === "skip" || t.x || skipped.some(([x, y]) => t.index > x && t.index < y);
       if (skip) {
         counts.skipped++;
         continue;
       }
-      const open = t.index + t[0].indexOf("(") + 1;
-      const s = testStrength(code.slice(t.index + t[0].length, closeParen(code, open)), helpers);
+      // `test.each(table)("…", testStoragePath)`: the body is a function the file defines.
+      const body = code.slice(t.bodyStart, t.bodyEnd);
+      const named = body.match(/^\s*,\s*([A-Za-z_$][\w$]*)\s*,?\s*(?:\d+\s*)?$/)?.[1];
+      const s = testStrength(named && bodies.has(named) ? bodies.get(named) : body, helpers);
       counts[s]++;
-      if (flagged[s]) flagged[s].push({ at: `${file}:${src.slice(0, t.index).split("\n").length}`, title: t[4].slice(0, 100) });
+      if (flagged[s]) flagged[s].push({ at: `${file}:${src.slice(0, t.index).split("\n").length}`, title: t.title.slice(0, 100) });
     }
   }
   return { file, tests, counts, flagged, asserting: counts.strong + counts.weak };

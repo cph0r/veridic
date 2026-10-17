@@ -231,3 +231,29 @@ test("audit: a helper the test file defines that asserts is an assertion; Playwr
   assert.equal(a.flagged.unasserted[0].title, "only clicks");
   fs.rmSync(repo, { recursive: true, force: true });
 });
+
+test("audit: table-driven test.each([…])('…', fn) and test.each`table` are test cases", async () => {
+  const { auditFile } = await import("../core/tests.mjs");
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "veridic-each-"));
+  fs.writeFileSync(path.join(repo, "a.test.ts"), [
+    "describe('paths', () => {",
+    "  test.each<Case>([",
+    "    { name: 'allows a file', filepath: '1.jpg' },",
+    "  ])('$name', ({ filepath }) => {",
+    "    expect(check(filepath)).toBe(true);",
+    "  });",
+    "  it.each`",
+    "    a    | b",
+    "    ${1} | ${2}",
+    "  `('adds $a', ({ a, b }) => { add(a, b); });",
+    "  it.skip.each([1])('skipped %i', (n) => { expect(n).toBe(1); });",
+    "  test.each([{ name: 'x' }])('$name', checkPath);",
+    "  function checkPath({ name }) { expect(name).toBe('x'); }",
+    "});",
+  ].join("\n"));
+  const a = auditFile(repo, "a.test.ts");
+  assert.equal(a.tests, 4);
+  assert.deepEqual(a.counts, { strong: 2, weak: 0, unasserted: 1, empty: 0, skipped: 1 });
+  assert.equal(a.flagged.unasserted[0].title, "adds $a");
+  fs.rmSync(repo, { recursive: true, force: true });
+});
