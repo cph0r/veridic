@@ -14,6 +14,25 @@ const routePathOf = (raw) => stringValue(raw) ?? raw.match(/^`([^`]*)`$/)?.[1]?.
 
 const METHODS = new Set(["get", "post", "put", "patch", "delete", "head", "options", "all"]);
 
+/** JSON with comments and trailing commas (tsconfig.json): comments are dropped only outside strings. */
+export function jsonc(text) {
+  let out = "";
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (c === '"') {
+      let j = i + 1;
+      while (j < text.length && text[j] !== '"') j += text[j] === "\\" ? 2 : 1;
+      out += text.slice(i, j + 1);
+      i = j;
+    } else if (c === "/" && text[i + 1] === "/") while (i < text.length && text[i] !== "\n") i++;
+    else if (c === "/" && text[i + 1] === "*") {
+      const end = text.indexOf("*/", i + 2);
+      i = end < 0 ? text.length : end + 1;
+    } else out += c;
+  }
+  return out.replace(/,(\s*[}\]])/g, "$1");
+}
+
 export const joinPath = (a, b) => `${a}/${b}`.replace(/\/+/g, "/").replace(/(.)\/$/, "$1") || "/";
 
 /** Normalized route id for matching: params become {}. */
@@ -27,11 +46,43 @@ export const parseRouteId = (s) => {
 
 export function routeInventory(g, { entry } = {}) {
   const exists = (rel) => fs.existsSync(path.join(g.repo, rel)) && fs.statSync(path.join(g.repo, rel)).isFile();
+  const withExt = (base) => {
+    base = base.replace(/\.[cm]?js$/, "");
+    for (const c of [base, `${base}.ts`, `${base}.tsx`, `${base}.js`, `${base}.mjs`, `${base}.cjs`, path.join(base, "index.ts"), path.join(base, "index.js")]) if (exists(c)) return c;
+    return null;
+  };
+  // TypeScript path aliases (`"@/*": ["src/*"]`) from the nearest tsconfig.json or jsconfig.json.
+  const aliasCache = new Map();
+  const aliasesFor = (fromFile) => {
+    for (let dir = path.dirname(fromFile); ; dir = path.dirname(dir)) {
+      if (aliasCache.has(dir)) return aliasCache.get(dir);
+      for (const name of ["tsconfig.json", "jsconfig.json"]) {
+        const rel = dir === "." ? name : path.join(dir, name);
+        if (!exists(rel)) continue;
+        let cfg = {};
+        try {
+          cfg = JSON.parse(jsonc(fs.readFileSync(path.join(g.repo, rel), "utf8")));
+        } catch {}
+        const co = cfg.compilerOptions ?? {};
+        const baseUrl = path.join(dir, co.baseUrl ?? ".");
+        const list = Object.entries(co.paths ?? {}).map(([k, v]) => ({ prefix: k.replace(/\*$/, ""), wild: k.endsWith("*"), to: v.map((t) => path.join(baseUrl, t.replace(/\*$/, ""))) }));
+        aliasCache.set(dir, list);
+        return list;
+      }
+      if (dir === "." || dir === "/" || dir === "") {
+        aliasCache.set(dir, []);
+        return [];
+      }
+    }
+  };
   const resolveImport = (fromFile, spec) => {
-    if (!spec.startsWith(".")) return null;
-    const base = path.join(path.dirname(fromFile), spec).replace(/\.js$/, "");
-    for (const c of [base, `${base}.ts`, `${base}.tsx`, `${base}.js`, `${base}.mjs`, path.join(base, "index.ts"), path.join(base, "index.js")]) {
-      if (exists(c)) return c;
+    if (spec.startsWith(".")) return withExt(path.join(path.dirname(fromFile), spec));
+    for (const a of aliasesFor(fromFile)) {
+      if (!(a.wild ? spec.startsWith(a.prefix) : spec === a.prefix)) continue;
+      for (const t of a.to) {
+        const hit = withExt(a.wild ? path.join(t, spec.slice(a.prefix.length)) : t);
+        if (hit) return hit;
+      }
     }
     return null;
   };
@@ -93,15 +144,38 @@ export function routeInventory(g, { entry } = {}) {
         const key = `${c.line}:${c.args.map((a) => a.text).join(",")}`;
         if (seen.has(key)) continue;
         seen.add(key);
-        const prefix = stringValue(c.args[0]?.raw ?? "") ?? "";
-        const rest = c.args.slice(prefix ? 1 : 0);
+        const first = c.args[0]?.raw ?? "";
+        const prefix = (/^["'`]/.test(first) ? routePathOf(first) : null) ?? "";
+        const rest = c.args.slice(/^["'`]/.test(first) ? 1 : 0);
+        // A folder mounted file by file: use(`/${f}`, require(`./${f}`)) inside readdirSync(...).
+        const tplVar = first.match(/^`\/\$\{\s*([\w$]+)\s*\}`$/)?.[1];
+        const tplReq = tplVar && rest.find((a) => new RegExp(`require\\(\\s*\`\\.\\/\\$\\{\\s*${tplVar}\\s*\\}\\s*\``).test(a.raw));
+        if (tplReq) {
+          const dir = path.posix.dirname(file);
+          const mountedElsewhere = new Set([...src.matchAll(/require\(\s*["']\.\/([\w.-]+)["']\s*\)/g)].map((m) => m[1].replace(/\.[cm]?[jt]s$/, "")));
+          for (const f of sourceFiles.filter((x) => path.posix.dirname(x) === dir && x !== file && !/(^|\/)index\.[cm]?[jt]s$/.test(x))) {
+            const base = path.posix.basename(f).replace(/\.[cm]?[jt]s$/, "");
+            if (!mountedElsewhere.has(base)) out.push({ line: c.line, prefix: `/${base}`, idents: [], mounts: [{ file: f }] });
+          }
+          continue;
+        }
         const pathArg = rest.length === 2 && rest[0].text.match(/^(\w+)\.(\w+)$/);
         const routeArg = rest.length === 2 && rest[1].text.match(/^(\w+)\.(\w+)$/);
         if (!prefix && pathArg && routeArg && pathArg[1] === routeArg[1]) {
           for (const e of loopEntries(src, c.line, pathArg[1], pathArg[2], routeArg[2])) out.push({ line: c.line, prefix: e.prefix, idents: [e.ident] });
           continue;
         }
-        out.push({ line: c.line, prefix, idents: rest.map((a) => a.text).filter((t) => /^\w+$/.test(t)) });
+        // Routers handed over as `require("./x")` or built by a call, `inventoryRouter(path)`.
+        const mounts = [];
+        for (const a of rest) {
+          const req = a.raw.match(/^require\(\s*["'](\.[^"']+)["']\s*\)(?:\.(\w+))?$/);
+          if (req) mounts.push({ spec: req[1], name: req[2] ?? "default" });
+          else {
+            const call = a.text.match(/^(?:await\s+)?([\w$]+)\s*\(/);
+            if (call && !/^(require|express|json|urlencoded|static)$/.test(call[1])) mounts.push({ factory: call[1] });
+          }
+        }
+        out.push({ line: c.line, prefix, idents: rest.map((a) => a.text).filter((t) => /^\w+$/.test(t)), mounts });
       }
     }
     return out;
@@ -139,6 +213,57 @@ export function routeInventory(g, { entry } = {}) {
     if (!m) return null;
     return m[1].split(",").map((p) => p.trim().replace(/[:=?].*$/s, "").trim())[i] ?? null;
   };
+  // Where a name is really defined, following barrel re-exports (`export { x } from "./x"`, `export * from`).
+  const resolveExport = (file, name, depth = 0) => {
+    const src = g.text(file) ?? "";
+    if (depth > 3 || new RegExp(`(?:function\\s+${name}\\b|\\b(?:const|let|var)\\s+${name}\\b)`).test(src)) return file;
+    for (const m of src.matchAll(/export\s*\{([^}]*)\}\s*from\s*["'](\.[^"']+)["']/g)) {
+      const parts = m[1].split(",").map((x) => x.trim().split(/\s+as\s+/));
+      const hit = parts.find((p) => (p[1] ?? p[0]) === name);
+      const target = hit && resolveImport(file, m[2]);
+      if (target) return resolveExport(target, hit[0], depth + 1);
+    }
+    for (const m of src.matchAll(/export\s*\*\s*from\s*["'](\.[^"']+)["']/g)) {
+      const target = resolveImport(file, m[1]);
+      const found = target && resolveExport(target, name, depth + 1);
+      if (found && new RegExp(`(?:function\\s+${name}\\b|\\b(?:const|let|var)\\s+${name}\\b)`).test(g.text(found) ?? "")) return found;
+    }
+    return file;
+  };
+  // Mount the router a factory returns: `createAuthRouter(name)` imported, re-exported or local.
+  const factoryTarget = (file, fn, imports) => {
+    const imp = imports[fn];
+    if (!imp) return { target: file, name: fn };
+    const name = imp.name === "default" ? exportVar(imp.file, "default") : imp.name;
+    return { target: name === "*" ? imp.file : resolveExport(imp.file, name), name };
+  };
+  // A variable holding a factory's router: `authRouter = createLocalAuthRouter(p)` (every assignment).
+  const factoryAssigned = (file, id) => [...new Set([...(g.text(file) ?? "").matchAll(new RegExp(`\\b${id}\\s*(?::[^=;]+)?=\\s*(?:await\\s+)?([\\w$]+)\\s*\\(`, "g"))].map((m) => m[1]).filter((f) => !/^(Router|express|require)$/.test(f)))];
+  // The router a factory function returns: `function inventoryRouter(p) { const router = Router(); …; return router; }`.
+  const returnedRouter = (file, fn) => {
+    const src = g.text(file) ?? "";
+    // fn "*" (an unnamed default export) or a name: find that function, then what it returns.
+    const named = /^[\w$]+$/.test(fn) ? `function\\s+${fn}\\b|\\b${fn}\\s*=\\s*(?:async\\s*)?(?:function\\b|\\()|` : "";
+    const at = src.search(new RegExp(`(?:${named}export\\s+default\\s+(?:async\\s+)?(?:function|\\())`));
+    if (at < 0) return null;
+    return src.slice(at).match(/\breturn\s+([\w$]+)\s*;?/)?.[1] ?? null;
+  };
+  // Registrars called through an object: `const routes = { auth, users }; for (k in routes) routes[k](router)`.
+  const objectRegistrars = (file, v) => {
+    const src = g.text(file) ?? "";
+    const out = [];
+    for (const m of src.matchAll(new RegExp(`\\b([\\w$]+)\\s*\\[[^\\]]+\\]\\s*\\(([^()]*)\\)`, "g"))) {
+      const args = m[2].split(",").map((x) => x.trim());
+      const index = args.indexOf(v);
+      if (index < 0) continue;
+      const obj = src.match(new RegExp(`\\b(?:const|let|var)\\s+${m[1]}\\b[\\s\\S]{0,300}?=\\s*\\{([^{}]*)\\}`))?.[1];
+      for (const part of obj?.split(",") ?? []) {
+        const id = part.split(":").pop().trim();
+        if (/^[\w$]+$/.test(id)) out.push({ fn: id, index });
+      }
+    }
+    return out;
+  };
   // Calls that hand the app or router to another function: `registerAuthRoutes(app)`.
   const registrarCalls = (file, v) => {
     if (!v || v === "*") return [];
@@ -165,20 +290,49 @@ export function routeInventory(g, { entry } = {}) {
       const imports = importsOf(file);
       const locals = localRouters(file);
       for (const use of usesOf(file, v)) {
-        const routerIdent = [...use.idents].reverse().find((id) => imports[id] || (locals.has(id) && id !== v));
         const at = `${file}:${use.line}`;
-        const mw = use.idents.filter((id) => id !== routerIdent).map((name) => ({ name, at }));
+        if (use.mounts?.length) {
+          const mw = use.idents.map((name) => ({ name, at }));
+          for (const m of use.mounts) {
+            const full = joinPath(prefix, use.prefix);
+            if (m.file) walk(m.file, exportVar(m.file, "default"), full, [...guards, ...mw]);
+            else if (m.spec) {
+              const target = resolveImport(file, m.spec);
+              if (target) walk(target, exportVar(target, m.name), full, [...guards, ...mw]);
+            } else if (m.factory) {
+              const { target, name } = factoryTarget(file, m.factory, imports);
+              walk(target, returnedRouter(target, name) ?? "*", full, [...guards, ...mw]);
+            }
+          }
+          if (use.mounts.some((m) => m.file || m.spec || m.factory)) continue;
+        }
+        // Which arguments are routers: a local router, or an import from a file that defines a
+        // router or routes. `app.use(cors, auth, router, notFound)` mounts only `router`.
+        // A variable assigned from a router factory is a router too.
+        const full0 = joinPath(prefix, use.prefix);
+        const assigned = use.idents.filter((id) => !imports[id] && !locals.has(id)).map((id) => [id, factoryAssigned(file, id)]).filter(([, fns]) => fns.length);
+        for (const [, fns] of assigned) for (const fn of fns) {
+          const { target, name } = factoryTarget(file, fn, imports);
+          walk(target, returnedRouter(target, name) ?? "*", full0, guards);
+        }
+        const candidates = use.idents.filter((id) => imports[id] || (locals.has(id) && id !== v));
+        const routerLike = (id) => locals.has(id) || routeFiles.has(imports[id]?.file) || localRouters(imports[id]?.file ?? "").size > 0;
+        let routers = candidates.filter(routerLike);
+        if (!routers.length && candidates.length) routers = [candidates.at(-1)];
+        const mw = use.idents.filter((id) => !routers.includes(id)).map((name) => ({ name, at }));
         const full = joinPath(prefix, use.prefix);
-        if (routerIdent && imports[routerIdent]) {
-          const imp = imports[routerIdent];
-          walk(imp.file, exportVar(imp.file, imp.name), full, [...guards, ...mw]);
-        } else if (routerIdent) walk(file, routerIdent, full, [...guards, ...mw]); // a router defined in this file
-        else if (use.prefix && mw.length) pathGuards.push({ prefix: full, guards: mw, at });
+        for (const routerIdent of routers) {
+          if (imports[routerIdent]) {
+            const imp = imports[routerIdent];
+            walk(imp.file, exportVar(imp.file, imp.name), full, [...guards, ...mw]);
+          } else walk(file, routerIdent, full, [...guards, ...mw]); // a router defined in this file
+        }
+        if (!routers.length && use.prefix && mw.length) pathGuards.push({ prefix: full, guards: mw, at });
       }
       // Registration functions: the app/router passed to an imported (or local) function.
       const receivers = v && v !== "*" ? [v] : appVars(file);
       for (const r of receivers) {
-        for (const c of registrarCalls(file, r)) {
+        for (const c of [...registrarCalls(file, r), ...objectRegistrars(file, r)]) {
           const target = imports[c.fn]?.file ?? file;
           const dflt = imports[c.fn]?.name === "default" ? exportVar(target, "default") : null;
           const fnName = imports[c.fn] ? (imports[c.fn].name === "default" ? (dflt && dflt !== "*" ? dflt : c.fn) : imports[c.fn].name) : c.fn;
@@ -207,7 +361,9 @@ export function routeInventory(g, { entry } = {}) {
   const known = new Set(routeNodes.map((n) => `${n.file}|${n.name}`));
   for (const f of sourceFiles) {
     if (!/\.[cm]?[jt]s$/.test(f) || f.includes("node_modules/") || /\.(test|spec)\./.test(f)) continue;
-    const vars = [...new Set([...localRouters(f), ...appVars(f), ...paramVars(f)])];
+    // Plus any receiver CodeGraph already found routes on in this file (an `app` from elsewhere).
+    const indexed = routeNodes.filter((n) => n.file === f).map((n) => (g.lines(f)[n.start - 1] ?? "").match(/([\w$]+)\s*\.\s*(?:get|post|put|patch|delete|head|options|all|route)\s*\(/)?.[1]).filter(Boolean);
+    const vars = [...new Set([...localRouters(f), ...appVars(f), ...paramVars(f), ...indexed])];
     if (!vars.length) continue;
     for (const ch of chainsOf(g.text(f) ?? "", vars)) {
       let routePath = null;
@@ -228,6 +384,7 @@ export function routeInventory(g, { entry } = {}) {
       });
     }
   }
+  const routeFiles = new Set(routeNodes.map((n) => n.file));
   const receiverOf = (n) => n.receiver ?? g.lines(n.file)[n.start - 1]?.match(/(\w+)\s*\.\s*(?:get|post|put|patch|delete|head|options|all|route)\s*\(/)?.[1];
   const lookup = (mounts, file, v) => mounts.get(`${file}#${v}`) ?? mounts.get(`${file}#*`) ?? [...mounts.values()].find((m) => m.file === file);
 
@@ -271,6 +428,21 @@ export function routeInventory(g, { entry } = {}) {
   const pathGuards = [];
   for (const w of walks) {
     for (const [k, m] of w.mounts) if (!mounts.has(k)) mounts.set(k, m); // the best entry's mounts win
+    pathGuards.push(...w.pathGuards);
+  }
+  // Files no entry reached that mount imported routers on an app handed in as a parameter
+  // (`mountApi(_express) { return _express.use("/api", apiRouter) }`): walk them from there.
+  const reachedFiles = new Set([...mounts.values()].map((m) => m.file));
+  for (const f of sourceFiles) {
+    if (reachedFiles.has(f) || /\.(test|spec)\.|__tests__/.test(f)) continue;
+    const src = g.text(f) ?? "";
+    const receivers = [...new Set([...src.matchAll(/([\w$]+)\s*\.\s*use\s*\(/g)].map((m) => m[1]))].filter((r) => new RegExp(`[(,]\\s*${r.replace(/\$/g, "\\$")}\\s*[:,)]`).test(src));
+    if (!receivers.length) continue;
+    const imports = Object.values(importsOf(f)).map((i) => i.file);
+    if (!imports.some((t) => routeFiles.has(t) && !reachedFiles.has(t))) continue;
+    const w = makeWalk();
+    w.walk(f, "*", "", []);
+    for (const [k, m] of w.mounts) if (!mounts.has(k) && m.file !== f) mounts.set(k, m);
     pathGuards.push(...w.pathGuards);
   }
   entry = walks[0]?.entry;

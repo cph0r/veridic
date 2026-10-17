@@ -88,3 +88,38 @@ test("access: middleware guards (protect/admin, auth('perm'), isX()) and code-on
   assert.deepEqual(m.map((x) => x.access), ["role", "role", "role", "public", "auth"]);
   assert.deepEqual(m.map((x) => x.flags.length > 0), [false, false, false, false, true]);
 });
+
+test("routes: inline require and router factories in use(), folder loops, object registrars", () => {
+  const { g, done } = fakeRepo({
+    "server.js": 'const express = require("express");\nconst inventory = require("./routes/inventory");\nconst app = express();\napp.use("/api/inventory", auth, inventory(uploads));\napp.use("/v1", require("./routes"));\napp.listen(1);\n',
+    "routes/inventory.js": 'const express = require("express");\nmodule.exports = function (uploads) {\n  const router = express.Router();\n  router.delete("/product/:id", del);\n  return router;\n};\n',
+    "routes/index.js": 'const fs = require("fs");\nconst router = require("express").Router();\nconst express = require("express");\nfs.readdirSync(__dirname).forEach((routeFile) => {\n  router.use(`/${routeFile}`, require(`./${routeFile}`));\n});\nconst routes = { users };\nfor (const k in routes) routes[k](router);\nmodule.exports = router;\n',
+    "routes/cities.js": 'const express = require("express");\nconst router = express.Router();\nrouter.get("/", list);\nmodule.exports = router;\n',
+  });
+  assert.deepEqual(ids(g), ["DELETE /api/inventory/product/:id", "GET /v1/cities"]);
+  done();
+});
+
+test("routes: tsconfig path aliases, the router among several use() args, and factories behind a barrel", () => {
+  const { g, done } = fakeRepo({
+    "tsconfig.json": '{ "compilerOptions": { "baseUrl": "./src", "paths": { "@/*": ["*"] } }, /* a comment */ "include": ["src/**/*"] }',
+    "src/index.ts": 'import express from "express";\nimport { router } from "@/routes";\nimport { notFound } from "@/middlewares";\nconst app = express();\napp.use(cors, router, notFound);\napp.listen(1);\n',
+    "src/middlewares/index.ts": "export const notFound = (req, res) => res.status(404).end();\n",
+    "src/routes/index.ts": 'import { Router } from "express";\nimport { createLoginRouter } from "../auth";\nexport const router = Router();\nlet loginRouter;\nloginRouter = createLoginRouter("local");\nrouter.use(`/login/${provider}`, loginRouter);\n',
+    "src/auth/index.ts": 'export { createLoginRouter } from "./local";\n',
+    "src/auth/local.ts": 'import { Router } from "express";\nexport function createLoginRouter(name) {\n  const router = Router();\n  router.post("/", login);\n  return router;\n}\n',
+  });
+  assert.deepEqual(ids(g), ["POST /login/:provider"]);
+  done();
+});
+
+test("routes: an app handed to a class method mounts its routers; jsonc keeps strings with comment-like text", async () => {
+  const { jsonc } = await import("../core/routes.mjs");
+  assert.deepEqual(JSON.parse(jsonc('{ "paths": { "@/*": ["*"] }, // note\n "include": ["src/**/*"], /* x */ "a": 1, }')), { paths: { "@/*": ["*"] }, include: ["src/**/*"], a: 1 });
+  const { g, done } = fakeRepo({
+    "src/providers/Routes.ts": 'import apiRouter from "../routes/Api";\nclass Routes {\n  public mountApi(_express) {\n    return _express.use(`/${apiPrefix}`, apiRouter);\n  }\n}\nexport default new Routes();\n',
+    "src/routes/Api.ts": 'import { Router } from "express";\nconst router = Router();\nrouter.get("/", home);\nexport default router;\n',
+  });
+  assert.deepEqual(ids(g), ["GET /:apiPrefix"]);
+  done();
+});
