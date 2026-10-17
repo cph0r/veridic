@@ -136,11 +136,47 @@ function nameOnly(g, file, text, t) {
   const bare = new RegExp(`(?<![\\w$.])${esc(t.name)}\\s*\\(`).test(text);
   const member = new RegExp(`\\.${esc(t.name)}\\s*\\(`).test(text);
   if (t.kind === "function" && member && !bare) return true;
+  // `f()` reaches a function in another file only if this file imports `f` (or requires
+  // its module): the index also links same-named functions across unrelated packages.
+  if ((t.kind === "function" || t.kind === "constant" || t.kind === "variable") && bare && !member && !importsFrom(g, file, t.name, t.file)) return true;
   if (t.kind === "method" && BUILTIN.has(t.name)) {
     const cls = (t.qname ?? "").split("::")[0];
     return !cls || !new RegExp(`\\b${esc(cls)}\\b`).test(g.text(file) ?? "");
   }
   return false;
+}
+
+// Does `file` import `name` from somewhere that can be `target`? A relative import must
+// resolve to it (or to a barrel); a package import must name it (`@acme/orders` for
+// packages/orders/…). Files with no imports at all (globals, legacy scripts) pass.
+const IMPORT_LINE = /^\s*(?:import\b[\s\S]*?from\s*["']([^"']+)["']|(?:const|let|var)\s+[\s\S]*?=\s*require\(\s*["']([^"']+)["']\s*\)|export\s*\{[^}]*\}\s*from\s*["']([^"']+)["'])/gm;
+const importsFrom = (g, file, name, target) => {
+  const text = g.text(file) ?? "";
+  const lines = [...text.matchAll(IMPORT_LINE)];
+  if (!lines.length) return true;
+  const nameRe = new RegExp(`(?<![\\w$])${esc(name)}(?![\\w$])`);
+  const hits = lines.filter((m) => nameRe.test(m[0]));
+  if (!hits.length) return false;
+  return hits.some((m) => {
+    const spec = m[1] ?? m[2] ?? m[3];
+    if (spec.startsWith(".")) {
+      const r = resolveRel(g, file, spec);
+      return !r || r === target || /(^|\/)index\.[cm]?[jt]sx?$/.test(r);
+    }
+    const r = resolveRel(g, file, spec);
+    if (r) return r === target || /(^|\/)index\.[cm]?[jt]sx?$/.test(r);
+    const words = spec.toLowerCase().split(/[@/\-_.]+/).filter((w) => w.length > 2 && !/^(?:workspace|src|lib|dist|index|packages?|node|server|client)$/.test(w));
+    return !words.length || words.some((w) => target.toLowerCase().includes(w));
+  });
+};
+function cacheBy2(fn) {
+  const byGraph = new WeakMap();
+  return (g, a, b) => {
+    if (!byGraph.has(g)) byGraph.set(g, new Map());
+    const m = byGraph.get(g), k = a + "\0" + b;
+    if (!m.has(k)) m.set(k, fn(g, a, b));
+    return m.get(k);
+  };
 }
 
 // Every call of `.name(` in the text is on a `$(…)` DOM query.

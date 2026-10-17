@@ -16,6 +16,7 @@ import { checkCitations } from "./citations.mjs";
 import { staleness } from "./staleness.mjs";
 import { doneWithoutSpec, loadClaim } from "./seam.mjs";
 import { findModules } from "./modules.mjs";
+import { linkUi } from "./ui.mjs";
 import { testsReaching } from "./tests.mjs";
 
 const MAX_SNIPPET = 40; // lines of cited code shown per citation
@@ -266,9 +267,18 @@ export async function collectReport(repo, { specs: specFiles } = {}) {
   if (g && inv?.routes.length) {
     try {
       const mods = findModules(g, inv);
+      // The UI: which screens call which routes (see ui.mjs).
+      let ui = { files: [] };
+      try {
+        ui = linkUi(repo, inv.routes, mods);
+      } catch (e) {
+        note("ui", e);
+      }
+      out.ui = { scanned: ui.scanned ?? 0, linked: ui.files.length, shared: ui.files.filter((f) => !f.module).map((f) => ({ file: f.file, kind: f.kind, routes: f.routes.length, modules: f.modules })) };
       const routeById = new Map(out.routes.map((r) => [r.id, r]));
       const invById = new Map(inv.routes.map((r) => [r.id, r]));
-      const targets = [...new Set(mods.flatMap((m) => [...m.files, ...m.code]))];
+      const uiOf = (id) => ui.files.filter((f) => f.module === id);
+      const targets = [...new Set([...mods.flatMap((m) => [...m.files, ...m.code]), ...ui.files.filter((f) => f.module).map((f) => f.file)])];
       let reaching = new Map();
       try {
         reaching = testsReaching(repo, targets);
@@ -293,6 +303,9 @@ export async function collectReport(repo, { specs: specFiles } = {}) {
         for (const r of rs) r.module = m.id;
         const tests = new Map();
         for (const f of [...m.files, ...m.code]) for (const t of reaching.get(f) ?? []) tests.set(t.file, t);
+        const screens = uiOf(m.id);
+        const uiTests = new Map();
+        for (const f of screens) for (const t of reaching.get(f.file) ?? []) if (!tests.has(t.file)) uiTests.set(t.file, t);
         const asserting = [...tests.values()].filter((t) => t.asserting > 0);
         // A route counts as tested when an asserting test calls its URL, or reaches its
         // handler and names the URL's last word.
@@ -334,7 +347,10 @@ export async function collectReport(repo, { specs: specFiles } = {}) {
           },
           specs: [...new Set(rs.flatMap((r) => r.specs ?? []))],
           specified: rs.filter((r) => r.specs?.length).length,
-          tests: { files: [...tests.values()].map((t) => ({ file: t.file, tests: t.tests, asserting: t.asserting })).sort((a, b) => b.tests - a.tests), asserting: asserting.length, untested: untested.map((r) => r.id) },
+          tests: { files: [...tests.values()].map((t) => ({ file: t.file, tests: t.tests, asserting: t.asserting })).sort((a, b) => b.tests - a.tests), ui: [...uiTests.values()].map((t) => ({ file: t.file, tests: t.tests, asserting: t.asserting })), asserting: asserting.length, untested: untested.map((r) => r.id) },
+          // Screens: the UI files whose calls are mostly this module's; and other screens calling it.
+          screens: screens.map((f) => ({ file: f.file, kind: f.kind, routes: f.routes.filter((id) => m.routes.includes(id)), other: f.routes.filter((id) => !m.routes.includes(id)).length })),
+          calledFrom: ui.files.filter((f) => f.module !== m.id && f.routes.some((id) => m.routes.includes(id))).map((f) => ({ file: f.file, kind: f.kind, module: f.module, routes: f.routes.filter((id) => m.routes.includes(id)) })),
         });
       }
       // Riskiest first: open high issues, money, deletes, then size.
@@ -346,7 +362,7 @@ export async function collectReport(repo, { specs: specFiles } = {}) {
     }
   }
   // Findings that name a test or spec file belong to the module whose code they're about, when there is one.
-  const fileModule = new Map(out.modules.flatMap((m) => [...m.files, ...m.code].map((f) => [f, m.id])));
+  const fileModule = new Map(out.modules.flatMap((m) => [...m.files, ...m.code, ...(m.screens ?? []).map((x) => x.file)].map((f) => [f, m.id])));
   for (const m of out.modules) for (const t of m.tests.files) if (!fileModule.has(t.file)) fileModule.set(t.file, m.id);
   for (const f of out.findings)
     if (!f.module) {

@@ -52,6 +52,9 @@
     file: '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/>',
     table: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18M9 10v10M15 10v10"/>',
     grid: '<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
+    monitor: '<rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8M12 17v4"/>',
+    puzzle: '<path d="M10 3h4v3a2 2 0 1 0 4 0V3h3v7h-3a2 2 0 1 0 0 4h3v7h-7v-3a2 2 0 1 0-4 0v3H3v-7h3a2 2 0 1 0 0-4H3V3z"/>',
+    hook: '<path d="M18 6a4 4 0 1 0-8 0v9a4 4 0 0 1-8 0v-2"/><path d="m4 11-2 2"/>',
     logo: '<path d="m5 12.5 4.5 4.5L19 7.5"/>',
   };
   const ic = (n, cls) => '<svg class="i ' + (cls || "") + '" viewBox="0 0 24 24" aria-hidden="true">' + (P[n] || "") + "</svg>";
@@ -237,11 +240,16 @@
   const modRoutes = (m) => ROUTES.filter((r) => r.module === m.id);
   const modFindings = (m) => F.filter((f) => f.module === m.id);
   const modLink = (id, cls) => { const m = MOD.get(id); return m ? '<button class="linkbtn ' + (cls || "") + '" data-mod="' + esc(id) + '">' + esc(m.name) + "</button>" : esc(id); };
-  const filesOf = (m) => [...m.files, ...m.code.filter((f) => !m.files.includes(f))];
+  const screensOf = (m) => (m.screens || []).map((x) => x.file);
+  const filesOf = (m) => [...m.files, ...m.code.filter((f) => !m.files.includes(f)), ...screensOf(m)];
+  // A file as its name (linked) over its folder: easier to scan than one long path.
+  const fileCell = (f) => { const i = f.lastIndexOf("/"); const h = hrefOf(f + ":1"); const name = esc(f.slice(i + 1)); return '<div class="fname">' + (h ? '<a class="loc" href="' + h + '">' + name + "</a>" : name) + '</div><div class="fdir">' + esc(f.slice(0, i + 1)) + "</div>"; };
+  const KIND = { page: { t: "Page", i: "monitor", c: "info" }, component: { t: "Component", i: "puzzle", c: "violet" }, hook: { t: "Hook", i: "hook", c: "ok" }, client: { t: "API client", i: "code", c: "low" } };
   const promptModuleSpec = (m) => "Use veridic to write a spec for the " + m.name + " module of " + D.name + ". It does: " + m.does.join(", ") + ".\nIts routes:\n" + modRoutes(m).map((r) => "- " + r.id + " (" + (EFF[r.effect] || EFF.read).t.toLowerCase() + (r.moves_money ? ", moves money" : "") + ") " + r.handler).join("\n") + "\nIts code: " + filesOf(m).join(", ") +
     "\n\nStart with the riskiest behavior (money, deletes, writes). Write user stories with Given/When/Then scenarios, requirements backed by [evidence: file:line] citations to the code that does them, and the invariants that must always hold. Save it as specs/" + m.id + "/spec.md, then run `veridic check` and `veridic tests`.";
   const promptModuleTests = (m) => { const ids = m.tests.untested; return "In " + D.name + ", these routes of the " + m.name + " module have no test that calls them or names them:\n" + ids.map((x) => "- " + x).join("\n") + "\n\nRun `veridic claim " + ids.slice(0, 8).map((x) => JSON.stringify(x)).join(" ") + "` first. Then, starting with the routes that move money or change data, write tests that call each route and assert its real effect (status, body, and what changed in the data). Make each test fail if the behavior broke. Run them, then `veridic done`."; };
-  const promptTask = (m) => "I'm going to work on the " + m.name + " module of " + D.name + " (it does: " + m.does.join(", ") + ").\n\nFirst run `veridic claim " + m.routes.map((x) => JSON.stringify(x)).join(" ") + "` so stray edits outside it get caught. Read its code before changing anything: " + filesOf(m).join(", ") + ".\n" +
+  const claimOf = (m) => "veridic claim " + [...m.routes, ...screensOf(m)].map((x) => JSON.stringify(x)).join(" ");
+  const promptTask = (m) => "I'm going to work on the " + m.name + " module of " + D.name + " (it does: " + m.does.join(", ") + ").\n\nFirst run `" + claimOf(m) + "` so stray edits outside it (backend or UI) get caught. Read its code before changing anything: " + filesOf(m).join(", ") + ".\n" +
     (m.usedBy.length ? "Other modules depend on it, so re-check them after the change: " + m.usedBy.map((u) => (MOD.get(u.module) || { name: u.module }).name + " (through " + u.via.join(", ") + ")").join("; ") + ".\n" : "") +
     "When the change is done, run `veridic done` and keep going until it says DONE.\n\nThe task: <describe what you want to change here>";
 
@@ -274,6 +282,7 @@
       '<div class="mfoot"><span data-tip="' + (s.high + s.medium ? plural(s.high + s.medium, "open issue") : "No open issues") + '" class="mf ' + (s.high ? "tone-high" : s.medium ? "tone-med" : "tone-ok") + '">' + ic(s.high + s.medium ? "alert" : "check2", "sm") + (s.high + s.medium || 0) + " issues</span>" +
       '<span class="mf ' + (m.specified ? "tone-ok" : "tone-low") + '" data-tip="' + (m.specified ? m.specified + " of " + s.routes + " routes have a spec" : "No spec yet") + '">' + ic("spec", "sm") + (m.specified ? Math.round((m.specified / s.routes) * 100) + "% spec" : "no spec") + "</span>" +
       '<span class="mf ' + (tested === s.routes ? "tone-ok" : tested ? "tone-med" : "tone-high") + '" data-tip="Routes a test calls or names">' + ic("flask", "sm") + tested + "/" + s.routes + " tested</span>" +
+      (m.screens && m.screens.length ? '<span class="mf tone-info" data-tip="UI pages, components and hooks that call it">' + ic("monitor", "sm") + plural(m.screens.length, "screen") + "</span>" : "") +
       (m.usedBy.length ? '<span class="mf tone-info" data-tip="Modules that depend on this one">' + ic("branch", "sm") + "used by " + m.usedBy.length + "</span>" : "") + "</div></button>";
   }
   const fact = (icon, n, label, tone) => (n ? '<span class="mfact bg-' + tone + '" data-tip="' + plural(n, "route") + " " + label + '">' + ic(icon, "sm") + n + "</span>" : "");
@@ -284,12 +293,12 @@
     if (!m) { state.view = "modules"; return vModules(); }
     const r = riskOf(m), s = m.stats, rs = modRoutes(m), fs = modFindings(m);
     const tested = s.routes - m.tests.untested.length;
-    const sections = [["does", "What it does", "route"], ["rules", "Rules", "spec"], ["tests", "Tests", "flask"], ["risks", "Risks", "alert"], ["neighbours", "Neighbours", "branch"], ["work", "Work on it", "wrench"]];
+    const sections = [["does", "What it does", "route"], ["screens", "Screens", "monitor"], ["rules", "Rules", "spec"], ["tests", "Tests", "flask"], ["risks", "Risks", "alert"], ["neighbours", "Neighbours", "branch"], ["work", "Work on it", "wrench"]];
     let h = '<div class="crumbs in"><button class="linkbtn" data-nav="modules">' + ic("grid", "sm") + "Modules</button>" + ic("chev", "sm") + "<span>" + esc(m.name) + "</span></div>";
     h += '<div class="card modhead in"><div style="flex:1;min-width:260px"><div class="row-flex"><h1>' + esc(m.name) + "</h1>" + pill(r.i, r.t, r.c) + (m.pinned ? pill("lock", "Set in .veridic.json", "low") : "") + "</div>" +
       '<p class="purpose">' + (m.does.length ? "Lets callers <b>" + m.does.map(esc).join("</b>, <b>") + "</b>." : "") + "</p>" +
       '<div class="mfoot" style="margin-top:10px">' + fact("coins", s.money, "move money", "high") + fact("trash", s.destructive, "delete", "high") + fact("pencil", s.writes, "change data", "med") + fact("eye", s.reads, "read", "info") +
-      '<span class="mf muted">' + plural(s.routes, "route") + " in " + plural(m.files.length, "file") + "</span></div></div>" +
+      '<span class="mf muted">' + plural(s.routes, "route") + " in " + plural(m.files.length, "file") + ((m.screens || []).length ? " · " + plural(m.screens.length, "screen") : "") + "</span></div></div>" +
       '<div class="modactions">' + btn("Start a task here", promptTask(m), "primary", "sparkle") + '<div class="muted small">Copies a prompt that claims this module, lists what to read, and ends with <code>veridic done</code>.</div></div></div>';
     h += '<nav class="secnav in">' + sections.map(([k, t, i]) => '<a href="#module/' + esc(m.id) + "/" + k + '" data-jump="' + k + '">' + ic(i, "sm") + t + (k === "risks" && fs.filter((f) => f.severity !== "low").length ? ' <span class="n hot">' + fs.filter((f) => f.severity !== "low").length + "</span>" : k === "tests" && m.tests.untested.length ? ' <span class="n">' + m.tests.untested.length + " untested</span>" : "") + "</a>").join("") + "</nav>";
 
@@ -307,7 +316,17 @@
         m.tests.untested.includes(rt.id) ? '<span class="tone-high" data-tip="No test calls or names it">' + ic("x", "sm") + "</span>" : '<span class="tone-ok" data-tip="A test calls or names it">' + ic("check2", "sm") + "</span>"], routeDetail(rt, iss));
     }), pg.html);
 
-    // 2. The rules it must follow.
+    // 2. Screens: the UI that calls this module.
+    h += secHead("screens", "monitor", "Screens", "The pages, components and hooks in the UI that call this module's routes. Change a route and these are what users see change.");
+    const sc = (m.screens || []).filter((x) => match(x.file));
+    const routeChips = (ids) => ids.slice(0, 4).map((x) => { const [mm, ...p] = x.split(" "); return '<span class="chiplet"><span class="method m-' + esc(mm) + '">' + esc(mm) + '</span><span class="mono small">' + esc(p.join(" ")) + "</span></span>"; }).join(" ") + (ids.length > 4 ? ' <span class="muted small">+' + (ids.length - 4) + "</span>" : "");
+    h += sc.length
+      ? '<div class="card in"><div class="tablewrap"><table class="t"><thead><tr><th>Kind</th><th>File</th><th>Calls</th><th></th></tr></thead><tbody>' + sc.map((x) => { const k = KIND[x.kind] || KIND.component; return '<tr><td><span class="lbl">' + icoBox(k.i, k.c) + '<span class="small">' + k.t + "</span></span></td><td>" + fileCell(x.file) + (x.other ? '<div class="muted small">also calls ' + plural(x.other, "route") + " of other modules</div>" : "") + '</td><td><div class="chipwrap">' + routeChips(x.routes) + '</div></td><td style="text-align:right">' + openBtn(x.file + ":1") + "</td></tr>"; }).join("") + "</tbody></table></div></div>"
+      : '<div class="callout info in">' + ic("monitor", "sm") + "<div><b>No screen calls this module directly.</b> It may be called by other services, webhooks or jobs, or through UI code Veridic can't follow (a URL built at runtime).</div></div>";
+    if ((m.calledFrom || []).length) h += '<details class="card in mt shared"><summary class="panel-h">' + ic("monitor", "sm") + "Other screens that call it<span class=\"sub\">" + plural(m.calledFrom.length, "file") + " owned by other modules or shared</span></summary><table class=\"t\"><tbody>" + m.calledFrom.map((x) => "<tr><td>" + fileCell(x.file) + '</td><td class="small">' + (x.module ? modLink(x.module) : '<span class="muted">shared</span>') + '</td><td><div class="chipwrap">' + routeChips(x.routes) + "</div></td></tr>").join("") + "</tbody></table></details>";
+    if ((m.tests.ui || []).length) h += '<div class="muted small mt">' + ic("flask", "sm") + " UI tests that reach these screens: " + m.tests.ui.map((t) => loc(t.file + ":1")).join(", ") + "</div>";
+
+    // 3. The rules it must follow.
     const specs = SPECS.map((sp, i) => [sp, i]).filter(([sp]) => m.specs.includes(sp.path));
     h += secHead("rules", "spec", "Rules it must follow", "What this module must always do, from its spec, each rule tied to the code that does it.");
     if (!specs.length) h += '<div class="callout warn in">' + ic("spec", "sm") + '<div style="flex:1"><b>No spec for this module yet.</b> A spec writes down the rules these routes must follow, like <i>“an order can\'t be cancelled once it\'s paid”</i>, each tied to the code that does it. Without one, nobody can tell a bug from an intended change here.' +
@@ -344,10 +363,10 @@
 
     // 6. Work on it.
     h += secHead("work", "wrench", "Work on it", "Three steps, so the change stays inside this module and is checked before it's called done.");
-    const claimCmd = "veridic claim " + m.routes.map((x) => JSON.stringify(x)).join(" ");
+    const claimCmd = claimOf(m);
     h += '<div class="steps in">' +
       step(1, "Claim it", "Tell Veridic what this task will change, so edits that leak into other modules get caught.", '<pre class="cmd">' + esc(claimCmd.length > 160 ? claimCmd.slice(0, 157) + "…" : claimCmd) + "</pre>" + btn("Copy command", claimCmd, "", "copy")) +
-      step(2, "Read, then edit", "The code this module owns. Shared code is used across the app: change it only if you must.", '<div class="small" style="display:grid;gap:3px">' + filesOf(m).slice(0, 8).map((f) => loc(f + ":1")).join("") + (filesOf(m).length > 8 ? '<span class="muted">+' + (filesOf(m).length - 8) + " more</span>" : "") + "</div>") +
+      step(2, "Read, then edit", "The code this module owns, backend and screens. Shared code is used across the app: change it only if you must.", '<div class="small" style="display:grid;gap:3px">' + filesOf(m).slice(0, 8).map((f) => loc(f + ":1")).join("") + (filesOf(m).length > 8 ? '<span class="muted">+' + (filesOf(m).length - 8) + " more</span>" : "") + "</div>") +
       step(3, "Check it's done", "Veridic checks the change stayed in the claim and every changed route has a test that asserts something.", '<pre class="cmd">veridic done</pre>' + btn("Copy command", "veridic done", "", "copy")) + "</div>" +
       '<div class="row-flex in mt">' + btn("Or copy all three as one prompt for Claude", promptTask(m), "primary", "sparkle") + "</div>";
     return h;

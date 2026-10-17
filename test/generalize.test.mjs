@@ -226,3 +226,40 @@ test("modules: same feature across files joins, a file of many features splits b
   assert.ok(ms.find((m) => m.name === "Platform").pinned);
   done();
 });
+
+test("ui: screens link to routes through generated clients, API objects and wrappers; in-app links don't count", async () => {
+  const { linkUi } = await import("../core/ui.mjs");
+  const { execFileSync } = await import("node:child_process");
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "veridic-ui-"));
+  const files = {
+    "server/package.json": "{}",
+    "server/orders.js": "router.get('/api/orders', list);",
+    "web/package.json": "{}",
+    "web/src/api.ts": "export const getOrdersUrl = () => `/api/orders`;\nexport const listOrders = () => fetch(getOrdersUrl());\nexport const useListOrders = () => useQuery(listOrders);\n",
+    "web/src/models/admin.js": "const Admin = {\n  users: async () => fetch(`${API_BASE}/users/all`),\n  invites: async () => fetch(`${API_BASE}/invites`),\n};\nexport default Admin;\n",
+    "web/src/pages/Orders.tsx": "import { useListOrders } from '../api';\nexport default function Orders() { useListOrders(); return null; }\n",
+    "web/src/pages/Users.jsx": "import Admin from '../models/admin';\nexport default function Users() { Admin.users(); return null; }\n",
+    "web/src/pages/Menu.tsx": "const adminApi = (p) => fetch(`/api/admin${p}`);\nexport default function Menu() { adminApi('/menu/items'); return null; }\n",
+    "web/src/pages/Pricing.tsx": "export default function Pricing() { return <Link href=\"/api/orders\">Orders</Link>; }\nconst next = role ? '/owner' : '/admin/menu/items';\n",
+  };
+  for (const [f, t] of Object.entries(files)) fs.mkdirSync(path.dirname(path.join(repo, f)), { recursive: true }), fs.writeFileSync(path.join(repo, f), t);
+  execFileSync("git", ["init", "-q"], { cwd: repo });
+  const routes = [
+    { id: "GET /api/orders", path: "/api/orders", file: "server/orders.js" },
+    { id: "GET /api/users/all", path: "/api/users/all", file: "server/orders.js" },
+    { id: "GET /api/invites", path: "/api/invites", file: "server/orders.js" },
+    { id: "GET /api/admin/menu/items", path: "/api/admin/menu/items", file: "server/orders.js" },
+    { id: "ALL /*", path: "/*", file: "server/orders.js" },
+  ];
+  const mod = (id, rs) => ({ id, routes: rs, files: ["server/orders.js"], code: [], shared: [] });
+  const ui = linkUi(repo, routes, [mod("orders", ["GET /api/orders"]), mod("users", ["GET /api/users/all", "GET /api/invites"]), mod("menu", ["GET /api/admin/menu/items"])]);
+  const of = (f) => ui.files.find((x) => x.file === f);
+  assert.deepEqual(of("web/src/pages/Orders.tsx")?.routes, ["GET /api/orders"], "a hook from a generated client");
+  assert.equal(of("web/src/pages/Orders.tsx")?.module, "orders");
+  assert.deepEqual(of("web/src/pages/Users.jsx")?.routes, ["GET /api/users/all"], "one method of an API object, not all of them");
+  assert.deepEqual(of("web/src/pages/Menu.tsx")?.routes, ["GET /api/admin/menu/items"], "a wrapper that adds /api/admin");
+  assert.equal(of("web/src/pages/Pricing.tsx"), undefined, "links to the UI's own pages aren't API calls");
+  assert.ok(!ui.files.some((x) => x.routes.includes("ALL /*")), "a catch-all matches nothing");
+  assert.ok(!ui.files.some((x) => x.file.startsWith("server/")), "backend files aren't screens");
+  fs.rmSync(repo, { recursive: true, force: true });
+});
