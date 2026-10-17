@@ -11,9 +11,11 @@
     "core/",
     "skill/",
     "commands/",
+    "hooks/",
     ".claude-plugin/",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "PRIVACY.md"
   ],
   "engines": {
     "node": ">=22.5"
