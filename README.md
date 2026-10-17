@@ -30,12 +30,11 @@ You don't run Veridic. Your agent does. Install it once, and Claude uses it when
 
 ```mermaid
 flowchart LR
-    you(["You: #quot;add refunds#quot;"]) --> agent["Claude"]
-    agent -- "1 · before editing" --> facts["<b>veridic prepare</b><br/>every route, webhook, timer<br/>and table involved, with<br/>the lines that prove it"]
-    facts --> agent
-    agent -- "2 · edits the code" --> check{"<b>veridic done</b><br/>only touched what it claimed?<br/>every requirement really tested?"}
-    check -- "NOT DONE<br/>stray file · test checks nothing" --> agent
-    check -- "DONE" --> result(["A change that stayed in scope<br/>and is proven by tests"])
+    ask(["You ask Claude<br/>for a change"]) --> facts["<b>veridic prepare</b><br/>the facts, with<br/>line numbers"]
+    facts --> edit["Claude<br/>edits the code"]
+    edit --> check{"<b>veridic done</b>"}
+    check -- "NOT DONE: stray file,<br/>test checks nothing" --> edit
+    check -- "DONE" --> result(["Change stayed in scope,<br/>proven by tests"])
 ```
 
 ## What it looks like

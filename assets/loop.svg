@@ -2,7 +2,7 @@
   <style>
     .term { fill: #0B1220; }
     .bar { fill: #1E293B; }
-    .t { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 15px; fill: #CBD5E1; }
+    .t { white-space: pre; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 15px; fill: #CBD5E1; }
     .dim { fill: #64748B; }
     .cmd { fill: #E2E8F0; }
     .bad { fill: #F87171; }
