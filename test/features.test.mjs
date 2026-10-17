@@ -228,6 +228,7 @@ test("report: collects routes, findings with fixes and the change in progress; t
   assert.ok(d.routes.some((x) => x.id === "POST /api/orders"));
   assert.ok(d.change && d.change.files.length > 0, "the uncommitted edit is the change in progress");
   for (const f of d.findings.filter((f) => f.area === "API")) assert.equal(f.fix, FIXES[f.kind] ?? null);
+  for (const f of d.findings) assert.ok(f.title && f.title !== f.kind && f.why, `plain-language title and reason for ${f.kind}`);
   d.findings.push({ area: "API", severity: "high", kind: "x", where: "</script><script>alert(1)</script>", text: "", evidence: [], fix: null });
   const html = renderReport(d);
   assert.doesNotMatch(html, /<\/script><script>alert/);
