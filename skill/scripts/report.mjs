@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // The report: one page with everything Veridic knows about the repo (specs,
 // routes, findings with suggested fixes, tests, the change in progress). Writes
-// .codegraph/veridic-report.html (git-ignored) and opens it in the browser.
+// .veridic/report.html and opens it in the browser. .veridic/ carries its own
+// .gitignore, so the report (which quotes your code) is never committed by accident.
 // --json prints the data instead; --no-open only writes the file.
 
 import { spawn } from "node:child_process";
@@ -27,8 +28,12 @@ run(async () => {
   if (!a.repo) fail("need --repo", usage);
   const data = await collectReport(a.repo, { specs: a.spec ? String(a.spec).split(",").map((s) => path.resolve(s)) : null });
   if (a.json) emit(data, 0);
-  const out = path.resolve(a.out ?? path.join(a.repo, ".codegraph", "veridic-report.html"));
+  const out = path.resolve(a.out ?? path.join(a.repo, ".veridic", "report.html"));
   fs.mkdirSync(path.dirname(out), { recursive: true });
+  if (!a.out) {
+    const ignore = path.join(a.repo, ".veridic", ".gitignore");
+    if (!fs.existsSync(ignore)) fs.writeFileSync(ignore, "# Written by veridic: generated files, never committed.\n*\n");
+  }
   fs.writeFileSync(out, renderReport(data));
   // Opening a browser is for a person at a terminal; an agent or CI gets the path.
   const opened = !a["no-open"] && process.stdout.isTTY && !process.env.CI ? openInBrowser(out) : false;

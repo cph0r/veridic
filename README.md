@@ -64,7 +64,7 @@ Or see everything at once:
 veridic report      # or: veridic ui, or /veridic:report in Claude Code
 ```
 
-One page opens in your browser, with tabs for specs (each requirement with its cited code and tests), routes (what each one really does and who can call it), findings (each with a suggested fix), tests (which ones check nothing), and the change in progress. It's a single local file: no server, nothing uploaded.
+One page opens in your browser, with tabs for specs (each requirement with its cited code and tests), routes (what each one really does and who can call it), findings (each with a suggested fix), tests (which ones check nothing), and the change in progress. Every `file:line` opens in your editor, and each finding has a **Copy fix prompt** button: paste it into Claude Code and the agent claims, fixes, tests and runs `veridic done`. It's one local file, `.veridic/report.html` (git-ignored): no server, nothing uploaded.
 
 ## How it works
 
