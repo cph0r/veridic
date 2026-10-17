@@ -219,3 +219,18 @@ test("done: deleting a route between two others changes neither of them", () => 
   assert.deepEqual(c.hunks[file], [[1.5, 1.5]]);
   r.done();
 });
+
+test("report: collects routes, findings with fixes and the change in progress; the page escapes what it embeds", async () => {
+  const { collectReport, renderReport, FIXES } = await import("../core/report.mjs");
+  const r = fixtureGit();
+  r.edit("src/routes/hooks.ts", 'res.json({ ok: true });', 'res.json({ ok: true, at: Date.now() });');
+  const d = await collectReport(r.repo);
+  assert.ok(d.routes.some((x) => x.id === "POST /api/orders"));
+  assert.ok(d.change && d.change.files.length > 0, "the uncommitted edit is the change in progress");
+  for (const f of d.findings.filter((f) => f.area === "API")) assert.equal(f.fix, FIXES[f.kind] ?? null);
+  d.findings.push({ area: "API", severity: "high", kind: "x", where: "</script><script>alert(1)</script>", text: "", evidence: [], fix: null });
+  const html = renderReport(d);
+  assert.doesNotMatch(html, /<\/script><script>alert/);
+  assert.equal(JSON.parse(html.match(/<script type="application\/json" id="data">([\s\S]*?)<\/script>/)[1]).routes.length, d.routes.length);
+  r.done();
+});

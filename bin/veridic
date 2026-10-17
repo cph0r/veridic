@@ -9,6 +9,8 @@ import path from "node:path";
 
 const root = path.resolve(path.dirname(fs.realpathSync(process.argv[1])), "..");
 const COMMANDS = {
+  report: ["skill/scripts/report.mjs", "open the report in your browser: specs, routes, findings with suggested fixes, tests, the change in progress (--json for the data)"],
+  ui: ["skill/scripts/report.mjs", "same as report"],
   init: ["skill/scripts/init.mjs", "set a repo up: find codegraph (--install to install it), build or update the code index, check routes"],
   metrics: ["skill/scripts/metrics.mjs", "every number in one call (--md for a table)"],
   check: [null, "cite + claims: are the citations right?"],
