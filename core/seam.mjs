@@ -115,7 +115,7 @@ export async function doneWithoutSpec(repo, { claims = [], range } = {}) {
   const { openGraph } = await import("./graph.mjs");
   const { routeInventory } = await import("./routes.mjs");
   const { parseTargets, affectedRoutes, footprintOf } = await import("./impact.mjs");
-  const { testsReaching, auditFile } = await import("./tests.mjs");
+  const { testsReaching, auditFile, testFilesOf } = await import("./tests.mjs");
   const g = openGraph(repo);
   const inv = routeInventory(g);
   const changed = changedFiles(repo, range);
@@ -140,20 +140,58 @@ export async function doneWithoutSpec(repo, { claims = [], range } = {}) {
   const textOf = (f) => (testText.has(f) ? testText.get(f) : testText.set(f, (g.text(f) ?? "").toLowerCase()).get(f));
   // The route's most specific literal part: /api/orders/:id/payment-status -> payment-status.
   const pathWords = (route) => route.split(" ")[1].split("/").filter((w) => w && !w.startsWith(":") && w !== "*").slice(-1);
+  // Asserting tests anywhere in the repo, for matching routes by URL.
+  const allTests = (() => {
+    try {
+      return testFilesOf(repo).filter((t) => auditFile(repo, t).asserting > 0);
+    } catch {
+      return [];
+    }
+  })();
+  const urlCache = new Map();
+  const callsUrl = (route) => {
+    if (urlCache.has(route)) return urlCache.get(route);
+    const p = route.split(" ")[1];
+    const parts = p.split("/").filter(Boolean);
+    // Literal segments in order; a :param or * matches any value, including `${id}` or "' + id + '".
+    const re = parts.length
+      ? new RegExp(`["'\`]/${parts.map((x) => (x.startsWith(":") || x === "*" ? "(?:[^/\\s'\"\`]+|['\"\`]\\s*\\+[^,)]*)" : x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))).join("/")}(?:[?'"\`),]|$)`)
+      : null;
+    const hit = !!re && parts.some((x) => !x.startsWith(":")) && allTests.some((t) => re.test(g.text(t) ?? ""));
+    urlCache.set(route, hit);
+    return hit;
+  };
   const strayHunks = [];
+  const outsideRoutes = [];
+  const claimedRoutes = new Set(targets.filter((t) => t.route).map((t) => t.route));
   const files = source.map((f) => {
     const h = changed.hunks?.[f] ?? null;
     const ranges = h ?? [[1, Number.MAX_SAFE_INTEGER]];
     const routes = affectedRoutes(g, inv, ranges.map(([start, end]) => ({ file: f, start, end })));
-    if (claims.length) for (const r of ranges) if (!inSeam(f, r) && (h || !seamFiles.has(f))) strayHunks.push({ file: f, range: r, routes: affectedRoutes(g, inv, [{ file: f, start: r[0], end: r[1] }]).map((x) => x.route) });
+    // A stray is a change inside code some *other* route runs: scope creep into behavior
+    // nobody asked to change. A change no route runs (a schema, imports, config, deleted
+    // code) isn't one; it is listed as outside any route.
+    if (claims.length)
+      for (const r of ranges) {
+        if (inSeam(f, r)) continue;
+        const others = affectedRoutes(g, inv, [{ file: f, start: r[0], end: r[1] }]).map((x) => x.route).filter((id) => !claimedRoutes.has(id));
+        if (others.length) strayHunks.push({ file: f, range: r, routes: others });
+        else outsideRoutes.push(`${f}:${r[0]}${r[1] !== r[0] && r[1] < Number.MAX_SAFE_INTEGER ? `-${r[1]}` : ""}`);
+      }
     // Names of the functions the change sits in, for matching tests by name.
     const fns = h ? [...new Set(h.flatMap(([a, b]) => [...g.nodes.values()].filter((n) => n.file === f && (n.kind === "function" || n.kind === "method") && n.start <= b && n.end >= a).map((n) => n.name)))] : [];
     const reaching = (reachChanged.get(f) ?? []).filter((t) => t.asserting > 0);
-    const untestedRoutes = routes.filter((r) => !reaching.some((t) => pathWords(r.route).some((w) => textOf(t.file).includes(w.toLowerCase())) || fns.some((n) => textOf(t.file).includes(n.toLowerCase()))));
-    return { file: f, in_seam: !claims.length || !strayHunks.some((x) => x.file === f), routes: routes.map((r) => r.route), risky: routes.filter((r) => r.moves_money || r.effect === "destructive").map((r) => r.route), tests: reaching.map((t) => t.file), untested_routes: untestedRoutes.map((r) => r.route) };
+    // A route is tested if a test that reaches the change names it or the changed function,
+    // or if any asserting test calls the route by its URL (supertest, e2e): `/v1/users/${id}`.
+    // Which routes must have a test: the claimed ones (or, with no claim, routes whose own
+    // handler changed). Routes reached only through shared code are reported, not required.
+    const required = routes.filter((r) => (claimedRoutes.size ? claimedRoutes.has(r.route) : r.hops === 0));
+    const untestedRoutes = required.filter((r) => !reaching.some((t) => pathWords(r.route).some((w) => textOf(t.file).includes(w.toLowerCase())) || fns.some((n) => textOf(t.file).includes(n.toLowerCase()))) && !callsUrl(r.route));
+    return { file: f, also_affects: routes.filter((r) => !required.includes(r)).map((r) => r.route), in_seam: !claims.length || !strayHunks.some((x) => x.file === f), routes: routes.map((r) => r.route), risky: routes.filter((r) => r.moves_money || r.effect === "destructive").map((r) => r.route), tests: reaching.map((t) => t.file), untested_routes: untestedRoutes.map((r) => r.route) };
   });
   const testAudit = tests.map((f) => auditFile(repo, f)).filter((a) => a.tests);
-  const strays = claims.length ? [...strayHunks.map((x) => `${x.file}:${x.range[0]}${x.range[1] !== x.range[0] && x.range[1] < Number.MAX_SAFE_INTEGER ? `-${x.range[1]}` : ""}${x.routes.length ? ` (behind ${x.routes.slice(0, 2).join(", ")})` : ""}`), ...tests.filter((t) => !seamTests.has(t) && !seamFiles.has(t))] : [];
+  // Tests are never strays: adding or fixing tests is part of any change.
+  const strays = claims.length ? strayHunks.map((x) => `${x.file}:${x.range[0]}${x.range[1] !== x.range[0] && x.range[1] < Number.MAX_SAFE_INTEGER ? `-${x.range[1]}` : ""} (behind ${x.routes.slice(0, 2).join(", ")})`) : [];
   const untested = files.filter((f) => f.untested_routes.length);
   const nothing = testAudit.flatMap((a) => [...a.flagged.unasserted, ...a.flagged.empty].map((x) => x.at));
   const problems = [
@@ -168,7 +206,7 @@ export async function doneWithoutSpec(repo, { claims = [], range } = {}) {
     range: changed.range,
     claimed: claims,
     changed: { source: source.length, tests: tests.length },
-    ...(claims.length ? { seam: { files: seamFiles.size, strays } } : {}),
+    ...(claims.length ? { seam: { files: seamFiles.size, strays, outside_routes: outsideRoutes } } : {}),
     affected_routes: affected.length,
     risky_routes: [...new Set(files.flatMap((f) => f.risky))],
     files,

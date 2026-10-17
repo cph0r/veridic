@@ -327,7 +327,8 @@ export function routeInventory(g, { entry } = {}) {
             walk(imp.file, exportVar(imp.file, imp.name), full, [...guards, ...mw]);
           } else walk(file, routerIdent, full, [...guards, ...mw]); // a router defined in this file
         }
-        if (!routers.length && use.prefix && mw.length) pathGuards.push({ prefix: full, guards: mw, at });
+        // Middleware with no router: `router.use(requireJwtAuth)` guards everything under this mount.
+        if (!routers.length && mw.length) pathGuards.push({ prefix: full, guards: mw, at });
       }
       // Registration functions: the app/router passed to an imported (or local) function.
       const receivers = v && v !== "*" ? [v] : appVars(file);
@@ -469,7 +470,7 @@ export function routeInventory(g, { entry } = {}) {
 
     const guards = [
       ...mount.guards,
-      ...pathGuards.filter((pg) => fullPath === pg.prefix || fullPath.startsWith(`${pg.prefix}/`)).flatMap((pg) => pg.guards),
+      ...pathGuards.filter((pg) => pg.prefix === "/" || fullPath === pg.prefix || fullPath.startsWith(`${pg.prefix}/`)).flatMap((pg) => pg.guards),
     ];
     // Inline guards: router.get("/x", requireAuth, async (req, res) => ...)
     const head = g.lines(n.file).slice(start - 1, start + 3).join(" ");

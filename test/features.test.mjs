@@ -171,3 +171,16 @@ test("Stop hook: silent unless the repo opted in; then sends the agent back once
   assert.equal(hook(true).status, 0, "never loops");
   r.done();
 });
+
+test("done: changes no route runs (schemas, imports) and test files aren't strays; an HTTP test of the route counts", async () => {
+  const r = fixtureGit();
+  r.edit("src/services/orders.ts", 'status: "awaiting_payment"', 'status: "awaiting_payment", channel: "qr"');
+  r.write("src/models/order.ts", "export const OrderSchema = { channel: String };\n"); // run by no route
+  r.edit("src/log.ts", "export function log(msg) {", "// logging\nexport function log(msg) {"); // shared helper: a comment above it
+  r.write("test/http/orders.e2e.test.ts", 'it("creates an order", async () => { const res = await request(app).post("/api/orders"); expect(res.status).toBe(201); });\n');
+  r.write("test/fixtures/order.json", "{}\n");
+  const d = await doneWithoutSpec(r.repo, { claims: ["POST /api/orders"] });
+  assert.deepEqual(d.seam.strays, [], JSON.stringify(d.problems));
+  assert.equal(d.done, true, JSON.stringify(d.problems));
+  r.done();
+});

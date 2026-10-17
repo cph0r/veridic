@@ -51,7 +51,9 @@ const ROLE_CHECK = /\.role\s*(?:!==|===|!=|==)|hasRole\(|requireRole\(/;
 const CALLER = /req\.(?:userId|user\??!?\.id|user!\.id|customer\??\.id|auth\??\.\w+|session\??\.\w*[uU]ser)|\buserId\b|ownerId|restaurantId:\s*req\.|\w+\(\s*req\.user\b/; // identity handed to a helper, e.g. getActiveRestaurantId(req.user!)
 // In handler code reached from the route, only the request's own identity counts as scoping:
 // a function that merely mentions `userId` doesn't limit anything to the caller.
-const CALLER_IN_HANDLER = /\b(?:validate|verify|check|assert|ensure|require)\w*(?:Author|Owner|Access|Permission)\w*\s*\(|req\.(?:userId|user\b|customer\??\.id|auth\??\.\w+|session\??\.\w*[uU]ser)|\w+\(\s*req\.user\b/;
+// An explicit ownership or permission check in the handler: validateAuthor(…), checkAccess(…).
+const OWNER_HELPER = /\b(?:validate|verify|check|assert|ensure|require|can)\w*(?:Author|Owner|Access|Permission|Ownership)\w*\s*\(/;
+const CALLER_IN_HANDLER = /req\.(?:userId|user\b|customer\??\.id|auth\??\.\w+|session\??\.\w*[uU]ser)|\w+\(\s*req\.user\b/;
 const OPEN_BY_DESIGN = /webhook|callback|login|logout|health|oauth|signup|register|token/i;
 // Scoped only by values the client supplies (query/body ids, e.g. from a QR code): weaker than caller identity.
 const CLIENT_SCOPE = /req\.(?:query|body)\.\w+[\s\S]{0,400}?\beq\([\w.]+\.(?:\w*[iI]d|\w*Token)\b/;
@@ -77,7 +79,8 @@ export function accessMatrix(g, inv) {
     const body = handlerText(g, r, handlerNames.get(r) ?? null);
     // Without sign-in anywhere on the route, req.user can't be the caller (it's whatever was loaded).
     const identity = access !== "public" && CALLER_IN_HANDLER.test(body);
-    let scoped = CALLER.test(text) || identity || guards.some((n) => OWNER_GUARD.test(n)) ? "yes" : CLIENT_SCOPE.test(text) || CLIENT_SCOPE.test(body) ? "weak" : "no";
+    const ownerChecked = guards.some((n) => OWNER_GUARD.test(n)) || OWNER_HELPER.test(body) || OWNER_HELPER.test(text);
+    let scoped = CALLER.test(text) || identity || ownerChecked || guards.some((n) => OWNER_GUARD.test(n)) ? "yes" : CLIENT_SCOPE.test(text) || CLIENT_SCOPE.test(body) ? "weak" : "no";
     const flags = [];
     // Identity or ownership supplied by the client on a write. Not when middleware put the
     // caller's own user id there (`appendUserId()`) and that is the field used.
@@ -92,7 +95,7 @@ export function accessMatrix(g, inv) {
     // the caller's: the handler reads or acts as whichever user the URL names, even if it also
     // looked at the caller's session.
     const userParam = params.find((p) => /^(?:user|account|customer|member|owner)_?id$/i.test(p));
-    if (userParam && !OPEN_BY_DESIGN.test(r.path)) {
+    if (userParam && !OPEN_BY_DESIGN.test(r.path) && !ownerChecked) {
       const all = `${text}\n${body}`;
       const compared = new RegExp(`(?:req\\.params\\.${userParam}|\\b${userParam}\\b)\\s*[!=]==?\\s*(?:String\\()?\\s*req\\.(?:session|user|auth)|req\\.(?:session|user|auth)[\\w.?!]*\\s*[!=]==?\\s*(?:String\\()?\\s*(?:req\\.params\\.)?${userParam}\\b`).test(all);
       const used = new RegExp(`req\\.params\\.${userParam}\\b|\\{[^}]*\\b${userParam}\\b[^}]*\\}\\s*=\\s*req\\.params`).test(all);
