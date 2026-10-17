@@ -208,6 +208,18 @@
   const BROKEN = (D.ui && D.ui.broken) || [];
   const UNCALLED = D.uncalled || [];
   const base = (f) => f.split("/").pop();
+  // On a module page each item opens in place to what it's about; on Home it leads to the module.
+  const rowsOf = (items) => '<div class="list compact">' + items.join("") + "</div>";
+  const DETAIL = {
+    issues: (fs) => fs.map((f) => '<div class="aitem"><div class="title">' + dot(SEVC[f.severity]) + " " + esc(f.title || f.kind) + ' <span class="mono faint">' + esc(f.where) + "</span></div>" + issueDetail(f) + "</div>").join(""),
+    stale: (rs) => rowsOf(rs.map((r) => li('<button class="link mono" data-req="' + esc(r.id) + '">' + esc(r.id) + "</button> " + esc(String(r.text).slice(0, 140)) + (String(r.text).length > 140 ? "…" : ""), r.cites.slice(0, 2).map((c) => loc(c.cite)).join(" ")))),
+    writes: (p) => '<p class="small muted">Owned by ' + modLink(p.owner) + ". Writing it outside the owner means its rules live in two places.</p>" + rowsOf(Object.entries(p.at).flatMap(([o, locs]) => locs.map((l) => li(loc(l), '<span class="tag">' + esc(nameOf(o)) + "</span>")))),
+    cycle: (p) => rowsOf(Object.entries(p.via).flatMap(([o, files]) => files.map((f) => li(loc(f + ":1"), '<span class="tag">' + esc(nameOf(o)) + " uses the other here</span>")))),
+    broken: (br) => rowsOf(br.map((b) => li('<span class="mono">' + esc(b.url) + "</span>", loc(b.file + ":" + b.line, base(b.file) + ":" + b.line)))),
+    uncalled: (un) => rowsOf(un.map((u) => li('<span class="mono">' + esc(u.route) + "</span>", loc(u.handler, base(u.handler.split(":")[0]))))),
+    copies: (bs) => rowsOf(bs.map((b) => li(loc(b.a.file + ":" + b.a.start, base(b.a.file) + ":" + b.a.start) + '<span class="sep">=</span>' + loc(b.b.file + ":" + b.b.start, base(b.b.file) + ":" + b.b.start), '<span class="tag">' + b.lines + " lines</span>"))),
+    untested: (m) => rowsOf(m.tests.untested.map((id) => { const r = ROUTES.find((x) => x.id === id); return li('<span class="mono">' + esc(id) + "</span>", r ? loc(r.handler, base(r.handler.split(":")[0])) : ""); })),
+  };
   function attention(scope) {
     const out = [];
     const mods = scope ? [scope] : [...MODS].sort(riskOrder);
@@ -216,34 +228,38 @@
     if (!scope && c && !c.done) out.push({ i: "branch", c: "high", t: "The change in progress isn't done", why: c.problems.slice(0, 2).join("; ") + " · run veridic done for the details" });
     for (const m of mods) {
       const fs = modFindings(m).filter((f) => f.severity === "high");
-      if (fs.length) out.push({ i: "shield", c: "high", t: plural(fs.length, "serious issue") + (scope ? "" : " in " + m.name), why: [...new Set(fs.map((f) => f.title || f.kind))].join("; "), go: go(m) });
+      if (fs.length) out.push({ i: "shield", c: "high", t: plural(fs.length, "serious issue") + (scope ? "" : " in " + m.name), why: [...new Set(fs.map((f) => f.title || f.kind))].join("; "), go: go(m), d: scope && DETAIL.issues(fs) });
     }
     for (const [sp, si] of SPECS.map((x, i) => [x, i]).filter(([x]) => !scope || specsOf(scope).includes(x))) {
       const st = specReqs(sp).filter((r) => r.stale);
-      if (st.length) out.push({ i: "doc", c: "med", t: plural(st.length, "rule") + " out of date", why: specTitle(sp) + ": the code behind " + st.map((r) => r.id).join(", ") + " changed since they were written", go: scope || !specOwner(sp) ? "" : ' data-mod="' + esc(specOwner(sp).id) + '" data-to="rules"' });
+      if (st.length) out.push({ i: "doc", c: "med", t: plural(st.length, "rule") + " out of date", why: specTitle(sp) + ": the code behind " + st.map((r) => r.id).join(", ") + " changed since they were written", go: scope || !specOwner(sp) ? "" : ' data-mod="' + esc(specOwner(sp).id) + '" data-to="rules"', d: scope && DETAIL.stale(st) });
     }
     for (const m of mods) {
       const fs = modFindings(m).filter((f) => f.severity === "medium" && f.area !== "Spec");
-      if (fs.length && !modFindings(m).some((f) => f.severity === "high")) out.push({ i: "shield", c: "med", t: plural(fs.length, "issue") + " to review" + (scope ? "" : " in " + m.name), why: [...new Set(fs.map((f) => f.title || f.kind))].join("; "), go: go(m) });
+      if (fs.length && !modFindings(m).some((f) => f.severity === "high")) out.push({ i: "shield", c: "med", t: plural(fs.length, "issue") + " to review" + (scope ? "" : " in " + m.name), why: [...new Set(fs.map((f) => f.title || f.kind))].join("; "), go: go(m), d: scope && DETAIL.issues(fs) });
     }
     for (const p of MODU.problems.filter((p) => p.kind !== "hub" && (!scope || p.modules.includes(scope.id))).slice(0, scope ? 4 : 3)) {
-      if (p.kind === "shared-writes") { const locs = Object.values(p.at).flat(); out.push({ i: "branch", c: "med", t: p.names.slice(1).join(", ") + " also write" + (p.names.length > 2 ? "" : "s") + " " + p.table, why: "Owned by " + p.names[0] + "; written outside it at " + locs.slice(0, 2).map(base).join(", "), go: go(MOD.get(p.owner)) }); }
-      else out.push({ i: "branch", c: "med", t: p.names.join(" and ") + " depend on each other", why: "A change to either can break the other", go: go(MOD.get(p.modules[0])) });
+      if (p.kind === "shared-writes") { const locs = Object.values(p.at).flat(); out.push({ i: "branch", c: "med", t: p.names.slice(1).join(", ") + " also write" + (p.names.length > 2 ? "" : "s") + " " + p.table, why: "Owned by " + p.names[0] + "; written outside it at " + locs.slice(0, 2).map(base).join(", "), go: go(MOD.get(p.owner)), d: scope && DETAIL.writes(p) }); }
+      else out.push({ i: "branch", c: "med", t: p.names.join(" and ") + " depend on each other", why: "A change to either can break the other", go: go(MOD.get(p.modules[0])), d: scope && DETAIL.cycle(p) });
     }
     const br = BROKEN.filter((b) => !scope || b.module === scope.id);
-    if (br.length) out.push({ i: "route", c: "high", t: plural(br.length, "call") + " to endpoints that don't exist", why: [...new Set(br.map((b) => b.url))].slice(0, 3).join(", ") + " · in " + [...new Set(br.map((b) => base(b.file)))].slice(0, 2).join(", "), go: scope ? ' data-open="details"' : ' data-sub="structure"' });
+    if (br.length) out.push({ i: "route", c: "high", t: plural(br.length, "call") + " to endpoints that don't exist", why: [...new Set(br.map((b) => b.url))].slice(0, 3).join(", ") + " · in " + [...new Set(br.map((b) => base(b.file)))].slice(0, 2).join(", "), go: scope ? "" : ' data-sub="structure"', d: scope && DETAIL.broken(br) });
     const un = UNCALLED.filter((u) => !scope || u.module === scope.id);
-    if (un.length) out.push({ i: "route", c: "", t: plural(un.length, "endpoint") + " nothing in the repo calls", why: un.slice(0, 3).map((u) => u.route).join(", ") + (un.length > 3 ? ", …" : "") + " · no screen or test uses them", go: scope ? ' data-open="details"' : ' data-sub="structure"' });
+    if (un.length) out.push({ i: "route", c: "", t: plural(un.length, "endpoint") + " nothing in the repo calls", why: un.slice(0, 3).map((u) => u.route).join(", ") + (un.length > 3 ? ", …" : "") + " · no screen or test uses them", go: scope ? "" : ' data-sub="structure"', d: scope && DETAIL.uncalled(un) });
     const blocks = (scope ? dupsOf(scope) : DUP.blocks).filter((b) => b.lines >= 10);
-    if (blocks.length) { const b = blocks[0]; out.push({ i: "copy", c: "", t: plural(blocks.length, "block") + " of copied code" + (scope ? "" : ", " + DUP.pct + "% of the code"), why: "Largest: " + b.lines + " lines in " + base(b.a.file) + " and " + base(b.b.file), go: scope ? ' data-open="details"' : ' data-sub="structure"' }); }
+    if (blocks.length) { const b = blocks[0]; out.push({ i: "copy", c: "", t: plural(blocks.length, "block") + " of copied code" + (scope ? "" : ", " + DUP.pct + "% of the code"), why: "Largest: " + b.lines + " lines in " + base(b.a.file) + " and " + base(b.b.file), go: scope ? "" : ' data-sub="structure"', d: scope && DETAIL.copies(blocks) }); }
     const needTests = mods.filter((m) => m.tests.untested.length && m.stats.writes + m.stats.destructive + m.stats.money).slice(0, scope ? 1 : 2);
-    for (const m of needTests) out.push({ i: "flask", c: m.stats.money ? "high" : "med", t: (scope ? "" : m.name + ": ") + m.tests.untested.length + " of " + plural(m.stats.routes, "route") + " untested", why: m.stats.money ? "It moves money" : m.stats.destructive ? "It deletes data" : "It changes data", go: go(m) });
+    for (const m of needTests) out.push({ i: "flask", c: m.stats.money ? "high" : "med", t: (scope ? "" : m.name + ": ") + m.tests.untested.length + " of " + plural(m.stats.routes, "route") + " untested", why: m.stats.money ? "It moves money" : m.stats.destructive ? "It deletes data" : "It changes data", go: go(m), d: scope && DETAIL.untested(m) });
     for (const m of mods.filter((m) => !m.specified).slice(0, 1)) out.push({ i: "doc", c: "", t: (scope ? "No" : m.name + " has no") + " written rules", why: "Nothing says what its routes must do, so a bug and an intended change look the same", go: scope ? "" : ' data-mod="' + esc(m.id) + '"' });
     if (!scope && T && T.unasserted + T.empty) out.push({ i: "flask", c: "med", t: plural(T.unasserted + T.empty, "test") + " check nothing", why: "They pass even when the code is broken", go: ' data-sub="tests"' });
     return out;
   }
   const attList = (items, n) => items.length
-    ? '<div class="steps">' + items.slice(0, n).map((s) => "<" + (s.go ? "button" : "div") + ' class="stepc' + (s.go ? " go" : "") + '"' + (s.go || "") + '><span class="sico ' + (s.c || "none") + '">' + ic(s.i) + '</span><div class="main"><div class="title">' + esc(s.t) + '</div><div class="sub" title="' + esc(s.why) + '">' + esc(s.why) + "</div></div>" + (s.go ? ic("chev", "sm faint") : "") + "</" + (s.go ? "button" : "div") + ">").join("") + "</div>"
+    ? '<div class="steps">' + items.slice(0, n).map((s) => {
+      const body = '<span class="sico ' + (s.c || "none") + '">' + ic(s.i) + '</span><div class="main"><div class="title">' + esc(s.t) + '</div><div class="sub" title="' + esc(s.why) + '">' + esc(s.why) + "</div></div>";
+      if (s.d) { const id = "d" + seq++; return '<div class="stepwrap"><div class="stepc click" data-d="' + id + '">' + body + ic("chev", "sm faint chev") + '</div><div class="sdetail" id="' + id + '" hidden>' + s.d + "</div></div>"; }
+      return "<" + (s.go ? "button" : "div") + ' class="stepc' + (s.go ? " go" : "") + '"' + (s.go || "") + ">" + body + (s.go ? ic("chev", "sm faint") : "") + "</" + (s.go ? "button" : "div") + ">";
+    }).join("") + "</div>"
     : empty("Nothing needs attention. Every route is checked, tested and covered by rules.");
 
   // ---- Home: the repo in a glance, and what to do next ----
@@ -645,7 +661,7 @@
     if (t.closest("[data-modtoggle]")) { modsOpen = !modsOpen; store.set("mods-open", modsOpen ? "1" : "0"); nav(); return; }
     if (t.closest("#menu")) { $(".shell").classList.toggle("menu"); return; }
     if (t.closest("a, button, select, input, label, pre, textarea, summary")) return;
-    const row = t.closest(".li[data-d], tr[data-d]");
+    const row = t.closest(".li[data-d], tr[data-d], .stepc[data-d]");
     if (row) toggle(row);
   });
   $("#q").addEventListener("input", (e) => { state.q = e.target.value; state.pages = {}; render(true); });
