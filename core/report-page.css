@@ -90,10 +90,10 @@ code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
 .item .slot { width: 14px; display: grid; place-items: center; flex: none; }
 .item.group .chev { color: var(--faint); transition: transform 0.15s; }
 .item.group[aria-expanded="true"] .chev { transform: rotate(90deg); }
-.sublist { display: flex; flex-direction: column; gap: 1px; margin: 1px 0 4px 17px; padding-left: 7px; border-left: 1px solid var(--line); }
+.sublist { flex-shrink: 0; display: flex; flex-direction: column; gap: 1px; margin: 1px 0 4px 17px; padding-left: 7px; border-left: 1px solid var(--line); }
 .item.sub { padding: 4px 10px; font-size: 13.5px; color: var(--muted); }
 .item.sub:hover, .item.sub.on { color: var(--text); }
-.item { display: flex; align-items: center; gap: 8px; width: 100%; padding: 5px 10px; border-radius: 7px; color: var(--text-2); white-space: nowrap; overflow: hidden; }
+.item { flex-shrink: 0; display: flex; align-items: center; gap: 8px; width: 100%; padding: 5px 10px; border-radius: 7px; color: var(--text-2); white-space: nowrap; overflow: hidden; }
 .item:hover { background: var(--hover); color: var(--text); }
 .item[aria-current="page"], .item.on { background: var(--hover); color: var(--text); font-weight: 550; }
 .item .grow { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }

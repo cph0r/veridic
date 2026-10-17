@@ -265,7 +265,7 @@
     if (m.does.length) h += '<p class="lead">Lets callers ' + m.does.slice(0, 4).map(esc).join(", ") + (m.does.length > 4 ? ", and more" : "") + ".</p>";
     h += '<div class="mgrid"><div class="mcol">' + indRow(indicators(m));
     h += section("next", "Needs attention");
-    h += attList(attention(m), 8) + '</div><aside class="mside">' + shape(m) + "</aside></div>";
+    h += attList(attention(m), 8) + moduleRules(m) + '</div><aside class="mside">' + shape(m) + "</aside></div>";
     h += '<details class="details"' + (state.open.has("details") ? " open" : "") + ' data-details><summary>Details<span class="faint"> · ' + plural(m.stats.routes, "route") + ((m.data && m.data.owns.length) ? ", " + plural(m.data.owns.length, "table") : "") + ((m.screens || []).length ? ", " + plural(m.screens.length, "screen") : "") + "</span></summary>" + moduleDetails(m) + "</details>";
     return h;
   }
@@ -281,6 +281,21 @@
     if (m.usedBy.length || m.uses.length) h += '<div class="card"><div class="ik">' + ic("branch", "sm") + "Connected</div>" + (m.usedBy.length ? '<div class="clabel">Used by</div><div class="chips">' + m.usedBy.map((u) => '<button class="chip link2" data-mod="' + esc(u.module) + '">' + esc(nameOf(u.module)) + "</button>").join("") + "</div>" : "") + (m.uses.length ? '<div class="clabel">Uses</div><div class="chips">' + m.uses.map((u) => '<button class="chip link2" data-mod="' + esc(u.module) + '">' + esc(nameOf(u.module)) + "</button>").join("") + "</div>" : "") + "</div>";
     return h;
   }
+  // The module's rules, from its spec (and any other spec citing its code): status at a glance,
+  // the whole spec one click away.
+  function moduleRules(m) {
+    const specs = SPECS.map((sp, i) => [sp, i]).filter(([sp]) => m.specs.includes(sp.path)).sort(([a], [b]) => (b.path.includes("/" + m.id + "/") ? 1 : 0) - (a.path.includes("/" + m.id + "/") ? 1 : 0));
+    if (!specs.length) return section("rules", "Rules") + empty("No spec yet. Nothing written says what these routes must do, so nothing can tell a bug from an intended change." + (m.stats.money ? " It moves money, so it's a good one to start with." : "") + " <code>/veridic:specs " + esc(m.id) + "</code> in Claude Code writes one.");
+    const mine = new Set(filesOf(m));
+    let h = "";
+    for (const [sp, si] of specs) {
+      const reqs = specReqs(sp).filter((r) => r.cites.some((c) => mine.has(c.file)));
+      const shown = reqs.length ? reqs : specReqs(sp);
+      h += section("rules-" + si, specs.length > 1 ? "Rules · " + esc(specName(sp)) : "Rules", shown.length, '<button class="text-btn" data-spec="' + si + '">Open the spec →</button>');
+      h += few("rules-" + si, shown, 6, (r) => { const st = REQ[r.status] || REQ.none; return li('<div class="req" style="display:flex;gap:12px;align-items:baseline"><span class="id">' + esc(r.id) + "</span><span>" + md(r.text) + "</span></div>", '<span class="pip ' + (tested(r) ? "ok" : st[1] || "med") + '" title="' + esc(st[0]) + '">' + ic("flask", "sm") + '</span><span class="pip ' + (r.stale ? "med" : "ok") + '" title="' + (r.stale ? "Code changed since written" : "Matches the code") + '">' + ic("check", "sm") + "</span>"); }, "compact");
+    }
+    return h;
+  }
   function moduleDetails(m) {
     const s = m.stats, rs = modRoutes(m), fs = modFindings(m).filter((f) => f.severity !== "low");
     let h = "";
@@ -290,22 +305,6 @@
       h += section("issues", "Issues", fs.length, "");
       h += few("issues", fs.sort((a, b) => rank(a.severity) - rank(b.severity)), 3, (f) => liOpen(
         '<div style="display:flex;gap:12px;align-items:baseline">' + dot(SEVC[f.severity]) + '<div style="min-width:0">' + two(esc(f.title || f.kind), '<span class="mono">' + esc(f.where) + "</span>") + "</div></div>", "", issueDetail(f)));
-    }
-
-    // Rules: the spec, or the lack of one.
-    const specs = SPECS.map((sp, i) => [sp, i]).filter(([sp]) => m.specs.includes(sp.path));
-    if (specs.length) {
-      const mine = new Set(filesOf(m));
-      for (const [sp, si] of specs) {
-        const reqs = specReqs(sp).filter((r) => r.cites.some((c) => mine.has(c.file)));
-        const shown = reqs.length ? reqs : specReqs(sp);
-        h += section("rules", "Rules", shown.length, '<button class="text-btn" data-spec="' + si + '">' + esc(specTitle(sp)) + " →</button>");
-        h += few("rules-" + si, shown, 6, (r) => { const st = REQ[r.status] || REQ.none; const c = r.stale ? "med" : st[1]; return li('<div class="req" style="display:flex;gap:12px;align-items:baseline"><span class="id">' + esc(r.id) + '</span><span>' + md(r.text) + "</span></div>", '<span class="tag ' + (c === "ok" ? "" : c) + '">' + (r.stale ? "code changed" : st[0].toLowerCase()) + "</span>"); }, "compact");
-        if (m.specified < s.routes) h += '<p class="small muted" style="margin-top:8px">' + plural(s.routes - m.specified, "route") + " not covered by its rules yet.</p>";
-      }
-    } else {
-      h += section("rules", "Rules");
-      h += empty("No spec yet. Nothing written says what these routes must do, so nothing can tell a bug from an intended change." + (s.money ? " It moves money, so it's a good one to start with." : ""));
     }
 
     // Routes.
@@ -387,16 +386,20 @@
 
   // ---- Specs: a map of which modules have written rules, and the one picked below it ----
   function vSpec() {
+    const m = state.specMod && MOD.get(state.specMod);
+    if (!m && !SPECS[state.spec]) return '<h1>Specs</h1><p class="lead">Written rules for what the app must do, one spec per module. A change that breaks one gets caught.</p>' + oSpecs();
+    const back = state.fromMod && MOD.get(state.fromMod) ? '<button class="back" data-mod="' + esc(state.fromMod) + '">' + ic("back", "sm") + esc(MOD.get(state.fromMod).name) + "</button>" : '<button class="back" data-nav="spec">' + ic("back", "sm") + "Specs</button>";
+    return back + (m ? noSpecPane(m) : specPane(SPECS[state.spec], state.spec));
+  }
+  // Overview's Specs tab: coverage, every spec as a row, and the modules with none.
+  function oSpecs() {
     const covered = ROUTES.filter((r) => r.specs && r.specs.length).length;
     const without = MODS.filter((m) => !m.specified).sort(riskOrder);
-    let h = "<h1>Specs</h1><p class=\"lead\">Written rules for what the app must do. A change that breaks one gets caught.</p>";
+    let h = "";
     const p = pct(covered, ROUTES.length), c = p >= 50 ? "ok" : p ? "med" : "high";
     h += '<div class="inds">' + '<div class="ind">' + ring(p, c, 64, p + "%") + '<div><div class="ik">' + ic("doc", "sm") + 'Coverage</div><div class="iv t-' + c + '">' + (p >= 50 ? "Good" : p ? "Needs work" : "None yet") + '</div><div class="id2">of routes have rules</div></div></div>' +
       '<div class="ind">' + ring(pct(MODS.length - without.length, MODS.length), c, 64, String(MODS.length - without.length)) + '<div><div class="ik">' + ic("route", "sm") + 'Modules</div><div class="iv">' + (MODS.length - without.length) + " of " + MODS.length + '</div><div class="id2">have a spec</div></div></div>' +
       (SPECS.length ? (() => { const all = SPECS.flatMap(specReqs), t = pct(all.filter(tested).length, all.length), cc = t >= 70 ? "ok" : t >= 30 ? "med" : "high"; return '<div class="ind">' + ring(t, cc, 64, t + "%") + '<div><div class="ik">' + ic("flask", "sm") + 'Rules tested</div><div class="iv t-' + cc + '">' + all.filter(tested).length + " of " + all.length + '</div><div class="id2">rules have a test</div></div></div>'; })() : "") + "</div>";
-    // One spec, or a module with none, picked from the sidebar or the list below.
-    const m = state.specMod && MOD.get(state.specMod);
-    if (m || SPECS[state.spec]) return '<button class="back" data-nav="spec">' + ic("back", "sm") + "Specs</button>" + (m ? noSpecPane(m) : specPane(SPECS[state.spec], state.spec));
     // Otherwise every spec as one row, then the modules still without one.
     h += section("list", "Specs", SPECS.length || null);
     h += SPECS.length ? '<div class="list">' + SPECS.map((sp, i) => {
@@ -456,7 +459,7 @@
     const subs = [["summary", "Summary"], ["modules", "Modules", MODS.length || null], ["findings", "Findings", F.filter((f) => f.severity !== "low").length], ["routes", "Routes", ROUTES.length], ["tests", "Tests", T ? T.tests : null], ["structure", "Structure", null]];
     let h = "<h1>Overview</h1><p class=\"lead\">The whole app at once: every finding, route and test.</p>";
     h += '<div class="tabs">' + subs.map(([k, t, n]) => '<button class="tab" data-f="sub" data-v="' + k + '" aria-pressed="' + (state.sub === k) + '">' + t + (n ? '<span class="n">' + n.toLocaleString() + "</span>" : "") + "</button>").join("") + "</div>";
-    return h + ({ summary: oSummary, modules: oModules, findings: oFindings, routes: oRoutes, tests: oTests, structure: oStructure }[state.sub] || oSummary)();
+    return h + ({ summary: oSummary, modules: oModules, specs: oSpecs, findings: oFindings, routes: oRoutes, tests: oTests, structure: oStructure }[state.sub] || oSummary)();
   }
   function oSummary() {
     const r = D.readiness || {};
@@ -577,7 +580,6 @@
   }
   // The sidebar: Home, then Modules with every module nested under it (collapsible), then the rest.
   let modsOpen = store.get("mods-open") !== "0";
-  let specsOpen = store.get("specs-open") === "1";
   function nav() {
     const cur = state.view;
     // Every row: an icon, the label, then one fixed slot on the right (a dot, or the chevron).
@@ -587,11 +589,7 @@
       ? '<button class="item group" data-modtoggle aria-expanded="' + modsOpen + '">' + ic("blocks", "sm") + '<span class="grow">Modules</span><span class="meta">' + MODS.length + "</span>" + slot(ic("chev", "sm chev")) + "</button>" +
         (modsOpen ? '<div class="sublist">' + MODS.map((m) => '<button class="item sub' + (cur === "module" && state.mod === m.id ? " on" : "") + '" data-mod="' + esc(m.id) + '"><span class="grow">' + esc(m.name) + "</span>" + slot(sideDot(m) ? dot(sideDot(m)) : "") + "</button>").join("") + "</div>" : "")
       : "";
-    const specGroup = SPECS.length
-      ? '<button class="item group" data-spectoggle aria-expanded="' + specsOpen + '"' + (cur === "spec" && state.spec < 0 && !state.specMod ? ' aria-current="page"' : "") + ">" + ic("doc", "sm") + '<span class="grow">Specs</span><span class="meta">' + SPECS.length + "</span>" + slot(ic("chev", "sm chev")) + "</button>" +
-        (specsOpen ? '<div class="sublist">' + SPECS.map((sp, i) => '<button class="item sub' + (cur === "spec" && state.spec === i && !state.specMod ? " on" : "") + '" data-spec="' + i + '" title="' + esc(specTitle(sp)) + '"><span class="grow">' + esc(specName(sp)) + "</span>" + slot(specReqs(sp).some((r) => r.stale) ? dot("med") : "") + "</button>").join("") + "</div>" : "")
-      : item(NAV[1]);
-    $("#nav").innerHTML = item(NAV[0]) + group + specGroup + NAV.slice(2).map(item).join("");
+    $("#nav").innerHTML = item(NAV[0]) + group + NAV.slice(1).map(item).join("");
   }
   function render(keepScroll) {
     seq = 0;
@@ -654,8 +652,8 @@
     if (md0) { openModule(md0.dataset.mod, md0.dataset.to); return; }
     const sp = t.closest("[data-spec]");
     const sm = t.closest("[data-specmod]");
-    if (sm) { state.specMod = sm.dataset.specmod; state.spec = -1; setView("spec"); return; }
-    if (sp) { state.spec = +sp.dataset.spec; state.specMod = null; state.sf = "all"; specsOpen = true; store.set("specs-open", "1"); setView("spec"); return; }
+    if (sm) { state.fromMod = null; state.specMod = sm.dataset.specmod; state.spec = -1; setView("spec"); return; }
+    if (sp) { state.fromMod = state.view === "module" ? state.mod : null; state.spec = +sp.dataset.spec; state.specMod = null; state.sf = "all"; setView("spec"); return; }
     if (t.closest("[data-about]")) { state.aboutOpen = !state.aboutOpen; render(true); return; }
     const op = t.closest("[data-open]");
     if (op) { state.open.add(op.dataset.open); render(true); return; }
@@ -664,7 +662,7 @@
     const pg = t.closest("[data-page]");
     if (pg) { if (pg.disabled) return; state.pages[pg.dataset.page] = +pg.dataset.p; render(true); return; }
     const sb = t.closest("[data-sub]");
-    if (sb) { state.sub = sb.dataset.sub; state.sev = ["high", "medium"]; setView("overview"); return; }
+    if (sb) { state.spec = -1; state.specMod = null; state.sub = sb.dataset.sub; state.sev = ["high", "medium"]; setView("overview"); return; }
     const n = t.closest("[data-nav]");
     if (n) { if (n.dataset.nav === "spec") (state.spec = -1), (state.specMod = null); setView(n.dataset.nav); return; }
     const f = t.closest("[data-f]");
@@ -678,7 +676,6 @@
     }
     const g = t.closest("[data-group]");
     if (g) { state.openGroup = g.dataset.group; state.sev = ["high", "medium", "low"]; state.area = "all"; state.sub = "findings"; state.open.add("findings"); render(true); return; }
-    if (t.closest("[data-spectoggle]")) { const onOverview = state.view === "spec" && state.spec < 0 && !state.specMod; specsOpen = onOverview ? !specsOpen : true; store.set("specs-open", specsOpen ? "1" : "0"); state.spec = -1; state.specMod = null; setView("spec"); return; }
     if (t.closest("[data-modtoggle]")) { modsOpen = !modsOpen; store.set("mods-open", modsOpen ? "1" : "0"); nav(); return; }
     if (t.closest("#menu")) { $(".shell").classList.toggle("menu"); return; }
     if (t.closest("a, button, select, input, label, pre, textarea, summary")) return;
