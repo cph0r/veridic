@@ -14,6 +14,10 @@
   <img src="https://img.shields.io/badge/license-MIT-111111?style=flat-square" alt="MIT">
 </p>
 
+<p align="center">
+  <img src="assets/loop.svg" alt="Veridic tells the agent NOT DONE (a stray file, a test that asserts nothing); the agent fixes both; Veridic says DONE" width="720">
+</p>
+
 ---
 
 ## What you get
@@ -23,6 +27,16 @@
 - **No dangerous surprises.** It finds the code that will hurt you: a `GET` that moves money, an endpoint anyone can use to delete someone else's data, tests that pass but check nothing.
 
 You don't run Veridic. Your agent does. Install it once, and Claude uses it whenever it writes, changes or reviews code.
+
+```mermaid
+flowchart LR
+    you(["You: #quot;add refunds#quot;"]) --> agent["Claude"]
+    agent -- "1 · before editing" --> facts["<b>veridic prepare</b><br/>every route, webhook, timer<br/>and table involved, with<br/>the lines that prove it"]
+    facts --> agent
+    agent -- "2 · edits the code" --> check{"<b>veridic done</b><br/>only touched what it claimed?<br/>every requirement really tested?"}
+    check -- "NOT DONE<br/>stray file · test checks nothing" --> agent
+    check -- "DONE" --> result(["A change that stayed in scope<br/>and is proven by tests"])
+```
 
 ## What it looks like
 

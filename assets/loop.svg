@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="330" viewBox="0 0 760 330" role="img" aria-label="An agent finishes a change; Veridic says NOT DONE (a stray file, a test that asserts nothing); the agent fixes both; Veridic says DONE.">
+  <style>
+    .term { fill: #0B1220; }
+    .bar { fill: #1E293B; }
+    .t { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 15px; fill: #CBD5E1; }
+    .dim { fill: #64748B; }
+    .cmd { fill: #E2E8F0; }
+    .bad { fill: #F87171; }
+    .ok { fill: #34D399; }
+    .say { fill: #93C5FD; }
+    .head { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; fill: #94A3B8; }
+    /* 12 s loop: run 1 (not done), the agent fixes, run 2 (done). */
+    .s { opacity: 0; animation: 12s infinite; }
+    .a1 { animation-name: a1; } .a2 { animation-name: a2; } .a3 { animation-name: a3; } .a4 { animation-name: a4; }
+    .b0 { animation-name: b0; } .b1 { animation-name: b1; } .b2 { animation-name: b2; } .b3 { animation-name: b3; }
+    @keyframes a1 { 0%, 2% { opacity: 0 } 4%, 46% { opacity: 1 } 49%, 100% { opacity: 0 } }
+    @keyframes a2 { 0%, 9% { opacity: 0 } 11%, 46% { opacity: 1 } 49%, 100% { opacity: 0 } }
+    @keyframes a3 { 0%, 16% { opacity: 0 } 18%, 46% { opacity: 1 } 49%, 100% { opacity: 0 } }
+    @keyframes a4 { 0%, 25% { opacity: 0 } 27%, 46% { opacity: 1 } 49%, 100% { opacity: 0 } }
+    @keyframes b0 { 0%, 36% { opacity: 0 } 38%, 50% { opacity: 1 } 53%, 100% { opacity: 0 } }
+    @keyframes b1 { 0%, 53% { opacity: 0 } 55%, 96% { opacity: 1 } 99%, 100% { opacity: 0 } }
+    @keyframes b2 { 0%, 60% { opacity: 0 } 62%, 96% { opacity: 1 } 99%, 100% { opacity: 0 } }
+    @keyframes b3 { 0%, 70% { opacity: 0 } 72%, 96% { opacity: 1 } 99%, 100% { opacity: 0 } }
+    @media (prefers-reduced-motion: reduce) { .s { animation: none; } .final { opacity: 1; } }
+  </style>
+  <rect class="term" x="0" y="0" width="760" height="330" rx="12"/>
+  <rect class="bar" x="0" y="0" width="760" height="34" rx="12"/>
+  <rect class="bar" x="0" y="20" width="760" height="14"/>
+  <circle cx="22" cy="17" r="6" fill="#F87171"/><circle cx="42" cy="17" r="6" fill="#FBBF24"/><circle cx="62" cy="17" r="6" fill="#34D399"/>
+  <text class="head" x="380" y="22" text-anchor="middle">claude · after editing the refunds route</text>
+
+  <!-- run 1: not done -->
+  <g class="s a1"><text class="t" x="28" y="72"><tspan class="dim">$</tspan> <tspan class="cmd">veridic done FR-001 --card</tspan></text></g>
+  <g class="s a2"><text class="t" x="28" y="108"><tspan class="dim">  ·</tspan> claimed  FR-001</text>
+    <text class="t" x="28" y="132"><tspan class="bad">  ✖</tspan> seam     1 stray file: <tspan class="bad">src/stripe.ts</tspan></text></g>
+  <g class="s a3"><text class="t" x="28" y="156"><tspan class="bad">  ✖</tspan> FR-001   its named test asserts nothing</text></g>
+  <g class="s a4"><text class="t" x="28" y="196"><tspan class="dim">  VERDICT</tspan> <tspan class="bad">✖ NOT DONE</tspan></text></g>
+
+  <!-- the agent fixes it -->
+  <g class="s b0"><text class="t say" x="28" y="246">Claude: undoing the unrelated edit to src/stripe.ts,</text>
+    <text class="t say" x="28" y="270">        and making the refund test assert the 404.</text></g>
+
+  <!-- run 2: done -->
+  <g class="s b1 final"><text class="t" x="28" y="72"><tspan class="dim">$</tspan> <tspan class="cmd">veridic done FR-001 --card</tspan></text></g>
+  <g class="s b2 final"><text class="t" x="28" y="108"><tspan class="dim">  ·</tspan> claimed  FR-001</text>
+    <text class="t" x="28" y="132"><tspan class="ok">  ●</tspan> seam     held: 2 changed files, all in scope</text>
+    <text class="t" x="28" y="156"><tspan class="ok">  ●</tspan> FR-001   covered by a test that asserts</text></g>
+  <g class="s b3 final"><text class="t" x="28" y="196"><tspan class="dim">  VERDICT</tspan> <tspan class="ok">● DONE</tspan></text>
+    <text class="t dim" x="28" y="246">  computed from the code, the diff and the tests. No model decides it.</text></g>
+</svg>
