@@ -18,7 +18,8 @@ import { parseSpec, makeResolver } from "./citations.mjs";
 import { basisOf, basisComment } from "./basis.mjs";
 
 const TEST_FILE = /(^|\/)(__tests__|tests?)\/.*\.[cm]?[jt]sx?$|\.(test|spec)\.[cm]?[jt]sx?$/;
-const TITLE = /(?<![\w$.])(x?)(?:it|test|describe)(?:\.(todo|skip|only|concurrent))?\s*\(\s*(["'`])((?:(?!\3).)*)\3/g;
+// Modifiers: skipped (todo, skip), focused, and expected to fail (vitest it.fails, jest test.failing).
+const TITLE = /(?<![\w$.])(x?)(?:it|test|describe)(?:\.(todo|skip|only|concurrent|fails|failing))?\s*\(\s*(["'`])((?:(?!\3).)*)\3/g;
 const REQ_ID = /\b((?:FR|SC|NFR|AC|INV)-\d+[a-z]?|R-[A-Z]{2,6}-\d{4})(?:\s*[·.:/-]?\s*(VC\d+))?\b/g;
 // Domain test ids: T-<DOMAIN>-<req>.<vc>.<n>[-API|-UI]
 const T_ID = /\bT-[A-Z]{2,6}-(\d{4})\.(\d+)\.\d+(?:-[A-Z]+)?\b/g;
@@ -220,7 +221,15 @@ export function findTaggedTests(repo, files) {
       const body = code.slice(t.index + t[0].length, closeParen(code, open));
       const todo = t[2] === "todo" || t[2] === "skip" || t[1] === "x" || skipped.some(([a, b]) => t.index > a && t.index < b);
       const strength = todo ? null : testStrength(body);
-      for (const { id, vc } of ids) out.push({ id, vc, file, line: lineOf(t.index), title: t[4], todo, strength, spec: bound });
+      // Expected to fail: the test proves the code currently breaks the rule. Frameworks with no
+      // such marker (mocha, node:test) skip the test with "[broken]" in its title: broken, not proven.
+      const expectFail = t[2] === "fails" || t[2] === "failing";
+      const brokenSkip = todo && /\[broken\]/i.test(t[4]);
+      for (const { id, vc } of ids) {
+        // "FR-001 (orders): …": the rule belongs to module orders (ids repeat across specs).
+        const qual = t[4].match(new RegExp(`\\b${id}\\s*\\(([\\w-]+)\\)`))?.[1] ?? null;
+        out.push({ id, vc, file, line: lineOf(t.index), title: t[4], todo, strength, spec: bound, expectFail, brokenSkip, qual });
+      }
     }
   }
   return out;
@@ -408,7 +417,7 @@ export function testCoverage(repo, spec, opts = {}) {
   const testFiles = files.filter((f) => TEST_FILE.test(f) && !f.includes("node_modules/") && /\b(?:it|test)(?:\.\w+)?\s*\(/.test(safeRead(repo, f)));
 
   const specRel = opts.specPath ? path.relative(repo, path.resolve(opts.specPath)) : null;
-  const tagged = findTaggedTests(repo, files).filter((t) => cited.has(t.id) && (!t.spec || !specRel || t.spec === specRel || path.resolve(repo, t.spec) === path.resolve(opts.specPath)));
+  const tagged = findTaggedTests(repo, files).filter((t) => cited.has(t.id) && (!t.qual || !opts.module || t.qual === opts.module) && (!t.spec || !specRel || t.spec === specRel || path.resolve(repo, t.spec) === path.resolve(opts.specPath)));
   const checks = (t) => t.strength === "weak" || t.strength === "strong";
   const reachCache = new Map();
   const reaches = (testFile, targets) => {
@@ -422,11 +431,15 @@ export function testCoverage(repo, spec, opts = {}) {
       .filter((t) => t.id === id)
       .map((t) => {
         const result = run?.results.get(`${t.file}\0${t.title}`);
-        return { at: `${t.file}:${t.line}`, title: t.title, todo: t.todo, ...(t.strength ? { strength: t.strength } : {}), reaches_cited_code: reaches(t.file, cited.get(id)), ...(run ? { result: result ?? "not run" } : {}) };
+        return { at: `${t.file}:${t.line}`, title: t.title, todo: t.todo, ...(t.expectFail ? { expect_fail: true } : {}), ...(t.brokenSkip ? { broken_skip: true } : {}), ...(t.strength ? { strength: t.strength } : {}), reaches_cited_code: reaches(t.file, cited.get(id)), ...(run ? { result: result ?? "not run" } : {}) };
       });
-    const real = tests.filter((t) => !t.todo && t.reaches_cited_code && checks(t));
+    const real = tests.filter((t) => !t.todo && !t.expect_fail && t.reaches_cited_code && checks(t));
+    const proving = tests.filter((t) => !t.todo && t.expect_fail && t.reaches_cited_code && checks(t));
     let status = "none";
-    if (real.length) status = run ? (real.some((t) => t.result === "failed") ? "failing" : real.some((t) => t.result === "passed") ? "passing" : "covered") : "covered";
+    let proven;
+    if (!real.length && proving.length) (status = "broken"), (proven = true);
+    else if (!real.length && tests.some((t) => t.broken_skip && t.reaches_cited_code)) (status = "broken"), (proven = false);
+    else if (real.length) status = run ? (real.some((t) => t.result === "failed") ? "failing" : real.some((t) => t.result === "passed") ? "passing" : "covered") : "covered";
     else if (tests.some((t) => !t.todo && t.reaches_cited_code)) status = "unasserted";
     else if (tests.some((t) => !t.todo)) status = "tagged_only";
     else if (tests.length) status = "todo";
@@ -439,7 +452,7 @@ export function testCoverage(repo, spec, opts = {}) {
       const vt = tagged.filter((t) => t.id === id && t.vc === vc && !t.todo && checks(t) && reaches(t.file, cited.get(id)));
       return { id: vc, covered: vt.length > 0, tests: vt.map((t) => ({ at: `${t.file}:${t.line}`, title: t.title, ...(run ? { result: run.results.get(`${t.file}\0${t.title}`) ?? "not run" } : {}) })) };
     });
-    return { id, status, tests, related_tests, text: texts.get(id), cites: cites.get(id), ...(verification.length ? { verification, vc_covered: verification.filter((v) => v.covered).length } : {}) };
+    return { id, status, ...(proven != null ? { proven } : {}), tests, related_tests, text: texts.get(id), cites: cites.get(id), ...(verification.length ? { verification, vc_covered: verification.filter((v) => v.covered).length } : {}) };
   });
 
   const count = (s) => requirements.filter((r) => r.status === s).length;
@@ -465,6 +478,7 @@ export function testCoverage(repo, spec, opts = {}) {
         return { tests_checked: new Set(live.map((t) => `${t.file}:${t.line}`)).size, ...(none.length ? { tests_asserting_nothing: none } : {}), ...(weak.length ? { weak_tests: weak } : {}) };
       })(),
       todo: count("todo"),
+      broken: count("broken"),
       untested: count("none"),
     },
     requirements,

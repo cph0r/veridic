@@ -361,3 +361,49 @@ test("routes: a route declared inside a test file isn't one of the app's routes"
   assert.ok(!inv.routes.some((r) => r.file === f), "no route from a test file");
   fs.rmSync(repo, { recursive: true, force: true });
 });
+
+// ---- rules to tests (specs/rules-to-tests/spec.md) ----
+// A small repo: one source file, a spec citing it, and a test file importing it.
+async function rulesRepo(testSrc, specExtra = "") {
+  const { execFileSync } = await import("node:child_process");
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "veridic-rules-"));
+  const files = {
+    "src/a.js": "export function a(x) {\n  return x + 1;\n}\n",
+    "specs/orders/spec.md": "- **FR-001**: a adds one. [evidence: src/a.js:1-3]\n- **FR-002**: a never returns its input. [evidence: src/a.js:1-3]\n- **FR-003**: a is pure. [evidence: src/a.js:1-3]\n" + specExtra,
+    "test/a.test.js": testSrc,
+  };
+  for (const [f, t] of Object.entries(files)) fs.mkdirSync(path.join(repo, path.dirname(f)), { recursive: true }), fs.writeFileSync(path.join(repo, f), t);
+  execFileSync("git", ["init", "-q"], { cwd: repo });
+  return repo;
+}
+
+test("FR-001: it.fails and test.failing are found and marked as expected failures", async () => {
+  const { findTaggedTests } = await import("../core/tests.mjs");
+  const repo = await rulesRepo('import { a } from "../src/a.js";\nit.fails("FR-001: a adds two", () => { expect(a(1)).toBe(3); });\ntest.failing("FR-002: a returns its input", () => { expect(a(1)).toBe(1); });\nit("FR-003: a is pure", () => { expect(a(1)).toBe(2); });\n');
+  const t = findTaggedTests(repo, ["test/a.test.js"]);
+  assert.deepEqual(t.map((x) => [x.id, x.expectFail]), [["FR-001", true], ["FR-002", true], ["FR-003", false]]);
+  fs.rmSync(repo, { recursive: true, force: true });
+});
+
+test("FR-002: a rule proven only by expected-failure tests is broken; a normal named test makes it covered", async () => {
+  const { testCoverage } = await import("../core/tests.mjs");
+  const repo = await rulesRepo('import { a } from "../src/a.js";\nit.fails("FR-001: a adds two", () => { expect(a(1)).toBe(3); });\nit.fails("FR-002: wrong", () => { expect(a(1)).toBe(3); });\nit("FR-002: a never returns its input", () => { expect(a(1)).not.toBe(1); });\n');
+  const spec = fs.readFileSync(path.join(repo, "specs/orders/spec.md"), "utf8");
+  const cov = testCoverage(repo, spec, { specPath: path.join(repo, "specs/orders/spec.md") });
+  const st = Object.fromEntries(cov.requirements.map((r) => [r.id, r.status]));
+  assert.equal(cov.summary.broken, 1);
+  assert.equal(st["FR-001"], "broken");
+  assert.equal(st["FR-002"], "covered");
+  assert.equal(st["FR-003"], "none");
+  fs.rmSync(repo, { recursive: true, force: true });
+});
+
+test("FR-003: a title qualified with another module doesn't count for this one", async () => {
+  const { testCoverage } = await import("../core/tests.mjs");
+  const repo = await rulesRepo('import { a } from "../src/a.js";\nit("FR-001 (menu): a adds one", () => { expect(a(1)).toBe(2); });\nit("FR-002 (orders): a never returns its input", () => { expect(a(1)).not.toBe(1); });\n');
+  const spec = fs.readFileSync(path.join(repo, "specs/orders/spec.md"), "utf8");
+  const st = Object.fromEntries(testCoverage(repo, spec, { specPath: path.join(repo, "specs/orders/spec.md"), module: "orders" }).requirements.map((r) => [r.id, r.status]));
+  assert.equal(st["FR-001"], "none", "qualified for menu");
+  assert.equal(st["FR-002"], "covered", "qualified for orders");
+  fs.rmSync(repo, { recursive: true, force: true });
+});
