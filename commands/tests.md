@@ -1,10 +1,31 @@
 ---
-description: Which spec requirements have real tests; "scaffold" generates placeholders, "run" runs them
-argument-hint: "<spec.md> [run | scaffold <test path>]"
-allowed-tools: Bash(veridic:*)
+description: Turn a module's rules into tests Veridic counts (link existing tests, write the rest); or, given a spec, which requirements have real tests
+argument-hint: "<module id> [more ids] | <spec.md> [run | scaffold <test path>]"
+allowed-tools: Bash(veridic:*), Agent, Read
 ---
 
-Arguments: `$ARGUMENTS`. The first is the spec.
+Arguments: `$ARGUMENTS`.
+
+## Module ids: turn the rules into tests
+
+1. **Plan.** For each module, run `veridic tests --module <id>` and read it: its
+   totals, its test recipe, and per rule the status, link candidates and test
+   file. If a module has no spec of its own, say so and stop for that module
+   (the output says where its rules are, or that `/veridic:specs <id>` writes
+   them). If the recipe says a package has no test framework, its rules are
+   tested from a package that has one, or left untested with that reason.
+2. **Ask.** Show a short plan per module: rules to link (existing tests that
+   may already check them), rules to write, riskiest first. Say that only test
+   files change, and that one agent works per module. Wait for a yes.
+3. **Write.** For each module, run the `veridic-test-writer` agent with the
+   module id, in the foreground, at most four at a time, and wait for every one
+   to finish.
+4. **Report.** Run `veridic tests --module <id> --run` for each module and show
+   the totals line, before and after. List any rule now `broken`: the code
+   breaks it today, proven by an expected-failure test. Those are bugs to fix,
+   not tests to change.
+
+## A spec file (`*.md`): which requirements have real tests
 
 - Default: `veridic tests --spec <spec>`. Report tested % and list the untested requirements, most important first (security and money paths before cosmetics).
 - `run`: `veridic tests --spec <spec> --run`. Report passing / failing per requirement; for a failing one, show the assertion that failed.

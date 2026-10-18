@@ -589,3 +589,9 @@ test("FR-013: the module work list prints its totals and ends with the next comm
   assert.match(md, /^Next: \/veridic:tests orders \(2 to link, 1 to write\)$/m);
   fs.rmSync(repo, { recursive: true, force: true });
 });
+
+test("FR-015: the report names a broken rule 'broken, proven'", () => {
+  const page = fs.readFileSync(new URL("../core/report-page.js", import.meta.url), "utf8");
+  const req = page.match(/const REQ = \{([\s\S]*?)\};/)[1];
+  assert.match(req, /broken: \["Broken, proven", "high"\]/);
+});

@@ -76,6 +76,16 @@ its number of turns. Follow this order and don't repeat steps.
 Don't run `metrics`, `anchor`, `mutate` or `stale` while writing a spec; they
 are for maintenance (`references/maintenance.md`).
 
+## Turning rules into tests
+
+A rule counts as tested only when a passing test named with its id reaches the
+code it cites. For a module, `veridic tests --module <id>` lists every rule's
+status, the tests that may already check it (link them by adding the id to the
+title), the test file to use, and the repo's test recipe (framework, run
+command, helpers). `/veridic:tests <id>` does the whole job with the
+`veridic-test-writer` agent. A rule the code breaks today gets an
+expected-failure test (`it.fails`, `test.failing`): it shows as broken, proven.
+
 ## Implementing a requirement: is it done?
 
 After changing code for requirements, run `veridic done --spec S FR-002 [FR-003 …] --card`

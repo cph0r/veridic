@@ -11,6 +11,7 @@
     "core/",
     "skill/",
     "commands/",
+    "agents/",
     "hooks/",
     ".claude-plugin/",
     "README.md",

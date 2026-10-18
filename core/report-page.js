@@ -54,6 +54,7 @@
   const REQ = {
     passing: ["Tested, passing", "ok"], covered: ["Tested", "ok"], failing: ["Test failing", "high"], unasserted: ["Its test checks nothing", "high"],
     tagged_only: ["Its test misses the code", "med"], todo: ["Test is a todo", ""], none: ["No test yet", "med"],
+    broken: ["Broken, proven", "high"], // an expected-failure test shows the code breaks the rule
   };
   const tested = (r) => r.status === "passing" || r.status === "covered";
 
