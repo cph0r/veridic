@@ -1,6 +1,6 @@
 ---
 description: Turn a module's rules into tests Veridic counts (link existing tests, write the rest); or, given a spec, which requirements have real tests
-argument-hint: "<module id> [more ids] | <spec.md> [run | scaffold <test path>]"
+argument-hint: "<module id> [more ids] [--yes] | <spec.md> [run | scaffold <test path>]"
 allowed-tools: Bash(veridic:*), Agent, Read
 ---
 
@@ -16,7 +16,8 @@ Arguments: `$ARGUMENTS`.
    tested from a package that has one, or left untested with that reason.
 2. **Ask.** Show a short plan per module: rules to link (existing tests that
    may already check them), rules to write, riskiest first. Say that only test
-   files change, and that one agent works per module. Wait for a yes.
+   files change, and that one agent works per module. Wait for a yes, unless
+   the arguments include `--yes` (an unattended run).
 3. **Write.** For each module, run the `veridic-test-writer` agent with the
    module id, in the foreground, at most four at a time, and wait for every one
    to finish.
