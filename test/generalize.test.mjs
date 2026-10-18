@@ -407,3 +407,72 @@ test("FR-003: a title qualified with another module doesn't count for this one",
   assert.equal(st["FR-002"], "covered", "qualified for orders");
   fs.rmSync(repo, { recursive: true, force: true });
 });
+
+// A repo with three packages: vitest with a shared test helper, jest with HTTP tests, and none.
+async function recipeRepo() {
+  const { execFileSync } = await import("node:child_process");
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "veridic-recipe-"));
+  const files = {
+    "api/package.json": JSON.stringify({ devDependencies: { vitest: "1" } }),
+    "api/vitest.config.ts": 'export default { test: { setupFiles: ["./test/setup.ts"] } };\n',
+    "api/test/setup.ts": "process.env.TZ = 'UTC';\n",
+    "api/src/x.ts": "export const x = 1;\n",
+    "api/src/y.ts": "export const y = 2;\n",
+    "api/src/testkit/db.ts": "/**\n * A fake database for unit tests: queue results, inspect writes.\n */\nexport function fakeDb() { return {}; }\n",
+    "api/src/x.test.ts": 'import { x } from "./x";\nimport { fakeDb } from "./testkit/db";\nit("x", () => { expect(x).toBe(1); });\n',
+    "api/src/y.test.ts": 'import { y } from "./y";\nimport { fakeDb } from "./testkit/db";\nit("y", () => { expect(y).toBe(2); });\n',
+    "web/package.json": JSON.stringify({ devDependencies: { jest: "29", supertest: "6" } }),
+    "web/src/app.js": "module.exports = {};\n",
+    "web/__tests__/app.test.js": 'const request = require("supertest");\nconst app = require("../src/app");\ntest("ok", async () => { await request(app).get("/").expect(200); });\n',
+    "none/package.json": JSON.stringify({ name: "none" }),
+    "none/src/z.js": "module.exports = 1;\n",
+  };
+  for (const [f, t] of Object.entries(files)) fs.mkdirSync(path.join(repo, path.dirname(f)), { recursive: true }), fs.writeFileSync(path.join(repo, f), t);
+  execFileSync("git", ["init", "-q"], { cwd: repo });
+  return { repo, files: Object.keys(files) };
+}
+
+test("FR-004: the recipe names each package's framework and the command to run one test file", async () => {
+  const { testRecipe } = await import("../core/recipe.mjs");
+  const { repo, files } = await recipeRepo();
+  const r = testRecipe(repo, files);
+  assert.equal(r.get("api").framework, "vitest");
+  assert.equal(r.get("api").run, "npx vitest run <file>");
+  assert.equal(r.get("web").framework, "jest");
+  assert.equal(r.get("web").run, "npx jest <file>");
+  assert.equal(r.get("none").framework, null);
+  assert.equal(r.get("none").run, null);
+  fs.rmSync(repo, { recursive: true, force: true });
+});
+
+test("FR-005: the recipe reports where most of a package's tests live", async () => {
+  const { testRecipe } = await import("../core/recipe.mjs");
+  const { repo, files } = await recipeRepo();
+  const r = testRecipe(repo, files);
+  assert.equal(r.get("api").layout, "colocated");
+  assert.equal(r.get("web").layout, "__tests__");
+  fs.rmSync(repo, { recursive: true, force: true });
+});
+
+test("FR-006: the recipe lists setup files and shared helpers with their leading comment", async () => {
+  const { testRecipe } = await import("../core/recipe.mjs");
+  const { repo, files } = await recipeRepo();
+  const api = testRecipe(repo, files).get("api");
+  assert.deepEqual(api.setup, ["api/test/setup.ts"]);
+  assert.deepEqual(api.helpers.map((h) => h.file), ["api/src/testkit/db.ts"]);
+  assert.match(api.helpers[0].note, /fake database for unit tests/);
+  fs.rmSync(repo, { recursive: true, force: true });
+});
+
+test("FR-007: the recipe says HTTP or direct, gives the marker, and names a test to copy for a cited file", async () => {
+  const { testRecipe, exampleTest } = await import("../core/recipe.mjs");
+  const { repo, files } = await recipeRepo();
+  const r = testRecipe(repo, files);
+  assert.equal(r.get("api").style, "direct");
+  assert.equal(r.get("web").style, "http");
+  assert.equal(r.get("api").marker, "it.fails");
+  assert.equal(r.get("web").marker, "test.failing");
+  assert.equal(exampleTest(repo, r.get("api"), "api/src/x.ts"), "api/src/x.test.ts");
+  assert.equal(exampleTest(repo, r.get("web"), "web/src/app.js"), "web/__tests__/app.test.js");
+  fs.rmSync(repo, { recursive: true, force: true });
+});
