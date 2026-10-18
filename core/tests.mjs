@@ -324,6 +324,22 @@ export function auditFile(repo, file) {
   return { file, tests, counts, flagged, asserting: counts.strong + counts.weak };
 }
 
+/** The tests in one file, each with its line, title and strength (skipped tests left out). */
+export function testsIn(repo, file) {
+  const src = safeRead(repo, file);
+  const code = codeOnly(src);
+  const skipped = [...code.matchAll(/\b(?:xdescribe|describe\.skip)\s*\(/g)].map((m) => [m.index, closeParen(code, m.index + m[0].length)]);
+  const { re: helpers, bodies } = localHelpers(code);
+  const out = [];
+  for (const t of testCases(src, code)) {
+    if (t.mod === "todo" || t.mod === "skip" || t.x || skipped.some(([x, y]) => t.index > x && t.index < y)) continue;
+    const body = code.slice(t.bodyStart, t.bodyEnd);
+    const named = body.match(/^\s*,\s*([A-Za-z_$][\w$]*)\s*,?\s*(?:\d+\s*)?$/)?.[1];
+    out.push({ line: src.slice(0, t.index).split("\n").length, title: t.title, strength: testStrength(named && bodies.has(named) ? bodies.get(named) : body, helpers) });
+  }
+  return out;
+}
+
 /** Every test file in the repo. */
 export function testFilesOf(repo) {
   return execFileSync("git", ["ls-files", "--cached", "--others", "--exclude-standard"], { cwd: repo, encoding: "utf8", maxBuffer: 64 << 20 })

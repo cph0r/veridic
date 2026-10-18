@@ -476,3 +476,84 @@ test("FR-007: the recipe says HTTP or direct, gives the marker, and names a test
   assert.equal(exampleTest(repo, r.get("web"), "web/src/app.js"), "web/__tests__/app.test.js");
   fs.rmSync(repo, { recursive: true, force: true });
 });
+
+// A module "orders" with its own spec, a payments route that moves money, existing tests.
+async function workRepo() {
+  const { execFileSync } = await import("node:child_process");
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "veridic-work-"));
+  const files = {
+    "package.json": JSON.stringify({ devDependencies: { vitest: "1" } }),
+    "src/pay.js": "export function pay(order) {\n  return { paid: true, id: order.id };\n}\n",
+    "src/list.js": "export function list() {\n  return [];\n}\n",
+    "specs/orders/spec.md": [
+      "- **FR-001**: Listing returns an array. [evidence: src/list.js:1-3]",
+      "- **FR-002**: Paying marks the order paid. [evidence: src/pay.js:1-3]",
+      "- **INV-1**: An order is paid at most once. [evidence: src/pay.js:1-3]",
+      "- **FR-003**: Orders are kept for a year.",
+      "",
+    ].join("\n"),
+    "specs/menu/spec.md": "- **FR-002**: The menu lists items. [evidence: src/pay.js:1-3]\n",
+    "src/pay.test.js": 'import { pay } from "./pay";\nit("pays an order", () => { expect(pay({ id: 1 }).paid).toBe(true); });\nit("FR-001: lists", () => { expect(1).toBe(1); });\n',
+    "src/list.test.js": 'import { list } from "./list";\nit("FR-001: listing returns an array", () => { expect(list()).toEqual([]); });\n',
+  };
+  for (const [f, t] of Object.entries(files)) fs.mkdirSync(path.join(repo, path.dirname(f)), { recursive: true }), fs.writeFileSync(path.join(repo, f), t);
+  execFileSync("git", ["init", "-q"], { cwd: repo });
+  const data = {
+    modules: [
+      { id: "orders", name: "Orders", specs: ["specs/orders/spec.md", "specs/menu/spec.md"], routes: ["POST /pay", "GET /orders"] },
+      { id: "menu", name: "Menu", specs: ["specs/menu/spec.md"], routes: [] },
+      { id: "tables", name: "Tables", specs: ["specs/orders/spec.md"], routes: [] },
+      { id: "voice", name: "Voice", specs: [], routes: [] },
+    ],
+    routes: [
+      { id: "POST /pay", module: "orders", moves_money: true, effect: "write", handler: "src/pay.js:1-3" },
+      { id: "GET /orders", module: "orders", moves_money: false, effect: "read", handler: "src/list.js:1-3" },
+    ],
+  };
+  return { repo, data };
+}
+
+test("FR-008: the work list gives each rule one status, money and invariants first", async () => {
+  const { workList } = await import("../core/worklist.mjs");
+  const { repo, data } = await workRepo();
+  const wl = await workList(repo, "orders", { data });
+  assert.deepEqual(wl.specs, ["specs/orders/spec.md"], "only the module's own spec");
+  assert.deepEqual(wl.rules.map((r) => [r.id, r.status, r.risk]), [["FR-002", "untested", 0], ["INV-1", "untested", 0], ["FR-001", "tested", 2], ["FR-003", "untested", 2]]);
+  assert.equal(wl.totals.tested, 1);
+  assert.equal(wl.totals.untested, 3);
+  assert.equal(wl.rules.find((r) => r.id === "FR-003").reason, "no cited code");
+  fs.rmSync(repo, { recursive: true, force: true });
+});
+
+test("FR-009: link candidates are existing asserting tests that reach the cited code and aren't named for the rule", async () => {
+  const { workList } = await import("../core/worklist.mjs");
+  const { repo, data } = await workRepo();
+  const wl = await workList(repo, "orders", { data });
+  const fr2 = wl.rules.find((r) => r.id === "FR-002");
+  assert.deepEqual(fr2.candidates.map((c) => c.title), ["pays an order"]);
+  assert.equal(fr2.target, "src/pay.test.js");
+  fs.rmSync(repo, { recursive: true, force: true });
+});
+
+test("FR-010: an id another spec also uses, with a test reaching both, is ambiguous", async () => {
+  const { workList } = await import("../core/worklist.mjs");
+  const { repo, data } = await workRepo();
+  const wl = await workList(repo, "orders", { data });
+  assert.equal(wl.rules.find((r) => r.id === "FR-002").ambiguous, true);
+  assert.equal(wl.rules.find((r) => r.id === "FR-001").ambiguous, false);
+  fs.rmSync(repo, { recursive: true, force: true });
+});
+
+test("FR-014: unknown modules and modules without a spec of their own are explained", async () => {
+  const { workList } = await import("../core/worklist.mjs");
+  const { repo, data } = await workRepo();
+  const unknown = await workList(repo, "nope", { data });
+  assert.match(unknown.error, /no module "nope"/);
+  assert.deepEqual(unknown.modules, ["orders", "menu", "tables", "voice"]);
+  const tables = await workList(repo, "tables", { data });
+  assert.match(tables.error, /no spec of its own/);
+  assert.match(tables.error, /Orders/);
+  const voice = await workList(repo, "voice", { data });
+  assert.match(voice.error, /\/veridic:specs voice/);
+  fs.rmSync(repo, { recursive: true, force: true });
+});
