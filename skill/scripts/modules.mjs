@@ -16,7 +16,10 @@ run(async () => {
   if (!list.length) fail("no modules found: run `veridic init` so Veridic can index the code and find the routes", usage);
   if (a.md) {
     const rows = list.map((m) => `| \`${m.id}\` | ${m.name} | ${m.routes} | ${m.does.slice(0, 3).join(", ")} | ${m.issues.high ? `${m.issues.high} high` : m.issues.medium ? `${m.issues.medium} medium` : "—"} | ${m.untested}/${m.routes} | ${m.specs.length ? m.specs.map((s) => `\`${s}\``).join(", ") : "none"} |`);
-    writeAll(["| id | module | routes | does | issues | untested | spec |", "|---|---|---|---|---|---|---|", ...rows].join("\n") + "\n");
+    // The next step: write specs where there are none, else turn the riskiest module's rules into tests.
+    const noSpec = list.filter((m) => !m.specs.length);
+    const next = noSpec.length ? `/veridic:specs (${noSpec.length} module${noSpec.length === 1 ? "" : "s"} without a spec)` : `veridic tests --module ${list[0].id}`;
+    writeAll(["| id | module | routes | does | issues | untested | spec |", "|---|---|---|---|---|---|---|", ...rows, "", `Next: ${next}`].join("\n") + "\n");
     return;
   }
   emit({ repo: a.repo, modules: list }, 0);

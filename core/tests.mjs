@@ -12,6 +12,7 @@
 
 import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
+import { testRecipe } from "./recipe.mjs";
 import os from "node:os";
 import path from "node:path";
 import { parseSpec, makeResolver } from "./citations.mjs";
@@ -394,6 +395,82 @@ export function runVitest(repo, testFiles) {
   return { results, errors };
 }
 
+// The package a test file belongs to: its nearest folder with a package.json.
+function byPackage(repo, testFiles) {
+  const out = new Map();
+  for (const f of testFiles) {
+    let dir = path.dirname(path.join(repo, f));
+    while (dir.startsWith(repo) && !fs.existsSync(path.join(dir, "package.json"))) dir = path.dirname(dir);
+    if (!out.has(dir)) out.set(dir, []);
+    out.get(dir).push(f);
+  }
+  return out;
+}
+
+/** Run node:test files, one at a time, and return results by test title (TAP output). */
+export function runNodeTest(repo, testFiles) {
+  const results = new Map();
+  const errors = [];
+  for (const [pkg, files] of byPackage(repo, testFiles))
+    for (const f of files) {
+      // Inside a node:test run, NODE_TEST_CONTEXT makes a nested `node --test` report to its parent
+      // instead of printing results: clear it so this run prints its own TAP.
+      const { NODE_TEST_CONTEXT, ...env } = process.env;
+      const r = spawnSync(process.execPath, ["--test", "--test-reporter=tap", path.relative(pkg, path.join(repo, f))], { cwd: pkg, encoding: "utf8", timeout: 600_000, env });
+      if (r.error || r.status == null) {
+        errors.push({ file: f, error: String(r.error?.message ?? "node --test did not run").slice(0, 800) });
+        continue;
+      }
+      for (const m of (r.stdout ?? "").matchAll(/^\s*(not ok|ok) \d+ - (.*?)(?:\s+#\s*(SKIP|TODO).*)?$/gm)) results.set(`${f}\0${m[2]}`, m[3] ? "skipped" : m[1] === "ok" ? "passed" : "failed");
+    }
+  return { results, errors };
+}
+
+/** Run jest on these files (from their package) and return results by test title. */
+export function runJest(repo, testFiles) {
+  const results = new Map();
+  const errors = [];
+  for (const [pkg, files] of byPackage(repo, testFiles)) {
+    const outFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "veridic-jest-")), "out.json");
+    const r = spawnSync("npx", ["--no-install", "jest", ...files.map((f) => path.relative(pkg, path.join(repo, f))), "--json", `--outputFile=${outFile}`], { cwd: pkg, encoding: "utf8", timeout: 600_000 });
+    if (!fs.existsSync(outFile)) {
+      errors.push({ package: path.relative(repo, pkg) || ".", error: (r.stderr || r.stdout || "jest produced no report").slice(-800) });
+      continue;
+    }
+    const report = JSON.parse(fs.readFileSync(outFile, "utf8"));
+    for (const tf of report.testResults ?? []) {
+      const rel = path.relative(repo, tf.name);
+      for (const a of tf.assertionResults ?? []) results.set(`${rel}\0${a.title}`, a.status);
+    }
+  }
+  return { results, errors };
+}
+
+/** Run named test files with each package's own framework (from the test recipe). */
+function runByFramework(repo, testFiles, files) {
+  const recipes = testRecipe(repo, files);
+  const frameworkOf = (f) => [...recipes.values()].filter((r) => r.dir === "." || f.startsWith(r.dir + "/")).sort((a, b) => b.dir.length - a.dir.length)[0]?.framework ?? null;
+  const groups = new Map();
+  for (const f of testFiles) {
+    const fw = frameworkOf(f);
+    if (!groups.has(fw)) groups.set(fw, []);
+    groups.get(fw).push(f);
+  }
+  const results = new Map();
+  const errors = [];
+  for (const [fw, fs2] of groups) {
+    const run = { vitest: runVitest, jest: runJest, "node:test": runNodeTest }[fw];
+    if (!run) {
+      errors.push({ files: fs2, error: fw ? `${fw} tests aren't run by Veridic yet` : "no test framework found for these files" });
+      continue;
+    }
+    const r = run(repo, fs2);
+    for (const [k, v] of r.results) results.set(k, v);
+    errors.push(...r.errors);
+  }
+  return { results, errors };
+}
+
 /**
  * @param opts { specPath (to honor `veridic-spec:` bindings), run: boolean, bases }
  * @returns {{ summary, requirements: [{ id, tests: [...], status }], errors? }}
@@ -441,7 +518,7 @@ export function testCoverage(repo, spec, opts = {}) {
     return [...targets].some((t) => reachCache.get(testFile).has(t));
   };
 
-  const run = opts.run ? runVitest(repo, [...new Set(tagged.filter((t) => !t.todo).map((t) => t.file))]) : null;
+  const run = opts.run ? runByFramework(repo, [...new Set(tagged.filter((t) => !t.todo).map((t) => t.file))], files) : null;
   const requirements = [...cited.keys()].map((id) => {
     const tests = tagged
       .filter((t) => t.id === id)

@@ -557,3 +557,35 @@ test("FR-014: unknown modules and modules without a spec of their own are explai
   assert.match(voice.error, /\/veridic:specs voice/);
   fs.rmSync(repo, { recursive: true, force: true });
 });
+
+test("FR-011: --run runs node:test files and records pass or fail per named test", async () => {
+  const { testCoverage } = await import("../core/tests.mjs");
+  const repo = await rulesRepo('import { test } from "node:test";\nimport assert from "node:assert";\nimport { a } from "../src/a.js";\ntest("FR-001: a adds one", () => { assert.equal(a(1), 2); });\ntest("FR-002: a never returns its input", () => { assert.equal(a(1), 1); });\n');
+  fs.writeFileSync(path.join(repo, "package.json"), JSON.stringify({ type: "module", scripts: { test: "node --test" } }));
+  const spec = fs.readFileSync(path.join(repo, "specs/orders/spec.md"), "utf8");
+  const st = Object.fromEntries(testCoverage(repo, spec, { specPath: path.join(repo, "specs/orders/spec.md"), run: true }).requirements.map((r) => [r.id, r.status]));
+  assert.equal(st["FR-001"], "passing");
+  assert.equal(st["FR-002"], "failing");
+  fs.rmSync(repo, { recursive: true, force: true });
+});
+
+test("FR-012: a test runner that can't start is reported, and its rules aren't called failing", async () => {
+  const { testCoverage } = await import("../core/tests.mjs");
+  const repo = await rulesRepo('const { a } = require("../src/a.js");\ntest("FR-001: a adds one", () => { expect(a(1)).toBe(2); });\n');
+  fs.writeFileSync(path.join(repo, "package.json"), JSON.stringify({ devDependencies: { jest: "29" } })); // declared, not installed
+  const spec = fs.readFileSync(path.join(repo, "specs/orders/spec.md"), "utf8");
+  const cov = testCoverage(repo, spec, { specPath: path.join(repo, "specs/orders/spec.md"), run: true });
+  assert.equal(cov.requirements.find((r) => r.id === "FR-001").status, "covered");
+  assert.ok(cov.errors?.length >= 1, "the runner failure is reported");
+  fs.rmSync(repo, { recursive: true, force: true });
+});
+
+test("FR-013: the module work list prints its totals and ends with the next command", async () => {
+  const { workList, workListMarkdown } = await import("../core/worklist.mjs");
+  const { repo, data } = await workRepo();
+  const md = workListMarkdown(await workList(repo, "orders", { data }));
+  assert.match(md, /^Totals: 4 rules · 1 tested · 0 broken · 0 failing · 0 weak · 3 untested$/m);
+  assert.match(md.trim().split("\n").pop(), /^Next: veridic tests --module orders --run$/);
+  assert.match(md, /^Next: \/veridic:tests orders \(2 to link, 1 to write\)$/m);
+  fs.rmSync(repo, { recursive: true, force: true });
+});
