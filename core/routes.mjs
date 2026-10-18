@@ -6,7 +6,7 @@
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { callExtent } from "./graph.mjs";
+import { callExtent, isTestFile } from "./graph.mjs";
 import { chainsOf, anonymousRouterChains, stringValue } from "./chains.mjs";
 
 // A route path from a string or template literal: `/${page}` becomes /:page.
@@ -351,12 +351,13 @@ export function routeInventory(g, { entry } = {}) {
     try {
       return execFileSync("git", ["ls-files", "--cached", "--others", "--exclude-standard"], { cwd: g.repo, encoding: "utf8", maxBuffer: 64 << 20 })
         .split("\n")
-        .filter((f) => /\.[cm]?[jt]sx?$/.test(f) && !f.includes("node_modules/"));
+        .filter((f) => /\.[cm]?[jt]sx?$/.test(f) && !f.includes("node_modules/") && !isTestFile(f));
     } catch {
       return g.files;
     }
   })();
-  const routeNodes = [...g.nodes.values()].filter((n) => n.kind === "route" && !n.name.startsWith("USE "));
+  // A route a test declares (a throwaway app in a test) isn't one of the app's routes.
+  const routeNodes = [...g.nodes.values()].filter((n) => n.kind === "route" && !n.name.startsWith("USE ") && !isTestFile(n.file));
   // CodeGraph indexes `router.get(...)` and `app.get(...)` only. Add the rest from the
   // source: other router names, and chains (`router.route("/x").get(a).post(b)`).
   const known = new Set(routeNodes.map((n) => `${n.file}|${n.name}`));

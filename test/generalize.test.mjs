@@ -342,3 +342,22 @@ test("specs: a requirement written as a heading is a requirement, and its citati
   const p = parseSpec("# Auth\n\n### FR-1: Registration creates a user\nIt MUST create one. [evidence: src/auth.ts:14-21]\n\n## Notes\nSee [evidence: src/x.ts:3]\n");
   assert.deepEqual(p.citations.map((c) => [c.fr, c.start, c.end]), [["FR-1", 14, 21], ["Notes (line 7)", 3, 3]]);
 });
+
+test("routes: a route declared inside a test file isn't one of the app's routes", async () => {
+  const { makeRepo } = await import("./fixture.mjs");
+  const { openGraph } = await import("../core/graph.mjs");
+  const { routeInventory } = await import("../core/routes.mjs");
+  const { DatabaseSync } = await import("node:sqlite");
+  const repo = makeRepo();
+  // A test that mounts a throwaway route on an app it's handed (the shape the fallback picks up).
+  const f = "src/routes/helpers.test.js";
+  fs.writeFileSync(path.join(repo, f), 'module.exports = function (app) {\n  app.get("/fake", (req, res) => res.send("x"));\n};\n');
+  const db = new DatabaseSync(path.join(repo, ".codegraph", "codegraph.db"));
+  db.prepare("insert into files values (?)").run(f);
+  db.prepare("insert into nodes values (?, ?, ?, ?, ?, ?)").run("route:fake", "route", "GET /fake", f, 2, 2);
+  db.close();
+  const inv = routeInventory(openGraph(repo), { entry: "src/app.ts" });
+  assert.ok(inv.routes.length > 0, "the app's own routes are still found");
+  assert.ok(!inv.routes.some((r) => r.file === f), "no route from a test file");
+  fs.rmSync(repo, { recursive: true, force: true });
+});

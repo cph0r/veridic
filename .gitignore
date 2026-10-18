@@ -5,3 +5,4 @@ node_modules/
 *.tgz
 # Acceptance test pinned to a private codebase; kept local.
 test/acceptance.test.mjs
+.superpowers/
