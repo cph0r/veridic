@@ -645,3 +645,16 @@ test("FR-003: a title qualified for one module never counts for another module's
   assert.equal(st("specs/payments/spec.md"), "none");
   fs.rmSync(repo, { recursive: true, force: true });
 });
+
+test("FR-011: run results are matched to test files even when the repo path goes through a symlink", async () => {
+  const { relKey } = await import("../core/tests.mjs");
+  const real = fs.mkdtempSync(path.join(os.tmpdir(), "veridic-real-"));
+  const link = real + "-link";
+  fs.symlinkSync(real, link);
+  fs.mkdirSync(path.join(real, "test"));
+  fs.writeFileSync(path.join(real, "test/a.test.js"), "");
+  // A runner reports the real path; the repo was given through the link.
+  assert.equal(relKey(link, path.join(fs.realpathSync(real), "test/a.test.js")), "test/a.test.js");
+  fs.rmSync(link);
+  fs.rmSync(real, { recursive: true, force: true });
+});

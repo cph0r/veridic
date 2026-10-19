@@ -367,6 +367,21 @@ export function testsReaching(repo, targets, { levels = 4 } = {}) {
   return out;
 }
 
+/**
+ * A runner's file path as the repo-relative path tests are keyed by. Runners report real
+ * paths (/private/var/… on macOS) while the repo may be given through a link (/var/…).
+ */
+export function relKey(repo, file) {
+  const real = (p) => {
+    try {
+      return fs.realpathSync(p);
+    } catch {
+      return p;
+    }
+  };
+  return path.relative(real(repo), real(file));
+}
+
 /** Run vitest on these files (from their package) and return results by test title. */
 export function runVitest(repo, testFiles) {
   const byPkg = new Map();
@@ -387,7 +402,7 @@ export function runVitest(repo, testFiles) {
     }
     const report = JSON.parse(fs.readFileSync(outFile, "utf8"));
     for (const tf of report.testResults ?? []) {
-      const rel = path.relative(repo, tf.name);
+      const rel = relKey(repo, tf.name);
       for (const a of tf.assertionResults ?? []) results.set(`${rel}\0${a.title}`, a.status); // passed | failed | pending | todo | skipped
       if (tf.status === "failed" && !(tf.assertionResults ?? []).length) errors.push({ file: rel, error: (tf.message ?? "suite failed to load").slice(0, 800) });
     }
@@ -440,7 +455,7 @@ export function runJest(repo, testFiles) {
     }
     const report = JSON.parse(fs.readFileSync(outFile, "utf8"));
     for (const tf of report.testResults ?? []) {
-      const rel = path.relative(repo, tf.name);
+      const rel = relKey(repo, tf.name);
       for (const a of tf.assertionResults ?? []) results.set(`${rel}\0${a.title}`, a.status);
     }
   }
