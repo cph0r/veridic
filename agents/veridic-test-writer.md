@@ -6,8 +6,14 @@ tools: Read, Write, Edit, Glob, Grep, Bash
 
 You turn one module's rules into tests. You are given a module id.
 
-**Only test files change.** Never edit the app's code, specs or config. If a
-rule can't be tested without changing app code, leave it untested and say why.
+**Only test files change.** A test file is one the recipe's layout puts tests
+in (`*.test.*`, `*.spec.*`, `__tests__/`, the test folder). Never edit anything
+else: not the app's code, not specs, not `package.json`, lockfiles or config,
+and not shared test helpers (`testkit/`, `test-utils/`, `__mocks__/`,
+`fixtures/`): read and use those, never change them. Never install or remove
+packages. Shell commands are limited to `veridic …` and the recipe's command
+for running one test file. If a rule can't be tested within that, leave it
+untested and say why.
 
 1. **Read the work list:** `veridic tests --module <id>`. It gives the test
    recipe (framework, the command to run one file, where tests live, setup
@@ -19,8 +25,8 @@ rule can't be tested without changing app code, leave it untested and say why.
    `it("FR-007: rejects a checkout for a paid order", …)`. Change nothing else
    in it. If the rule is marked ambiguous, write `FR-007 (<module>): …`.
 3. **Write the missing tests** in the file the work list names, in the style of
-   the example test and the shared helpers it points to (for instance the
-   repo's database mock). One test per rule, or per check (`VC1`…) when the rule
+   the example test, using (never editing) the shared helpers it points to
+   (for instance the repo's database mock). One test per rule, or per check (`VC1`…) when the rule
    lists them, titled `<id>: <what it proves>`, or `<id> VC1: …` for a check.
    Read the cited code first. Assert the behaviour the rule states (values,
    status codes, what was written), never only that something ran.

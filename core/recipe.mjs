@@ -35,9 +35,15 @@ function importsOf(repo, file, exists) {
   return out;
 }
 
-function frameworkOf(pkg, testSrcs) {
-  const deps = { ...(pkg.dependencies ?? {}), ...(pkg.devDependencies ?? {}) };
-  for (const f of ["vitest", "jest", "mocha"]) if (deps[f]) return f;
+function frameworkOf(pkg, testSrcs, ancestors = []) {
+  // The package's own dependencies, then those of the packages above it (a workspace root
+  // often installs the test framework), then what the tests themselves import.
+  for (const p of [pkg, ...ancestors]) {
+    const deps = { ...(p.dependencies ?? {}), ...(p.devDependencies ?? {}) };
+    for (const f of ["vitest", "jest", "mocha"]) if (deps[f]) return f;
+  }
+  if (testSrcs.some((s) => /from\s+["']vitest["']/.test(s))) return "vitest";
+  if (testSrcs.some((s) => /["']@jest\/globals["']/.test(s))) return "jest";
   if (/\bnode\s+--test\b/.test(pkg.scripts?.test ?? "") || testSrcs.some((s) => /["']node:test["']/.test(s))) return "node:test";
   return null;
 }
@@ -78,7 +84,14 @@ export function testRecipe(repo, files) {
     const mine = files.filter((f) => owner(f) === dir && !f.includes("node_modules/"));
     const tests = mine.filter((f) => TEST_FILE.test(f) && !HELPER_DIR.test(f) && /\b(?:it|test)(?:\.\w+)?\s*\(/.test(read(repo, f)));
     const srcs = tests.map((f) => read(repo, f));
-    const framework = frameworkOf(pkg, srcs);
+    const ancestors = pkgDirs.filter((d) => d !== dir && (d === "." || inDir(d, dir))).sort((a, b) => b.length - a.length).map((d) => {
+      try {
+        return JSON.parse(read(repo, d === "." ? "package.json" : `${d}/package.json`));
+      } catch {
+        return {};
+      }
+    });
+    const framework = frameworkOf(pkg, srcs, ancestors);
     const rel = (f) => (dir === "." ? f : f.slice(dir.length + 1));
     const where = { colocated: 0, __tests__: 0, "test-dir": 0 };
     for (const t of tests) where[/(^|\/)__tests__\//.test(t) ? "__tests__" : /^tests?\//.test(rel(t)) ? "test-dir" : "colocated"]++;

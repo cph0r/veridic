@@ -421,7 +421,8 @@ export function runNodeTest(repo, testFiles) {
         errors.push({ file: f, error: String(r.error?.message ?? "node --test did not run").slice(0, 800) });
         continue;
       }
-      for (const m of (r.stdout ?? "").matchAll(/^\s*(not ok|ok) \d+ - (.*?)(?:\s+#\s*(SKIP|TODO).*)?$/gm)) results.set(`${f}\0${m[2]}`, m[3] ? "skipped" : m[1] === "ok" ? "passed" : "failed");
+      // TAP escapes # and \ in names (`a \# b`): unescape so names match the test titles.
+      for (const m of (r.stdout ?? "").matchAll(/^\s*(not ok|ok) \d+ - (.*?)(?:\s+#\s*(SKIP|TODO).*)?$/gm)) results.set(`${f}\0${m[2].replace(/\\([#\\])/g, "$1")}`, m[3] ? "skipped" : m[1] === "ok" ? "passed" : "failed");
     }
   return { results, errors };
 }
@@ -510,7 +511,10 @@ export function testCoverage(repo, spec, opts = {}) {
   const testFiles = files.filter((f) => TEST_FILE.test(f) && !f.includes("node_modules/") && /\b(?:it|test)(?:\.\w+)?\s*\(/.test(safeRead(repo, f)));
 
   const specRel = opts.specPath ? path.relative(repo, path.resolve(opts.specPath)) : null;
-  const tagged = findTaggedTests(repo, files).filter((t) => cited.has(t.id) && (!t.qual || !opts.module || t.qual === opts.module) && (!t.spec || !specRel || t.spec === specRel || path.resolve(repo, t.spec) === path.resolve(opts.specPath)));
+  // A qualified title ("FR-001 (orders): …") counts only for that module: the one asked for,
+  // else the one the spec is filed under (specs/<module>/spec.md).
+  const forModule = opts.module ?? specRel?.match(/(?:^|\/)([^/]+)\/[^/]*spec\.md$/)?.[1] ?? null;
+  const tagged = findTaggedTests(repo, files).filter((t) => cited.has(t.id) && (!t.qual || !forModule || t.qual === forModule) && (!t.spec || !specRel || t.spec === specRel || path.resolve(repo, t.spec) === path.resolve(opts.specPath)));
   const checks = (t) => t.strength === "weak" || t.strength === "strong";
   const reachCache = new Map();
   const reaches = (testFile, targets) => {
@@ -518,7 +522,8 @@ export function testCoverage(repo, spec, opts = {}) {
     return [...targets].some((t) => reachCache.get(testFile).has(t));
   };
 
-  const run = opts.run ? runByFramework(repo, [...new Set(tagged.filter((t) => !t.todo).map((t) => t.file))], files) : null;
+  const named = [...new Set(tagged.filter((t) => !t.todo).map((t) => t.file))];
+  const run = opts.run ? (opts.runner ? opts.runner(repo, named) : runByFramework(repo, named, files)) : null;
   const requirements = [...cited.keys()].map((id) => {
     const tests = tagged
       .filter((t) => t.id === id)
@@ -530,7 +535,10 @@ export function testCoverage(repo, spec, opts = {}) {
     const proving = tests.filter((t) => !t.todo && t.expect_fail && t.reaches_cited_code && checks(t));
     let status = "none";
     let proven;
-    if (!real.length && proving.length) (status = "broken"), (proven = true);
+    // An expected-failure test that ran and failed means the code now does what the rule says:
+    // the marker is stale, and the rule isn't broken any more.
+    if (!real.length && proving.length && run && proving.some((t) => t.result === "failed")) status = "marker_stale";
+    else if (!real.length && proving.length) (status = "broken"), (proven = true);
     else if (!real.length && tests.some((t) => t.broken_skip && t.reaches_cited_code)) (status = "broken"), (proven = false);
     else if (real.length) status = run ? (real.some((t) => t.result === "failed") ? "failing" : real.some((t) => t.result === "passed") ? "passing" : "covered") : "covered";
     else if (tests.some((t) => !t.todo && t.reaches_cited_code)) status = "unasserted";

@@ -11,7 +11,8 @@ import { testCoverage, testsIn } from "./tests.mjs";
 import { testRecipe, exampleTest } from "./recipe.mjs";
 
 // Coverage statuses, in the work list's words.
-const STATUS = { covered: "tested", passing: "tested", broken: "broken", failing: "failing", unasserted: "weak", tagged_only: "weak", todo: "untested", none: "untested" };
+const STATUS = { covered: "tested", passing: "tested", broken: "broken", failing: "failing", marker_stale: "failing", unasserted: "weak", tagged_only: "weak", todo: "untested", none: "untested" };
+const REASON = { marker_stale: "its expected-failure test now fails: the code satisfies the rule, so make it a normal test" };
 const RULE = /^\s*(?:-\s*\*\*|#{1,6}\s+)((?:FR|SC|NFR|AC|INV)-\d+[a-z]?)\b/;
 
 const read = (repo, f) => {
@@ -61,9 +62,11 @@ export async function workList(repo, moduleId, opts = {}) {
   const covOf = (o) => otherCov.get(o.f) ?? otherCov.set(o.f, testCoverage(repo, o.text, { specPath: path.join(repo, o.f) })).get(o.f);
 
   const rules = [];
+  const errors = [];
   for (const spec of own) {
     const text = read(repo, spec) ?? "";
     const cov = testCoverage(repo, text, { specPath: path.join(repo, spec), run: !!opts.run, module: m.id });
+    errors.push(...(cov.errors ?? []));
     const byId = new Map(cov.requirements.map((r) => [r.id, r]));
     const ids = [...new Set(text.split("\n").map((l) => l.match(RULE)?.[1]).filter(Boolean))];
     for (const id of ids) {
@@ -80,7 +83,9 @@ export async function workList(repo, moduleId, opts = {}) {
       rules.push({
         id,
         spec,
-        status: STATUS[r.status] ?? "untested",
+        // Under --run, "covered" means its test never ran (the runner couldn't start): not tested.
+        status: opts.run && r.status === "covered" ? "not run" : STATUS[r.status] ?? "untested",
+        ...(REASON[r.status] ? { reason: REASON[r.status] } : {}),
         ...(r.proven === false ? { proven: false } : {}),
         text: r.text ?? "",
         checks: (r.verification ?? []).map((v) => v.id),
@@ -94,20 +99,22 @@ export async function workList(repo, moduleId, opts = {}) {
   }
   rules.sort((a, b) => a.risk - b.risk);
   const totals = { rules: rules.length };
-  for (const s of ["tested", "broken", "failing", "weak", "untested"]) totals[s] = rules.filter((r) => r.status === s).length;
+  for (const s of ["tested", "broken", "failing", "weak", "untested", "not run"]) totals[s] = rules.filter((r) => r.status === s).length;
   const used = [...new Set(rules.flatMap((r) => r.cites.map((c) => recipeOf(c.split(":")[0])?.dir)).filter((d) => d != null))];
   const recipe = Object.fromEntries(used.map((d) => { const { tests, ...rest } = recipes.get(d); return [d, rest]; }));
   const todo = totals.untested + totals.weak + totals.failing;
   const links = rules.filter((r) => r.status !== "tested" && r.candidates.length).length;
   const next = todo ? [`/veridic:tests ${m.id} (${links} to link, ${todo - links} to write)`, `veridic tests --module ${m.id} --run`] : [`veridic tests --module ${m.id} --run`];
-  return { module: { id: m.id, name: m.name }, specs: own, rules, totals, recipe, next };
+  return { module: { id: m.id, name: m.name }, specs: own, rules, totals, recipe, next, errors };
 }
 
 /** The work list as compact Markdown, ending with the next commands. */
 export function workListMarkdown(wl) {
   if (wl.error) return `${wl.error}${wl.modules ? `\nModules: ${wl.modules.join(", ")}` : ""}\n`;
   const t = wl.totals;
-  const L = [`# Rules to tests: ${wl.module.name}`, "", `Totals: ${t.rules} rules · ${t.tested} tested · ${t.broken} broken · ${t.failing} failing · ${t.weak} weak · ${t.untested} untested`, ""];
+  const L = [`# Rules to tests: ${wl.module.name}`, "", `Totals: ${t.rules} rules · ${t.tested} tested · ${t.broken} broken · ${t.failing} failing · ${t.weak} weak · ${t.untested} untested${t["not run"] ? ` · ${t["not run"]} not run` : ""}`, ""];
+  for (const e of wl.errors ?? []) L.push(`Could not run: ${e.package ?? e.file ?? (e.files ?? []).join(", ")}: ${String(e.error).trim().split("\n").pop().slice(0, 160)}`);
+  if (wl.errors?.length) L.push("");
   for (const [dir, r] of Object.entries(wl.recipe)) {
     L.push(`Recipe (${dir}): ${r.framework ?? "no test framework here: test this code from a package that has one"}${r.run ? ` · run one: \`${r.run}\`` : ""} · tests ${r.layout} · ${r.style === "http" ? "HTTP tests" : "direct calls"}${r.marker ? ` · expected failure: \`${r.marker}\`` : " · no expected-failure marker: skip with [broken] in the title"}`);
     for (const s of r.setup) L.push(`- setup: \`${s}\``);

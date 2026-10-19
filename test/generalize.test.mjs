@@ -595,3 +595,53 @@ test("FR-015: the report names a broken rule 'broken, proven'", () => {
   const req = page.match(/const REQ = \{([\s\S]*?)\};/)[1];
   assert.match(req, /broken: \["Broken, proven", "high"\]/);
 });
+
+// ---- final review fixes ----
+test("FR-012: under --run, a work-list rule whose runner couldn't start is 'not run', and the error is shown", async () => {
+  const { workList, workListMarkdown } = await import("../core/worklist.mjs");
+  const { repo, data } = await workRepo(); // declares vitest, doesn't install it
+  const wl = await workList(repo, "orders", { data, run: true });
+  assert.equal(wl.rules.find((r) => r.id === "FR-001").status, "not run");
+  assert.ok(wl.errors.length >= 1);
+  assert.match(workListMarkdown(wl), /^Could not run: /m);
+  fs.rmSync(repo, { recursive: true, force: true });
+});
+
+test("FR-002: an expected-failure test that now fails means the code satisfies the rule: not broken", async () => {
+  const { testCoverage } = await import("../core/tests.mjs");
+  const repo = await rulesRepo('import { a } from "../src/a.js";\nit.fails("FR-001: a adds one", () => { expect(a(1)).toBe(2); });\n');
+  const spec = fs.readFileSync(path.join(repo, "specs/orders/spec.md"), "utf8");
+  const runner = (_repo, files) => ({ results: new Map(files.map((f) => [`${f}\0FR-001: a adds one`, "failed"])), errors: [] });
+  const r = testCoverage(repo, spec, { specPath: path.join(repo, "specs/orders/spec.md"), run: true, runner }).requirements.find((x) => x.id === "FR-001");
+  assert.equal(r.status, "marker_stale");
+  fs.rmSync(repo, { recursive: true, force: true });
+});
+
+test("FR-004: a workspace package without its own test framework uses the one the root installs", async () => {
+  const { testRecipe } = await import("../core/recipe.mjs");
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "veridic-mono-"));
+  const files = { "package.json": JSON.stringify({ devDependencies: { vitest: "1" } }), "packages/a/package.json": JSON.stringify({ name: "a" }), "packages/a/src/x.ts": "export const x = 1;\n", "packages/a/src/x.test.ts": 'import { it, expect } from "vitest";\nimport { x } from "./x";\nit("x", () => { expect(x).toBe(1); });\n' };
+  for (const [f, t] of Object.entries(files)) fs.mkdirSync(path.join(repo, path.dirname(f)), { recursive: true }), fs.writeFileSync(path.join(repo, f), t);
+  assert.equal(testRecipe(repo, Object.keys(files)).get("packages/a").framework, "vitest");
+  fs.rmSync(repo, { recursive: true, force: true });
+});
+
+test("FR-011: a node:test title with # in it still gets its result", async () => {
+  const { testCoverage } = await import("../core/tests.mjs");
+  const repo = await rulesRepo('import { test } from "node:test";\nimport assert from "node:assert";\nimport { a } from "../src/a.js";\ntest("FR-001: a adds one # really", () => { assert.equal(a(1), 2); });\n');
+  fs.writeFileSync(path.join(repo, "package.json"), JSON.stringify({ type: "module", scripts: { test: "node --test" } }));
+  const spec = fs.readFileSync(path.join(repo, "specs/orders/spec.md"), "utf8");
+  assert.equal(testCoverage(repo, spec, { specPath: path.join(repo, "specs/orders/spec.md"), run: true }).requirements.find((r) => r.id === "FR-001").status, "passing");
+  fs.rmSync(repo, { recursive: true, force: true });
+});
+
+test("FR-003: a title qualified for one module never counts for another module's spec, in any view", async () => {
+  const { testCoverage } = await import("../core/tests.mjs");
+  const repo = await rulesRepo('import { a } from "../src/a.js";\nit("FR-001 (orders): a adds one", () => { expect(a(1)).toBe(2); });\n');
+  fs.mkdirSync(path.join(repo, "specs/payments"), { recursive: true });
+  fs.writeFileSync(path.join(repo, "specs/payments/spec.md"), "- **FR-001**: a adds one. [evidence: src/a.js:1-3]\n");
+  const st = (p) => testCoverage(repo, fs.readFileSync(path.join(repo, p), "utf8"), { specPath: path.join(repo, p) }).requirements.find((r) => r.id === "FR-001").status;
+  assert.equal(st("specs/orders/spec.md"), "covered");
+  assert.equal(st("specs/payments/spec.md"), "none");
+  fs.rmSync(repo, { recursive: true, force: true });
+});
