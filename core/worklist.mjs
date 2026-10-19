@@ -90,6 +90,7 @@ export async function workList(repo, moduleId, opts = {}) {
         text: r.text ?? "",
         checks: (r.verification ?? []).map((v) => v.id),
         cites: r.cites,
+        tests: [...new Set((r.tests ?? []).filter((t) => !t.todo).map((t) => t.at.split(":")[0]))],
         candidates,
         target: (rec && exampleTest(repo, rec, cited[0])) ?? targetFor(rec, cited[0]),
         risk: touchesRisky(r.cites) ? 0 : id.startsWith("INV") ? 1 : 2,

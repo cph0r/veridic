@@ -42,9 +42,13 @@ function frameworkOf(pkg, testSrcs, ancestors = []) {
     const deps = { ...(p.dependencies ?? {}), ...(p.devDependencies ?? {}) };
     for (const f of ["vitest", "jest", "mocha"]) if (deps[f]) return f;
   }
-  if (testSrcs.some((s) => /from\s+["']vitest["']/.test(s))) return "vitest";
-  if (testSrcs.some((s) => /["']@jest\/globals["']/.test(s))) return "jest";
-  if (/\bnode\s+--test\b/.test(pkg.scripts?.test ?? "") || testSrcs.some((s) => /["']node:test["']/.test(s))) return "node:test";
+  // The package's own test script says node:test; then real import lines (at a line's start,
+  // so a fixture string mentioning a framework doesn't count).
+  if (/\bnode\s+--test\b/.test(pkg.scripts?.test ?? "")) return "node:test";
+  const imports = (re) => testSrcs.some((s) => re.test(s));
+  if (imports(/^\s*import\b[^\n]*\bfrom\s+["']vitest["']/m)) return "vitest";
+  if (imports(/^\s*import\b[^\n]*\bfrom\s+["']@jest\/globals["']/m)) return "jest";
+  if (imports(/^\s*import\b[^\n]*\bfrom\s+["']node:test["']|^\s*(?:const|let|var)\b[^\n]*require\(\s*["']node:test["']\s*\)/m)) return "node:test";
   return null;
 }
 

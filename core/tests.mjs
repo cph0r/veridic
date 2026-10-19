@@ -463,7 +463,7 @@ export function runJest(repo, testFiles) {
 }
 
 /** Run named test files with each package's own framework (from the test recipe). */
-function runByFramework(repo, testFiles, files) {
+export function runByFramework(repo, testFiles, files) {
   const recipes = testRecipe(repo, files);
   const frameworkOf = (f) => [...recipes.values()].filter((r) => r.dir === "." || f.startsWith(r.dir + "/")).sort((a, b) => b.dir.length - a.dir.length)[0]?.framework ?? null;
   const groups = new Map();

@@ -658,3 +658,28 @@ test("FR-011: run results are matched to test files even when the repo path goes
   fs.rmSync(link);
   fs.rmSync(real, { recursive: true, force: true });
 });
+
+test("FR-016: test mutation changes a tested rule's cited code and counts the rules whose tests notice", async () => {
+  const { testMutation } = await import("../core/testmut.mjs");
+  const repo = await rulesRepo('import { test } from "node:test";\nimport assert from "node:assert";\nimport { a } from "../src/a.js";\ntest("FR-001: a adds one", () => { assert.equal(a(1), 2); });\ntest("FR-002: a returns a number", () => { assert.equal(typeof a(1), "number"); });\n');
+  fs.writeFileSync(path.join(repo, "package.json"), JSON.stringify({ type: "module", scripts: { test: "node --test" } }));
+  const before = fs.readFileSync(path.join(repo, "src/a.js"), "utf8");
+  const rules = [
+    { id: "FR-001", status: "tested", cites: ["src/a.js:1-3"], tests: ["test/a.test.js"] },
+    { id: "FR-002", status: "tested", cites: ["src/a.js:1-3"], tests: ["test/a.test.js"] },
+  ];
+  const r = testMutation(repo, rules, 2);
+  assert.deepEqual(r.rules.map((x) => [x.id, x.caught]), [["FR-001", true], ["FR-002", false]], "a(1) returns 3: FR-001's test fails; FR-002's still passes");
+  assert.equal(r.caught, 1);
+  assert.equal(fs.readFileSync(path.join(repo, "src/a.js"), "utf8"), before, "the code is restored");
+  fs.rmSync(repo, { recursive: true, force: true });
+});
+
+test("FR-004: a package that runs node --test is node:test, even if a test mentions vitest in a string", async () => {
+  const { testRecipe } = await import("../core/recipe.mjs");
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "veridic-nt-"));
+  const files = { "package.json": JSON.stringify({ scripts: { test: "node --test test/" } }), "test/a.test.mjs": 'import { test } from "node:test";\nconst fixture = \'import { it } from "vitest";\';\ntest("a", () => {});\n' };
+  for (const [f, t] of Object.entries(files)) fs.mkdirSync(path.join(repo, path.dirname(f)), { recursive: true }), fs.writeFileSync(path.join(repo, f), t);
+  assert.equal(testRecipe(repo, Object.keys(files)).get(".").framework, "node:test");
+  fs.rmSync(repo, { recursive: true, force: true });
+});
