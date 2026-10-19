@@ -96,4 +96,19 @@
 
 ## Dogfood report (filled in at the end)
 
-Where Veridic helped and where it got in the way while building this: claims that caught strays, `done` false alarms, the missing module view for a CLI repo.
+Built with Veridic on Veridic: a spec for this work (16 rules), tests named by rule, a claim before each task and `veridic done` after.
+
+**Helped**
+- `veridic init` on itself found a real bug at once: routes declared in test files counted as app routes (12 fake routes, 9 fake modules). Fixed first.
+- `veridic tests --spec … --run` on its own spec caught two bugs the unit tests didn't: a nested `node --test` printed no results, and a fixture string made the recipe think Veridic's tests were vitest (own spec 0/16 → 15/16 passing after the fix).
+- It honestly flags the weakest test (FR-015 reads the report page as text): tagged_only, not tested.
+- The end-to-end run found two more: results lost when the repo path is a symlink, and "covered" counted as tested under --run.
+
+**Got in the way / gaps**
+- On a repo with no routes (a CLI or library), `done`'s test check passes vacuously; only the claim guards the change.
+- `done` missed an unclaimed edit to `bin/veridic`: files outside the code index (no extension) go unchecked.
+- `claims` matches facts literally: behaviour written as a regex (`fails|failing`, `__tests__\/`) reads as unsupported (support 0.33–0.5 on this spec).
+- `stale --fix` repaired 2 of 5 shifted citations after heavy edits; the rest were set by hand.
+- Modules come from Express routes, so the module view and `tests --module` don't apply to Veridic itself.
+
+**Result** (veridic-bench TESTS-E2E.md, realworld, 40 rules): `/veridic:tests` 39/40 rules counted (2 broken, proven: real bugs), 6/8 sampled rules' tests caught a code change; a plain prompt 14/40, 3/6. Zero non-test edits in both. But 3.8× the cost ($2.67 vs $0.70) and 2.5× the time.
