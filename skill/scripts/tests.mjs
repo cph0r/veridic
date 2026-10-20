@@ -4,17 +4,25 @@
 // --run executes the linked tests (vitest, jest, node:test) and reports passing/failing.
 // --module <id>: the work list for turning that module's rules into tests (Markdown;
 // --json for the data; --mutate N also checks N sampled rules' tests catch a change).
+// --module <id> --link ID=file:line[,line] …: name those existing tests for those rules, in one call.
 
 import fs from "node:fs";
 import { testCoverage, traceabilityTable, auditTests } from "../../core/tests.mjs";
 import { workList, workListMarkdown } from "../../core/worklist.mjs";
 import { testMutation } from "../../core/testmut.mjs";
+import { linkForModule, linkMarkdown } from "../../core/link.mjs";
 import { parseArgs, emit, fail, run, writeAll } from "./_cli.mjs";
 
-const usage = "tests.mjs --repo <path> (--module <id> [--run] [--json] [--mutate N] | --spec <spec.md> [--run] [--table] [--base <dir>] | --audit)";
+const usage = "tests.mjs --repo <path> (--module <id> [--run] [--json] [--mutate N] | --module <id> --link ID=file:line[,line] … | --spec <spec.md> [--run] [--table] [--base <dir>] | --audit)";
 
 run(async () => {
-  const a = parseArgs(process.argv.slice(2), { flags: ["repo", "spec", "base", "module", "mutate"], bools: ["run", "table", "audit", "json"] });
+  const a = parseArgs(process.argv.slice(2), { flags: ["repo", "spec", "base", "module", "mutate"], bools: ["run", "table", "audit", "json", "link"] });
+  if (a.link && a.module && a.repo) {
+    const r = await linkForModule(a.repo, a.module, a._);
+    if (a.json) emit({ repo: a.repo, ...r }, r.skipped.length ? 1 : 0);
+    writeAll(linkMarkdown(r));
+    process.exit(r.skipped.length ? 1 : 0);
+  }
   if (a.module && a.repo) {
     const wl = await workList(a.repo, a.module, { run: !!a.run });
     // --mutate N: change the cited code of N tested rules; count those whose tests notice.

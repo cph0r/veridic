@@ -80,9 +80,11 @@ are for maintenance (`references/maintenance.md`).
 
 A rule counts as tested only when a passing test named with its id reaches the
 code it cites. For a module, `veridic tests --module <id>` lists every rule's
-status, the tests that may already check it (link them by adding the id to the
-title), the test file to use, and the repo's test recipe (framework, run
-command, helpers). `/veridic:tests <id>` does the whole job with the
+status, the tests that may already check it, the test file to use, the cited
+code of rules still to do, and the repo's test recipe (framework, run command,
+helpers, an example test). Link the tests that really check a rule in one call:
+`veridic tests --module <id> --link FR-002=src/a.test.ts:12,40 INV-1=…` puts
+the id in each title, nothing else. `/veridic:tests <id>` does the whole job with the
 `veridic-test-writer` agent. A rule the code breaks today gets an
 expected-failure test (`it.fails`, `test.failing`): it shows as broken, proven.
 

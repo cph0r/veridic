@@ -102,11 +102,24 @@ export async function workList(repo, moduleId, opts = {}) {
   const totals = { rules: rules.length };
   for (const s of ["tested", "broken", "failing", "weak", "untested", "not run"]) totals[s] = rules.filter((r) => r.status === s).length;
   const used = [...new Set(rules.flatMap((r) => r.cites.map((c) => recipeOf(c.split(":")[0])?.dir)).filter((d) => d != null))];
-  const recipe = Object.fromEntries(used.map((d) => { const { tests, ...rest } = recipes.get(d); return [d, rest]; }));
+  // The test to copy per package: the first rule's test file there that already exists.
+  const exampleIn = (d) => rules.find((r) => r.target && recipeOf(r.target)?.dir === d && r.cites.length && files.includes(r.target))?.target ?? null;
+  const recipe = Object.fromEntries(used.map((d) => { const { tests, ...rest } = recipes.get(d); return [d, { ...rest, example: exampleIn(d) }]; }));
+  // The cited code of rules still to do, so the agent reads it here (at most 60 lines a cite, 400 in all).
+  const code = [];
+  let budget = 400;
+  for (const c of new Set(rules.filter((r) => r.status !== "tested" && r.status !== "broken").flatMap((r) => r.cites))) {
+    const [, f, a, b] = c.match(/^(.*):(\d+)(?:-(\d+))?$/) ?? [];
+    const src = f && read(repo, f);
+    if (!src || budget <= 0) continue;
+    const lines = src.split("\n").slice(Number(a) - 1, Math.min(Number(b ?? a), Number(a) + 59, Number(a) - 1 + budget));
+    budget -= lines.length;
+    code.push({ cite: c, lines: lines.map((l, i) => `${String(Number(a) + i).padEnd(4)} ${l}`) });
+  }
   const todo = totals.untested + totals.weak + totals.failing;
   const links = rules.filter((r) => r.status !== "tested" && r.candidates.length).length;
-  const next = todo ? [`/veridic:tests ${m.id} (${links} to link, ${todo - links} to write)`, `veridic tests --module ${m.id} --run`] : [`veridic tests --module ${m.id} --run`];
-  return { module: { id: m.id, name: m.name }, specs: own, rules, totals, recipe, next, errors };
+  const next = todo ? [`/veridic:tests ${m.id} (${links} to link, ${todo - links} to write)`, ...(links ? [`veridic tests --module ${m.id} --link ID=file:line[,line] …`] : []), `veridic tests --module ${m.id} --run`] : [`veridic tests --module ${m.id} --run`];
+  return { module: { id: m.id, name: m.name }, specs: own, rules, totals, recipe, code, next, errors };
 }
 
 /** The work list as compact Markdown, ending with the next commands. */
@@ -117,12 +130,13 @@ export function workListMarkdown(wl) {
   for (const e of wl.errors ?? []) L.push(`Could not run: ${e.package ?? e.file ?? (e.files ?? []).join(", ")}: ${String(e.error).trim().split("\n").pop().slice(0, 160)}`);
   if (wl.errors?.length) L.push("");
   for (const [dir, r] of Object.entries(wl.recipe)) {
-    L.push(`Recipe (${dir}): ${r.framework ?? "no test framework here: test this code from a package that has one"}${r.run ? ` · run one: \`${r.run}\`` : ""} · tests ${r.layout} · ${r.style === "http" ? "HTTP tests" : "direct calls"}${r.marker ? ` · expected failure: \`${r.marker}\`` : " · no expected-failure marker: skip with [broken] in the title"}`);
+    L.push(`Recipe (${dir}): ${r.framework ?? "no test framework here: test this code from a package that has one"}${r.run ? ` · run one: \`${r.run}\`` : ""} · tests ${r.layout} · ${r.style === "http" ? "HTTP tests" : "direct calls"}${r.marker ? ` · expected failure: \`${r.marker}\`` : " · no expected-failure marker: skip with [broken] in the title"}${r.example ? ` · example test: \`${r.example}\`` : ""}`);
     for (const s of r.setup) L.push(`- setup: \`${s}\``);
     for (const h of r.helpers) L.push(`- helper: \`${h.file}\`${h.note ? `: ${h.note.split("\n")[0]}` : ""}`);
   }
   L.push("", "| rule | status | needs | link candidates | test file |", "|---|---|---|---|---|");
-  for (const r of wl.rules) L.push(`| ${r.id}${r.ambiguous ? ` (title: \`${r.id} (${wl.module.id}): …\`)` : ""} | ${r.status}${r.proven === false ? " (not proven)" : ""}${r.reason ? `: ${r.reason}` : ""} | ${r.text.slice(0, 120).replace(/\|/g, "\\|")}${r.checks.length ? ` (${r.checks.join(", ")})` : ""}${r.cites.length ? `<br>${r.cites.map((c) => `\`${c}\``).join(" ")}` : ""} | ${r.candidates.slice(0, 3).map((c) => `\`${c.at}\` ${c.title.slice(0, 60).replace(/\|/g, "\\|")}`).join("<br>") || "—"} | ${r.target ? `\`${r.target}\`` : "—"} |`);
+  for (const r of wl.rules) L.push(`| ${r.id}${r.ambiguous ? ` (title: \`${r.id} (${wl.module.id}): …\`)` : ""} | ${r.status}${r.proven === false ? " (not proven)" : ""}${r.reason ? `: ${r.reason}` : ""} | ${r.text.replace(/\s*\n\s*/g, " ").replace(/\|/g, "\\|")}${r.checks.length ? ` (${r.checks.join(", ")})` : ""}${r.cites.length ? `<br>${r.cites.map((c) => `\`${c}\``).join(" ")}` : ""} | ${r.candidates.slice(0, 6).map((c) => `\`${c.at}\` ${c.title.slice(0, 80).replace(/\|/g, "\\|")}`).join("<br>") || "—"} | ${r.target ? `\`${r.target}\`` : "—"} |`);
+  if (wl.code?.length) L.push("", "## Cited code", "", ...wl.code.flatMap((c) => [`\`${c.cite}\``, "```", ...c.lines, "```"]));
   L.push("", ...wl.next.map((n) => `Next: ${n}`));
   return L.join("\n") + "\n";
 }

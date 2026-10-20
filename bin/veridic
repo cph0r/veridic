@@ -33,7 +33,7 @@ const COMMANDS = {
   done: ["skill/scripts/done.mjs", "is it done: the change stayed in the claimed requirements' seam, and each criterion has an asserting (passing, with --run) test (--card). Without --spec: claim routes or files"],
   why: ["skill/scripts/why.mjs", "the commits behind a requirement's cited lines, as decision evidence"],
   mutate: ["skill/scripts/mutate.mjs", "would the guard notice the code behind a requirement changing"],
-  tests: ["skill/scripts/tests.mjs", "which requirements have a named test that reaches their code (--run: pass/fail); --module <id>: the work list for turning a module's rules into tests"],
+  tests: ["skill/scripts/tests.mjs", "which requirements have a named test that reaches their code (--run: pass/fail); --module <id>: the work list for turning a module's rules into tests; --link ID=file:line …: name existing tests for rules"],
   scaffold: ["skill/scripts/scaffold.mjs", "test skeleton: one placeholder per requirement, named with its id"],
   "install-hook": ["skill/hooks/install.mjs", "install the git pre-commit hook in a repo"],
 };

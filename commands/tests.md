@@ -20,7 +20,9 @@ Arguments: `$ARGUMENTS`.
    the arguments include `--yes` (an unattended run).
 3. **Write.** For each module, run the `veridic-test-writer` agent with the
    module id, in the foreground, at most four at a time, and wait for every one
-   to finish.
+   to finish. A module with only links to make (nothing to write) needs no
+   agent: read the candidates yourself and apply them with one
+   `veridic tests --module <id> --link ID=file:line …`.
 4. **Report.** Run `veridic tests --module <id> --run` for each module and show
    the totals line, before and after. List any rule now `broken`: the code
    breaks it today, proven by an expected-failure test. Those are bugs to fix,

@@ -705,3 +705,90 @@ test("the app's title and about come from the README's words, not its markdown (
   assert.equal(app.title, "Node/Express/Prisma Example App");
   assert.match(app.about, /^Example Node \(Express \+ Prisma\) codebase containing/);
 });
+
+// --link: the agent decides which existing tests check a rule; Veridic edits the titles in one call.
+function linkRepo(files) {
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "veridic-link-"));
+  for (const [f, t] of Object.entries(files)) fs.mkdirSync(path.join(repo, path.dirname(f)), { recursive: true }), fs.writeFileSync(path.join(repo, f), t);
+  return repo;
+}
+const AUTH_TEST = [
+  'import { register } from "./auth";',
+  "describe('register', () => {",
+  "  test('should throw when the username is empty', () => { expect(() => register({})).toThrow(); });",
+  '  it("FR-002: rejects an empty email", () => { expect(() => register({ username: "a" })).toThrow(); });',
+  "  it(`hashes the password`, async () => { expect(await register({ username: 'a', email: 'b' })).not.toBe('x'); });",
+  "});",
+  "",
+].join("\n");
+
+test("FR-017: linkTests puts the rule id at the front of the title on the given line, and nothing else changes", async () => {
+  const { linkTests } = await import("../core/link.mjs");
+  const repo = linkRepo({ "src/auth.test.ts": AUTH_TEST });
+  const r = linkTests(repo, [{ id: "FR-001", at: "src/auth.test.ts:3" }, { id: "FR-009", at: "src/auth.test.ts:5" }]);
+  const after = fs.readFileSync(path.join(repo, "src/auth.test.ts"), "utf8").split("\n");
+  fs.rmSync(repo, { recursive: true, force: true });
+  assert.deepEqual(r.linked.map((l) => l.title), ["FR-001: should throw when the username is empty", "FR-009: hashes the password"]);
+  assert.equal(after[2], "  test('FR-001: should throw when the username is empty', () => { expect(() => register({})).toThrow(); });");
+  assert.equal(after[4], "  it(`FR-009: hashes the password`, async () => { expect(await register({ username: 'a', email: 'b' })).not.toBe('x'); });");
+  assert.deepEqual(after.filter((_, i) => i !== 2 && i !== 4), AUTH_TEST.split("\n").filter((_, i) => i !== 2 && i !== 4));
+});
+
+test("FR-017: linkTests adds a second id to an already-named test, qualifies ambiguous ids, and both are found as tagged", async () => {
+  const { linkTests } = await import("../core/link.mjs");
+  const { findTaggedTests } = await import("../core/tests.mjs");
+  const repo = linkRepo({ "src/auth.test.ts": AUTH_TEST });
+  linkTests(repo, [{ id: "FR-006", at: "src/auth.test.ts:4" }, { id: "FR-003", at: "src/auth.test.ts:3" }], { module: "auth", qualify: new Set(["FR-003"]) });
+  const lines = fs.readFileSync(path.join(repo, "src/auth.test.ts"), "utf8").split("\n");
+  const tagged = findTaggedTests(repo, ["src/auth.test.ts"]);
+  fs.rmSync(repo, { recursive: true, force: true });
+  assert.match(lines[3], /it\("FR-002, FR-006: rejects an empty email"/);
+  assert.match(lines[2], /test\('FR-003 \(auth\): should throw when the username is empty'/);
+  assert.deepEqual(tagged.map((t) => [t.id, t.line, t.qual]).sort(), [["FR-002", 4, null], ["FR-003", 3, "auth"], ["FR-006", 4, null]]);
+});
+
+test("FR-017: linkTests refuses what isn't a test title in a test file, and leaves those files alone", async () => {
+  const { linkTests } = await import("../core/link.mjs");
+  const src = "export const x = 1;\n";
+  const repo = linkRepo({ "src/auth.test.ts": AUTH_TEST, "src/auth.ts": src });
+  const r = linkTests(repo, [
+    { id: "FR-001", at: "src/auth.ts:1" },
+    { id: "FR-001", at: "src/auth.test.ts:2" },
+    { id: "FR-002", at: "src/auth.test.ts:4" },
+    { id: "FR-001", at: "src/missing.test.ts:1" },
+  ]);
+  const after = fs.readFileSync(path.join(repo, "src/auth.test.ts"), "utf8");
+  const appAfter = fs.readFileSync(path.join(repo, "src/auth.ts"), "utf8");
+  fs.rmSync(repo, { recursive: true, force: true });
+  assert.equal(r.linked.length, 0);
+  assert.deepEqual(r.skipped.map((s) => s.reason), ["not a test file", "describe block, not a test", "already named FR-002", "no such file"]);
+  assert.equal(after, AUTH_TEST);
+  assert.equal(appAfter, src);
+});
+
+test("FR-017: linkForModule parses ID=file:line[,line] pairs and qualifies ids the module shares with another spec", async () => {
+  const { linkForModule, linkMarkdown } = await import("../core/link.mjs");
+  const { repo, data } = await workRepo();
+  const r = await linkForModule(repo, "orders", ["FR-002=src/pay.test.js:2", "INV-1=src/pay.test.js:2", "FR-001"], { data });
+  const line = fs.readFileSync(path.join(repo, "src/pay.test.js"), "utf8").split("\n")[1];
+  fs.rmSync(repo, { recursive: true, force: true });
+  assert.equal(line, 'it("FR-002 (orders), INV-1: pays an order", () => { expect(pay({ id: 1 }).paid).toBe(true); });');
+  assert.deepEqual(r.skipped.map((x) => [x.id, x.reason]), [["FR-001", "expected ID=file:line"]]);
+  assert.match(linkMarkdown(r), /^Linked 2 tests\b/);
+});
+
+test("FR-018: the work list carries what the agent would otherwise open: full rule text, the cited code of rules still to do, an example test, and the link command", async () => {
+  const { workList, workListMarkdown } = await import("../core/worklist.mjs");
+  const { repo, data } = await workRepo();
+  const long = "Paying marks the order paid and records who paid, when, with which card, and the amount charged in the order's own currency, never converted.";
+  const spec = path.join(repo, "specs/orders/spec.md");
+  fs.writeFileSync(spec, fs.readFileSync(spec, "utf8").replace("Paying marks the order paid.", long));
+  const md = workListMarkdown(await workList(repo, "orders", { data }));
+  fs.rmSync(repo, { recursive: true, force: true });
+  assert.ok(md.includes(long.replace(/\|/g, "\\|")), "the rule's whole text");
+  const code = md.slice(md.indexOf("## Cited code"));
+  assert.match(code, /`src\/pay\.js:1-3`\n```\n1 +export function pay\(order\) \{\n2 +  return \{ paid: true, id: order\.id \};\n3 +\}\n```/);
+  assert.ok(!code.includes("src/list.js"), "a tested rule's code is left out");
+  assert.match(md, /example test: `src\/pay\.test\.js`/);
+  assert.match(md, /^Next: veridic tests --module orders --link ID=file:line\[,line\] …$/m);
+});
