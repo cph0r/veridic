@@ -695,3 +695,13 @@ test("a *spec.md file without any rule id (a command or a doc) isn't a spec", as
   assert.deepEqual(defaultSpecs(repo).map((f) => path.relative(repo, f)).sort(), ["docs/heading-spec.md", "specs/a/spec.md"]);
   fs.rmSync(repo, { recursive: true, force: true });
 });
+
+test("the app's title and about come from the README's words, not its markdown (an image heading, a blockquoted heading)", async () => {
+  const { appOverview } = await import("../core/report.mjs");
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "veridic-about-"));
+  fs.writeFileSync(path.join(repo, "README.md"), "# ![Node/Express/Prisma Example App](project-logo.png)\n\n> ### Example Node (Express + Prisma) codebase containing real world examples (CRUD, auth)\n\n## Getting Started\n\nRun the following command to install dependencies, then start the server.\n");
+  const app = appOverview(repo);
+  fs.rmSync(repo, { recursive: true, force: true });
+  assert.equal(app.title, "Node/Express/Prisma Example App");
+  assert.match(app.about, /^Example Node \(Express \+ Prisma\) codebase containing/);
+});

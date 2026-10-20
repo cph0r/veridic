@@ -121,7 +121,7 @@ export function specDoc(text) {
 
 // What the app is, in its authors' words: the README's (or a similar file's)
 // title and first paragraph, plus the list that follows it.
-function appOverview(repo) {
+export function appOverview(repo) {
   for (const f of ["README.md", "readme.md", "Readme.md", "replit.md", "AGENTS.md", "CLAUDE.md", "docs/README.md"]) {
     let text;
     try {
@@ -129,8 +129,10 @@ function appOverview(repo) {
     } catch {
       continue;
     }
-    const title = text.match(/^#\s+(.+)$/m)?.[1].replace(/[*_`]/g, "").trim() ?? null;
-    const blocks = text.replace(/```[\s\S]*?```/g, "").split(/\n\s*\n/).map((b) => b.split("\n").filter((l) => !/^\s*#/.test(l) && !/^\s*(!\[|<|\[!\[)/.test(l)).join("\n").trim()).filter(Boolean);
+    // Markdown read as words: an image or a link becomes its text, HTML tags go.
+    const plain = (t) => t.replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1").replace(/<[^>]+>/g, "").replace(/[*_`]/g, "").trim();
+    const title = plain(text.match(/^#\s+(.+)$/m)?.[1] ?? "") || null;
+    const blocks = text.replace(/```[\s\S]*?```/g, "").split(/\n\s*\n/).map((b) => b.split("\n").map((l) => l.replace(/^\s*>\s*(#+\s*)?/, "")).filter((l) => !/^\s*#/.test(l) && !/^\s*(!\[|<|\[!\[)/.test(l)).join("\n").trim()).filter(Boolean);
     const i = blocks.findIndex((b) => !/^\s*([-*]|\d+\.)\s/.test(b) && b.replace(/\s+/g, " ").length > 40);
     if (i < 0) continue;
     const about = [blocks[i], ...(/^\s*([-*]|\d+\.)\s/.test(blocks[i + 1] ?? "") ? [blocks[i + 1]] : [])].join("\n\n");
