@@ -68,7 +68,7 @@ Or see everything at once:
 veridic report      # or: veridic ui, or /veridic:report in Claude Code
 ```
 
-One page opens in your browser: the app's health at a glance (safety, tests, written rules, modularity, copied code, the change in progress), what needs attention, and each module as a tile. A module's page shows what it does, the tables it owns, the screens that call it, its rules, tests and neighbours. It also finds UI calls to endpoints that don't exist and endpoints nothing calls. Every `file:line` opens in your editor. It only shows: it never changes anything. It's one local file, `.veridic/report.html` (git-ignored): no server, nothing uploaded.
+One page opens in your browser, written for someone who knows the requirements rather than the code. It starts with a verdict in a sentence ("11 problems to fix, and most of it isn't tested yet") and three gauges: requirements proven by tests, actions a test calls, and safety problems. Then the app as a graph of its parts: each circle's ring shows its requirements proven or broken, and the lines show which part uses, reads or changes another's data. Tap a part to see what it should do, what's broken, who can do what, and how it connects. Below, what to fix first and what can wait. It only shows: it never changes anything. It's one local file, `.veridic/report.html` (git-ignored): no server, no network, nothing uploaded.
 
 ## How it works
 

@@ -444,7 +444,6 @@ export function renderReport(data) {
 </head>
 <body>
 <div id="app"></div>
-<div class="toast" id="toast" role="status" aria-live="polite"></div>
 <script type="application/json" id="data">${json}</script>
 <script>${asset("report-page.js")}</script>
 </body>

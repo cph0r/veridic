@@ -590,10 +590,14 @@ test("FR-013: the module work list prints its totals and ends with the next comm
   fs.rmSync(repo, { recursive: true, force: true });
 });
 
-test("FR-015: the report names a broken rule 'broken, proven'", () => {
-  const page = fs.readFileSync(new URL("../core/report-page.js", import.meta.url), "utf8");
-  const req = page.match(/const REQ = \{([\s\S]*?)\};/)[1];
-  assert.match(req, /broken: \["Broken, proven", "high"\]/);
+test("FR-015: the report names a broken rule 'broken, proven'", async () => {
+  const vm = await import("node:vm");
+  const ctx = {};
+  vm.runInNewContext(fs.readFileSync(new URL("../core/report-page.js", import.meta.url), "utf8"), ctx);
+  const m = ctx.veridicModel({ name: "x", routes: [], modules: [], findings: [], specs: [{ path: "specs/a/spec.md", requirements: [{ id: "FR-001", requirement: true, status: "broken", text: "A must hold." }] }] });
+  assert.equal(m.statusOf({ status: "broken" }).label, "Broken, proven");
+  assert.equal(m.statusOf({ status: "broken" }).tone, "bad");
+  assert.match(m.fix[0].w, /^Broken, proven/);
 });
 
 // ---- final review fixes ----
