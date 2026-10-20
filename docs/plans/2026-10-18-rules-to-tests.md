@@ -112,3 +112,9 @@ Built with Veridic on Veridic: a spec for this work (16 rules), tests named by r
 - Modules come from Express routes, so the module view and `tests --module` don't apply to Veridic itself.
 
 **Result** (veridic-bench TESTS-E2E.md, realworld, 40 rules): `/veridic:tests` 39/40 rules counted (2 broken, proven: real bugs), 6/8 sampled rules' tests caught a code change; a plain prompt 14/40, 3/6. Zero non-test edits in both. But 3.8× the cost ($2.67 vs $0.70) and 2.5× the time.
+
+## Cutting the cost (2026-10-20)
+
+The first e2e run (B: $2.67, 109 min) spent most of its turns linking one test title per Edit, and lost about 45 minutes to stalls in both agents at once that didn't reproduce (the same commands take 4-8 s). Changes: `veridic tests --module <id> --link ID=file:line …` (FR-017), a work list with whole rule text, the cited code of rules still to do and an example test (FR-018), a test writer that batches edits and runs `--run` once, and a bench whose arms run without the user's plugins, hooks and MCP servers.
+
+Rerun on realworld (fresh specs, 38 rules): B counted 38/38 (3 broken, proven) at $0.62 in 2.5 min; A counted 33/38 at $0.69 in 3.4 min; mutation 6/10 vs 7/10; no non-test file changed in either. The auth agent went from 102 messages and 4.4M cache-read tokens to 35 and 0.8M. One app, one run each: the mutation gap is one sample, and the 109-to-2.5 minute drop is mostly the stalls and the user's global setup gone, which A gained from too (44 to 3.4 min).
