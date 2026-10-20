@@ -121,12 +121,24 @@ export function specCoverage(repo, specs) {
 }
 
 /** Specs to measure: the given paths, or every tracked `*spec.md` in the repo. */
+// A spec holds at least one rule id: **FR-001**, a "- FR-001:" item, a "### FR-1:" heading or
+// a table row. A *spec.md without one (a command's instructions, a doc) isn't a spec.
+const RULE_ID = /\*\*(?:FR|SC|NFR|AC|INV)-?\d+[a-z]?\*\*|^\s*(?:-|\d+\.|#{1,6}|\|)\s*(?:FR|SC|NFR|AC|INV)-?\d+[a-z]?\s*[:.|\-–—]/m;
+export const isSpecFile = (file) => {
+  try {
+    return RULE_ID.test(fs.readFileSync(file, "utf8"));
+  } catch {
+    return false;
+  }
+};
+
 export function defaultSpecs(repo) {
   try {
     return execFileSync("git", ["ls-files", "--", "*spec.md"], { cwd: repo, encoding: "utf8" })
       .split("\n")
       .filter(Boolean)
-      .map((f) => path.join(repo, f));
+      .map((f) => path.join(repo, f))
+      .filter(isSpecFile);
   } catch {
     return [];
   }

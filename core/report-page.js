@@ -150,8 +150,8 @@
   const NAV = [
     { k: "modules", t: "Home", i: "home" },
   ];
-  const fromHash = () => { const h = location.hash.slice(1).split("/"); return h[0] === "module" && h[1] ? { view: "module", mod: decodeURIComponent(h[1]), jump: h[2] } : NAV.some((n) => n.k === h[0]) ? { view: h[0] } : { view: "modules" }; };
-  const state = { ...fromHash(), sub: "attention", sev: ["high", "medium"], area: "all", rf: "all", spec: -1, sf: "all", aboutOpen: false, openGroup: null, pages: {}, open: new Set() };
+  const fromHash = () => { const h = location.hash.slice(1).split("/"); return h[0] === "module" && h[1] ? { view: "module", mod: decodeURIComponent(h[1]), jump: h[2] } : h[0] === "spec" && h[1] ? { view: "spec", spec: +h[1] } : NAV.some((n) => n.k === h[0]) ? { view: h[0] } : { view: "modules" }; };
+  const state = { sub: "attention", sev: ["high", "medium"], area: "all", rf: "all", spec: -1, sf: "all", aboutOpen: false, openGroup: null, pages: {}, open: new Set(), ...fromHash() };
 
   // The sidebar's dot: only a module's own problems. Red: a serious issue or a call to an endpoint
   // that doesn't exist. Amber: issues to review, or it shares a table or a loop with another module.
@@ -187,7 +187,7 @@
     // Out-of-date rules count toward the module that owns the spec, not every module it cites.
     const stale = (m ? SPECS.filter((x) => specOwner(x) === m) : SPECS).flatMap(specReqs).filter((r) => r.stale).length;
     const safe = pct(routes - new Set(fs.filter((f) => f.severity !== "low" && f.area === "API").map((f) => f.where)).size, routes);
-    return [
+    const all = [
       { k: "Safety", i: "shield", s: hi ? "risk" : me ? "care" : "good", p: safe, v: hi ? hi + " serious" : me ? me + " to review" : "of routes safe" },
       { k: "Tests", i: "flask", s: tp >= 70 ? "good" : tp >= 30 ? "care" : "risk", p: tp, v: "routes tested" },
       // The ring, its colour and its word all follow coverage; out-of-date rules are noted under it.
@@ -197,6 +197,16 @@
       ...(m && ST.modularity ? (() => { const ps = MODU.problems.filter((p) => p.kind !== "hub" && p.modules.includes(m.id)), ds = dupsOf(m).filter((b) => b.lines >= 10); const n = ps.length + ds.length; return [{ k: "Structure", i: "blocks", s: ps.some((p) => p.kind === "cycle") ? "risk" : n ? "care" : "good", p: n ? Math.max(10, 100 - n * 20) : 100, big: n ? String(n) : "✓", v: n ? (n === 1 ? "problem" : "problems") : "separate" }]; })() : []),
       // The change in progress: only while there is one. Without a claim it can't be checked.
       ...(!m && D.change && D.change.files.length ? [(() => { const c = D.change, claimed = c.claims.length; return { k: "Change", i: "branch", s: !c.done ? "risk" : claimed ? "good" : "care", p: c.done ? 100 : 0, big: !c.done ? String(c.problems.length) : claimed ? "✓" : String(c.files.length), v: !c.done ? "to finish" : claimed ? "in scope, tested" : plural(c.files.length, "file") + " changed, not claimed" }; })()] : []),
+    ];
+    // A repo with no routes (a CLI, a library): route gauges say nothing. Show its rules and tests instead.
+    if (m || ROUTES.length) return all;
+    const rs = SPECS.flatMap(specReqs), nt = rs.filter(tested).length, ns = rs.filter((r) => r.stale).length;
+    const rp = pct(nt, rs.length), cp = pct(rs.length - ns, rs.length), chk = T && T.tests ? pct(T.strong + T.weak, T.tests) : null;
+    return [
+      rs.length ? { k: "Rules tested", i: "flask", s: rp >= 80 ? "good" : rp >= 30 ? "care" : "risk", p: rp, v: nt + " of " + rs.length + " rules" } : { k: "Rules", i: "doc", s: "risk", p: 0, v: "none written" },
+      ...(rs.length ? [{ k: "Rules current", i: "doc", s: ns ? "care" : "good", p: cp, v: ns ? ns + " out of date" : "match the code" }] : []),
+      ...(chk != null ? [{ k: "Tests", i: "flask", s: chk >= 90 ? "good" : chk >= 60 ? "care" : "risk", p: chk, v: "check real values" }] : []),
+      ...all.filter((i) => i.k === "Duplication" || i.k === "Change"),
     ];
   }
   const indRow = (list) => '<div class="inds">' + list.map((i) => { const c = IND[i.s][0]; return "<" + (i.nav ? 'button data-nav="' + i.nav + '"' : "div") + ' class="ind">' + ring(i.p, c, 56, i.big != null ? esc(i.big) : i.p + "%") + '<div><div class="ik">' + ic(i.i, "sm") + i.k + '</div><div class="iv t-' + c + '">' + IND[i.s][1] + '</div><div class="id2">' + esc(i.v) + "</div></div></" + (i.nav ? "button" : "div") + ">"; }).join("") + "</div>";
@@ -299,7 +309,7 @@
       if (s.d) { const id = "d" + seq++; return '<div class="stepwrap"><div class="stepc click" data-d="' + id + '">' + body + ic("chev", "sm faint chev") + '</div><div class="sdetail" id="' + id + '" hidden>' + s.d + "</div></div>"; }
       return "<" + (s.go ? "button" : "div") + ' class="stepc' + (s.go ? " go" : "") + '"' + (s.go || "") + ">" + body + (s.go ? ic("chev", "sm faint") : "") + "</" + (s.go ? "button" : "div") + ">";
     }).join("") + "</div>"
-    : empty("Nothing needs attention. Every route is checked, tested and covered by rules.");
+    : empty(ROUTES.length ? "Nothing needs attention. Every route is checked, tested and covered by rules." : "Nothing needs attention.");
 
   // ---- Home: the repo in a glance, and what to do next ----
   function vModules() {
@@ -309,9 +319,12 @@
     h += indRow(indicators(null));
     // Everything app-wide, one tab at a time; what needs attention first.
     const items = homeAttention();
-    const subs = [["attention", "Needs attention", items.length || null], ["modules", "Modules", MODS.length || null], ["findings", "Findings", F.filter((f) => f.severity !== "low").length], ["routes", "Routes", ROUTES.length], ["tests", "Tests", T ? T.tests : null], ["structure", "Structure", null]];
+    // Without routes, the specs come first: they are what the repo's rules live in.
+    if (!ROUTES.length && state.sub === "attention") state.sub = "specs";
+    const subs = !ROUTES.length ? [["specs", "Specs", SPECS.length || null], ["findings", "Findings", F.filter((f) => f.severity !== "low").length], ["tests", "Tests", T ? T.tests : null], ["structure", "Structure", null]] : [["attention", "Needs attention", items.length || null], ["modules", "Modules", MODS.length || null], ["findings", "Findings", F.filter((f) => f.severity !== "low").length], ["routes", "Routes", ROUTES.length], ["tests", "Tests", T ? T.tests : null], ["structure", "Structure", null]];
     h += '<div class="tabs" id="sec-tabs">' + subs.map(([k, t, n]) => '<button class="tab" data-f="sub" data-v="' + k + '" aria-pressed="' + (state.sub === k) + '">' + t + (n ? '<span class="n">' + n.toLocaleString() + "</span>" : "") + "</button>").join("") + "</div>";
-    const tab = { attention: () => attList(items, state.open.has("steps") ? 99 : 6) + (items.length > 6 && !state.open.has("steps") ? '<button class="more" data-open="steps">Show all ' + items.length + "</button>" : "") + (D.errors && D.errors.length ? section("errors", "Couldn't check") + '<p class="muted small">' + D.errors.map(esc).join("<br>") + "</p>" : ""), modules: oModules, findings: oFindings, routes: oRoutes, tests: oTests, structure: oStructure };
+    const specList = () => (SPECS.length ? '<div class="list">' + SPECS.map((sp, i) => { const rs = specReqs(sp), nt = rs.filter(tested).length, ns = rs.filter((r) => r.stale).length; return liBtn(two(esc(specTitle(sp)), '<span class="mono">' + esc(sp.path) + "</span>"), '<span class="tag">' + nt + "/" + rs.length + " tested</span>" + (ns ? '<span class="tag med">' + ns + " out of date</span>" : ""), ' data-spec="' + i + '"'); }).join("") + "</div>" : empty("No spec yet. <code>/veridic:spec &lt;feature&gt;</code> in Claude Code writes one."));
+    const tab = { specs: specList, attention: () => attList(items, state.open.has("steps") ? 99 : 6) + (items.length > 6 && !state.open.has("steps") ? '<button class="more" data-open="steps">Show all ' + items.length + "</button>" : "") + (D.errors && D.errors.length ? section("errors", "Couldn't check") + '<p class="muted small">' + D.errors.map(esc).join("<br>") + "</p>" : ""), modules: oModules, findings: oFindings, routes: oRoutes, tests: oTests, structure: oStructure };
     return h + (tab[state.sub] || tab.attention)();
   }
 
@@ -360,16 +373,10 @@
       ];
     }, (r) => { const q = String(r.text).match(QUESTION); return '<p class="rfull">' + md(String(r.text).replace(QUESTION, "")) + "</p>" + (q ? '<div class="fix"><b>Open question.</b> ' + md(q[1]) + "</div>" : "") + reqDetail(s, r); }, size, (r) => "req-" + cssId(r.id));
   }
-  // The module's spec, the parts a person reads: what it should do (stories, each opening to its
-  // scenarios), then its rules as a table. The full spec.md is a click away in the editor.
   const RULES = {}; // table key -> the rules it lists, to find a rule's page
-  function moduleRules(m) {
-    // Its own specs (those that belong to it); others that also cite its code get one line.
-    const touching = SPECS.map((sp, i) => [sp, i]).filter(([sp]) => m.specs.includes(sp.path)).sort(([a], [b]) => ownFirst(m)(a, b));
-    const specs = touching.filter(([sp]) => specOwner(sp) === m);
-    const others = touching.filter(([sp]) => specOwner(sp) !== m);
-    const also = others.length ? '<p class="small muted" style="margin-top:10px">Also covered by ' + others.map(([sp]) => { const o = specOwner(sp); return o ? '<button class="link" data-mod="' + esc(o.id) + '" data-to="rules">' + esc(o.name) + "'s spec</button>" : loc(sp.path + ":1", specName(sp)); }).join(", ") + ".</p>" : "";
-    if (!specs.length) return section("rules", "Rules") + empty("No spec yet. Nothing written says what these routes must do, so nothing can tell a bug from an intended change." + (m.stats.money ? " It moves money, so it's a good one to start with." : "") + " <code>/veridic:specs " + esc(m.id) + "</code> in Claude Code writes one.") + also;
+  // A spec's readable parts: what it should do (stories opening to their scenarios), then its
+  // rules as a table, with spec.md a click away. Used by a module's page and a spec's own page.
+  function specBody(specs) {
     const stories = specs.flatMap(([sp]) => ((sp.doc && sp.doc.stories) || []));
     let h = "";
     if (stories.length) {
@@ -383,7 +390,16 @@
       h += section("rules", specs.length > 1 ? "Rules · " + esc(specName(sp)) : "Rules", shown.length, loc(sp.path + ":1", "spec.md", "plain"));
       h += rulesTable("rules-" + si, sp, shown, 10);
     }
-    return h + also;
+    return h;
+  }
+  function moduleRules(m) {
+    // Its own specs (those that belong to it); others that also cite its code get one line.
+    const touching = SPECS.map((sp, i) => [sp, i]).filter(([sp]) => m.specs.includes(sp.path)).sort(([a], [b]) => ownFirst(m)(a, b));
+    const specs = touching.filter(([sp]) => specOwner(sp) === m);
+    const others = touching.filter(([sp]) => specOwner(sp) !== m);
+    const also = others.length ? '<p class="small muted" style="margin-top:10px">Also covered by ' + others.map(([sp]) => { const o = specOwner(sp); return o ? '<button class="link" data-mod="' + esc(o.id) + '" data-to="rules">' + esc(o.name) + "'s spec</button>" : loc(sp.path + ":1", specName(sp)); }).join(", ") + ".</p>" : "";
+    if (!specs.length) return section("rules", "Rules") + empty("No spec yet. Nothing written says what these routes must do, so nothing can tell a bug from an intended change." + (m.stats.money ? " It moves money, so it's a good one to start with." : "") + " <code>/veridic:specs " + esc(m.id) + "</code> in Claude Code writes one.") + also;
+    return specBody(specs) + also;
   }
   function moduleDetails(m) {
     const s = m.stats, rs = modRoutes(m), fs = modFindings(m).filter((f) => f.severity !== "low");
@@ -539,7 +555,10 @@
   }
   // Every module side by side: one row each, a dot and a number per indicator, riskiest first.
   function oModules() {
-    if (!MODS.length) return empty("No modules found.");
+    // A spec no module claims (its module was renamed or split, or the repo has none): its own page.
+    const lost = SPECS.map((sp, i) => [sp, i]).filter(([sp]) => !specOwner(sp));
+    const lostList = lost.length ? section("lost", "Specs not tied to a module", lost.length) + '<div class="list compact">' + lost.map(([sp, i]) => liBtn(two(esc(specTitle(sp)), '<span class="mono">' + esc(sp.path) + "</span>"), '<span class="tag">' + plural(specReqs(sp).length, "rule") + "</span>", ' data-spec="' + i + '"')).join("") + "</div>" : "";
+    if (!MODS.length) return empty("No modules found.") + lostList;
     const cell = (i) => '<td><span class="mcell">' + dot(IND[i.s][0]) + '<span class="mv">' + esc(i.big != null ? i.big : i.p + "%") + '</span><span class="faint hide-sm">' + esc(i.v) + "</span></span></td>";
     const rows = MODS.filter((m) => match(m.name)).map((m) => {
       const [sf, ts, rl, sr] = indicators(m);
@@ -547,8 +566,7 @@
     }).join("");
     return '<div class="tablewrap"><table class="plain mtable"><thead><tr><th>Module</th><th>' + ic("shield", "sm") + ' Safety</th><th>' + ic("flask", "sm") + ' Tests</th><th>' + ic("doc", "sm") + ' Rules</th><th>' + ic("blocks", "sm") + " Structure</th></tr></thead><tbody>" + rows + "</tbody></table></div>" +
       '<div class="legend">' + dot("ok") + "good" + dot("med") + "needs work" + dot("high") + "at risk</div>" +
-      // A spec no module claims (its module was renamed or split): say so, with the file.
-      ((() => { const lost = SPECS.filter((sp) => !specOwner(sp)); return lost.length ? section("lost", "Specs not tied to a module", lost.length) + '<div class="list compact">' + lost.map((sp) => li(two(esc(specTitle(sp)), loc(sp.path + ":1", sp.path)), '<span class="tag">' + plural(specReqs(sp).length, "rule") + "</span>")).join("") + "</div>" : ""; })());
+      lostList;
   }
   // Structure: modules that reach into each other's data or depend on each other, and copied code.
   function oStructure() {
@@ -582,7 +600,17 @@
     return h;
   }
 
-  const VIEWS = { modules: vModules, module: vModule };
+  // A spec on its own page: for specs no module owns (a repo without routes, a renamed module).
+  function vSpec() {
+    const sp = SPECS[state.spec];
+    if (!sp) { state.view = "modules"; return vModules(); }
+    const rs = specReqs(sp), nt = rs.filter(tested).length, ns = rs.filter((r) => r.stale).length;
+    const tp = pct(nt, rs.length), cp = pct(rs.length - ns, rs.length);
+    let h = '<button class="back" data-nav="modules">' + ic("back", "sm") + "Home</button><h1>" + esc(specTitle(sp)) + '</h1><p class="lead">' + loc(sp.path + ":1", sp.path, "plain") + "</p>";
+    h += indRow([{ k: "Rules tested", i: "flask", s: tp >= 80 ? "good" : tp >= 30 ? "care" : "risk", p: tp, v: nt + " of " + rs.length + " rules" }, { k: "Rules current", i: "doc", s: ns ? "care" : "good", p: cp, v: ns ? ns + " out of date" : "match the code" }]);
+    return h + specBody([[sp, state.spec]]);
+  }
+  const VIEWS = { modules: vModules, module: vModule, spec: vSpec };
 
   // Open a rule on its module's page: turn its table to the right page, open the row, show it.
   function showReq(key, id) {
@@ -612,7 +640,10 @@
     const group = MODS.length
       ? '<button class="item group" data-modtoggle aria-expanded="' + modsOpen + '">' + ic("blocks", "sm") + '<span class="grow">Modules</span><span class="meta">' + MODS.length + "</span>" + slot(ic("chev", "sm chev")) + "</button>" +
         (modsOpen ? '<div class="sublist">' + MODS.map((m) => '<button class="item sub' + (cur === "module" && state.mod === m.id ? " on" : "") + '" data-mod="' + esc(m.id) + '"><span class="grow">' + esc(m.name) + "</span>" + slot(sideDot(m) ? dot(sideDot(m)) : "") + "</button>").join("") + "</div>" : "")
-      : "";
+      : SPECS.length
+        ? '<button class="item group" data-modtoggle aria-expanded="' + modsOpen + '">' + ic("doc", "sm") + '<span class="grow">Specs</span><span class="meta">' + SPECS.length + "</span>" + slot(ic("chev", "sm chev")) + "</button>" +
+          (modsOpen ? '<div class="sublist">' + SPECS.map((sp, i) => '<button class="item sub' + (cur === "spec" && state.spec === i ? " on" : "") + '" data-spec="' + i + '" title="' + esc(specTitle(sp)) + '"><span class="grow">' + esc(specName(sp)) + "</span>" + slot(specReqs(sp).some((r) => r.stale) ? dot("med") : "") + "</button>").join("") + "</div>" : "")
+        : "";
     $("#nav").innerHTML = item(NAV[0]) + group + NAV.slice(1).map(item).join("");
   }
   function render(keepScroll) {
@@ -639,7 +670,7 @@
     state.pages = {};
     state.open = new Set();
     $(".shell").classList.remove("menu");
-    try { history.pushState(null, "", "#" + (k === "module" ? "module/" + encodeURIComponent(state.mod) : k)); } catch {}
+    try { history.pushState(null, "", "#" + (k === "module" ? "module/" + encodeURIComponent(state.mod) : k === "spec" ? "spec/" + state.spec : k)); } catch {}
     nav();
     render();
   }
@@ -670,6 +701,8 @@
 
   document.addEventListener("click", (e) => {
     const t = e.target;
+    const sp0 = t.closest("[data-spec]");
+    if (sp0) { state.spec = +sp0.dataset.spec; setView("spec"); return; }
     const md0 = t.closest("[data-mod]");
     if (md0) { openModule(md0.dataset.mod, md0.dataset.to); return; }
     if (t.closest("[data-about]")) { state.aboutOpen = !state.aboutOpen; render(true); return; }

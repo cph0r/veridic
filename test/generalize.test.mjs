@@ -683,3 +683,15 @@ test("FR-004: a package that runs node --test is node:test, even if a test menti
   assert.equal(testRecipe(repo, Object.keys(files)).get(".").framework, "node:test");
   fs.rmSync(repo, { recursive: true, force: true });
 });
+
+test("a *spec.md file without any rule id (a command or a doc) isn't a spec", async () => {
+  const { defaultSpecs } = await import("../core/metrics.mjs");
+  const { execFileSync } = await import("node:child_process");
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "veridic-specs-"));
+  const files = { "commands/spec.md": "---\ndescription: write a spec\n---\nRun veridic prepare.\n", "specs/a/spec.md": "- **FR-001**: a. [evidence: x.js:1]\n", "docs/heading-spec.md": "### FR-1: Title\nText.\n" };
+  for (const [f, t] of Object.entries(files)) fs.mkdirSync(path.join(repo, path.dirname(f)), { recursive: true }), fs.writeFileSync(path.join(repo, f), t);
+  execFileSync("git", ["init", "-q"], { cwd: repo });
+  execFileSync("git", ["add", "-A"], { cwd: repo });
+  assert.deepEqual(defaultSpecs(repo).map((f) => path.relative(repo, f)).sort(), ["docs/heading-spec.md", "specs/a/spec.md"]);
+  fs.rmSync(repo, { recursive: true, force: true });
+});

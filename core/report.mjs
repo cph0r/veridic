@@ -11,7 +11,7 @@ import { openGraph } from "./graph.mjs";
 import { routeInventory } from "./routes.mjs";
 import { effectManifest, readiness } from "./effects.mjs";
 import { auditTests, testCoverage } from "./tests.mjs";
-import { metrics, defaultSpecs } from "./metrics.mjs";
+import { metrics, defaultSpecs, isSpecFile } from "./metrics.mjs";
 import { checkCitations } from "./citations.mjs";
 import { staleness } from "./staleness.mjs";
 import { doneWithoutSpec, loadClaim } from "./seam.mjs";
@@ -196,7 +196,7 @@ function specSection(repo, file, m) {
 
 function untrackedSpecs(repo) {
   try {
-    return execFileSync("git", ["ls-files", "--others", "--exclude-standard", "--", "*spec.md"], { cwd: repo, encoding: "utf8" }).split("\n").filter(Boolean).map((f) => path.join(repo, f));
+    return execFileSync("git", ["ls-files", "--others", "--exclude-standard", "--", "*spec.md"], { cwd: repo, encoding: "utf8" }).split("\n").filter(Boolean).map((f) => path.join(repo, f)).filter(isSpecFile);
   } catch {
     return [];
   }
