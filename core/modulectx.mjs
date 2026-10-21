@@ -105,3 +105,36 @@ export function moduleMarkdown(data, m) {
   }
   return L.join("\n") + "\n";
 }
+
+/**
+ * A screen group's context, as Markdown for an agent writing its spec: its pages and
+ * their URLs, its files, the API calls they make with the server rules each depends
+ * on (to link, not repeat), and the files no spec describes yet.
+ */
+export function screenMarkdown(data, s, { uncovered = [] } = {}) {
+  const L = [`# Screens: ${s.name} (\`${s.id}\`) of ${data.app?.title ?? data.name}`, ""];
+  L.push(`Write this group's spec to \`${s.specs?.[0] ?? s.spec_path}\`${s.specs?.length ? " (extend it; it already describes some of these screens)" : ""}. Describe what someone using these screens sees and can do; where a screen depends on a server rule, link it in one line (\`Server rules: specs/orders FR-016\`) instead of restating it.`, "");
+  L.push(`## Pages (${s.pages.length})`, "");
+  for (const p of s.pages) L.push(`- \`${p}\`${s.urls?.[p] ? ` at \`${s.urls[p]}\`` : ""}`);
+  L.push("", `## Files (${s.files.length})`, "");
+  for (const f of s.files) L.push(`- \`${f}\``);
+  // The server rules behind each call: rules whose citations land in the route's handler.
+  const rulesFor = (routeId) => {
+    const h = (data.routes ?? []).find((r) => r.id === routeId)?.handler ?? "";
+    const [, file, a, b] = h.match(/^(.*):(\d+)(?:-(\d+))?$/) ?? [];
+    if (!file) return [];
+    const lo = Number(a), hi = Number(b ?? a);
+    const out = [];
+    for (const sp of data.specs ?? []) for (const r of sp.requirements ?? []) if (r.requirement !== false && (r.cites ?? []).some((c) => c.file === file && (c.start == null || (c.start <= hi && (c.end ?? c.start) >= lo)))) out.push(`${sp.path} ${r.id}`);
+    return out;
+  };
+  if (s.calls?.length) {
+    L.push("", `## API calls (${s.calls.length}) and the server rules they depend on`, "");
+    for (const id of s.calls) { const rs = rulesFor(id); L.push(`- \`${id}\`${rs.length ? `: ${rs.join(", ")}` : ": no server rule cites its handler yet"}`); }
+  }
+  if (uncovered.length) {
+    L.push("", `## Not described by any spec yet (${uncovered.length})`, "", "Cite each in a rule, or say in Assumptions why it needs none.", "");
+    for (const f of uncovered) L.push(`- \`${f}\``);
+  }
+  return L.join("\n") + "\n";
+}

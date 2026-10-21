@@ -271,6 +271,7 @@ export async function collectReport(repo, { specs: specFiles } = {}) {
   // each with what it does, its risks, its spec, its tests and its neighbours.
   out.app = appOverview(repo);
   out.modules = [];
+  let uiFiles = []; // which UI files call which routes, for the screen groups below
   if (g && inv?.routes.length) {
     try {
       const mods = findModules(g, inv);
@@ -278,6 +279,7 @@ export async function collectReport(repo, { specs: specFiles } = {}) {
       let ui = { files: [] };
       try {
         ui = linkUi(repo, inv.routes, mods);
+        uiFiles = ui.files;
       } catch (e) {
         note("ui", e);
       }
@@ -431,7 +433,7 @@ export async function collectReport(repo, { specs: specFiles } = {}) {
   out.findings.sort((a, b) => order[a.severity] - order[b.severity]);
   // The frontend's screens, grouped by who uses them, each with its own spec (see screens.mjs).
   try {
-    out.screens = screenGroups(repo, { all: repoFiles(repo), routes: (out.routes ?? []).map((r) => ({ file: r.file ?? String(r.handler ?? "").replace(/:\d.*$/, "") })), specs: out.specs ?? [] });
+    out.screens = screenGroups(repo, { all: repoFiles(repo), routes: (out.routes ?? []).map((r) => ({ file: r.file ?? String(r.handler ?? "").replace(/:\d.*$/, "") })), specs: out.specs ?? [], ui: uiFiles });
   } catch (e) {
     out.screens = [];
     out.errors.push(`screens: ${e.message}`);

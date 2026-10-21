@@ -351,6 +351,21 @@ test("screen files are in their group, not in no part", async () => {
   r.done();
 });
 
+test("prepare for a screen group lists its pages and the server rules its calls depend on", async () => {
+  const { screenMarkdown } = await import("../core/modulectx.mjs");
+  const data = {
+    name: "shop", app: { title: "Shop" },
+    routes: [{ id: "POST /api/orders", handler: "api/src/orders.ts:1-3" }],
+    specs: [{ path: "specs/orders/spec.md", requirements: [{ id: "FR-001", requirement: true, text: "Must create an order.", cites: [{ file: "api/src/orders.ts", start: 2, end: 2 }] }] }],
+    screens: [{ id: "guest", name: "Guest screens", pages: ["web/src/pages/order.tsx"], urls: { "web/src/pages/order.tsx": "/t/:table" }, files: ["web/src/pages/order.tsx", "web/src/pages/order/CartPanel.tsx"], calls: ["POST /api/orders"], spec_path: "specs/guest-app/spec.md", specs: [] }],
+  };
+  const md = screenMarkdown(data, data.screens[0], { uncovered: ["web/src/pages/order/CartPanel.tsx"] });
+  assert.match(md, /\/t\/:table/);
+  assert.match(md, /POST \/api\/orders.*specs\/orders\/spec\.md FR-001/);
+  assert.match(md, /specs\/guest-app\/spec\.md/);
+  assert.match(md, /Not described by any spec yet[\s\S]*CartPanel\.tsx/);
+});
+
 test("ui: screens link to routes through generated clients, API objects and wrappers; in-app links don't count", async () => {
   const { linkUi } = await import("../core/ui.mjs");
   const { execFileSync } = await import("node:child_process");

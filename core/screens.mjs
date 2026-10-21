@@ -24,9 +24,10 @@ const title = (s) => s.replace(/[-_]+/g, " ").replace(/\b\w/g, (c) => c.toUpperC
  * @param all every repo file (relative paths)
  * @param routes the server's routes (their packages are not frontend)
  * @param specs report specs: [{ path, requirements: [{ cites: [{ file }] }] }]
- * @returns [{ id, name, pages, files, spec_path, specs }]
+ * @param ui linkUi's files: [{ file, routes }] (the API calls each makes)
+ * @returns [{ id, name, pages, urls, files, calls, spec_path, specs }]
  */
-export function screenGroups(repo, { all, routes = [], specs = [] }) {
+export function screenGroups(repo, { all, routes = [], specs = [], ui = [] }) {
   const read = (f) => { try { return fs.readFileSync(path.join(repo, f), "utf8"); } catch { return ""; } };
   // A file's package: the nearest folder above it with a package.json.
   const pkgMemo = new Map();
@@ -37,10 +38,10 @@ export function screenGroups(repo, { all, routes = [], specs = [] }) {
     }
   };
   const server = new Set(routes.filter((r) => r.file).map((r) => pkgOf(r.file)));
-  const ui = all.filter((f) => UI.test(f) && !SKIP.test(f) && !isTestFile(f) && !server.has(pkgOf(f)));
-  const uiSet = new Set(ui);
-  const frontPkgs = new Set(ui.filter((f) => JSX.test(f)).map(pkgOf));
-  const front = ui.filter((f) => frontPkgs.has(pkgOf(f)));
+  const uiAll = all.filter((f) => UI.test(f) && !SKIP.test(f) && !isTestFile(f) && !server.has(pkgOf(f)));
+  const uiSet = new Set(uiAll);
+  const frontPkgs = new Set(uiAll.filter((f) => JSX.test(f)).map(pkgOf));
+  const front = uiAll.filter((f) => frontPkgs.has(pkgOf(f)));
   if (!front.length) return [];
   const resolve = importResolver(repo);
   const imports = (f) => {
@@ -137,7 +138,10 @@ export function screenGroups(repo, { all, routes = [], specs = [] }) {
     .map(([id, g]) => {
       const n = new Map();
       for (const f of g.files) for (const sp of citedBy.get(f) ?? []) n.set(sp, (n.get(sp) ?? 0) + 1);
-      return { id, name: `${title(id)} screens`, pages: g.pages.sort(), files: g.files.sort(), spec_path: `specs/${id}-app/spec.md`, specs: [...n].sort((a, b) => b[1] - a[1]).map(([sp]) => sp) };
+      const callsOf = new Map(ui.map((u) => [u.file, u.routes ?? []]));
+      const calls = [...new Set(g.files.flatMap((f) => callsOf.get(f) ?? []))].sort();
+      const urls = Object.fromEntries(g.pages.filter((p) => urlOf.has(p)).map((p) => [p, urlOf.get(p)]));
+      return { id, name: `${title(id)} screens`, pages: g.pages.sort(), urls, files: g.files.sort(), calls, spec_path: `specs/${id}-app/spec.md`, specs: [...n].sort((a, b) => b[1] - a[1]).map(([sp]) => sp) };
     })
     .sort((a, b) => b.pages.length - a.pages.length);
 }

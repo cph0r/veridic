@@ -45,7 +45,11 @@ its number of turns. Follow this order and don't repeat steps.
    already split the app. `veridic modules` lists them (with each one's
    `spec_path`); `veridic prepare --module <id> --out .veridic/context/<id>.md`
    gathers one, with what each route really does, its tables, screens, tests,
-   existing rules and open findings. Use that split, write to the module's
+   existing rules and open findings. A frontend's screens are groups in the same
+   list (`guest`, `admin`, …): `prepare --module <group>` gives their pages, files
+   and the server rules their calls depend on; a screen rule links a server rule
+   in one line (`Server rules: specs/orders FR-016`) instead of restating it.
+   Use that split, write to the module's
    `spec_path` (extend a spec that already covers it), and put open findings
    under risks or open questions, never as MUST requirements. Otherwise, once:
    ```bash
@@ -69,6 +73,8 @@ its number of turns. Follow this order and don't repeat steps.
    `veridic cite --spec spec.md --fr FR-007,FR-012`.
 5. **Fix** all problems in as few edits as possible, then run step 4 once more.
    Stop when both exit 0.
+   For a module or screen group, then run `veridic coverage --module <id>`: cite
+   each file it lists in a rule, or say in Assumptions why it needs none.
 6. **Traceability:** `veridic tests --spec spec.md --table > traceability.md`.
    Read each `related` test it lists and change that row to `covered` only if
    the test asserts that requirement's behavior.

@@ -32,6 +32,8 @@ the feature's context once, before reading anything else.
    numbers). Read other files only for what it doesn't show; if the feature can
    unlock or limit other parts of the app, check those parts yourself.
 3. Continue from step 3 of the skill's sequence: write `spec.md` once, verify
-   once with `veridic cite` and `veridic claims`, fix, verify again, then
+   once with `veridic cite` and `veridic claims`, fix, verify again. For a module
+   or screen group, run `veridic coverage --module <id>` and cite each file it
+   lists, or say in Assumptions why it needs none. Then
    `veridic tests --spec <folder>/spec.md --table > <folder>/traceability.md`.
 4. Finish with `veridic metrics --md <folder>/spec.md` and show the table.
