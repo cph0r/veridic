@@ -90,6 +90,7 @@ flowchart LR
 | Checking an API for agents | `veridic agent-ready` | What every route really does: reads, writes, deletes, moves money, and which act on ids the caller doesn't own |
 | Writing a spec | `/veridic:spec checkout` | Spec Kit–format requirements, each citing the lines that implement it and checked against them |
 | Writing specs for the whole app | `/veridic:specs` | One spec per module (`veridic modules`), riskiest first, each from `veridic prepare --module <id>`: what every route really does, its tables, screens, tests and open findings |
+| How much of the app the specs describe | `veridic coverage` | Every behaviour file and the spec that cites it, per module and screen group; what's in no part; every file left out (tests, generated code, types, config, seeds) with its reason |
 | Asked "why is it like this?" | `veridic why FR-002` | The commits that wrote that code |
 
 **No model decides any of it.** Every verdict is computed from your code, the git diff and your tests, with the line that proves it, so it can't be talked into passing.
