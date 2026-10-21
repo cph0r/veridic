@@ -36,6 +36,18 @@ test("routes: route() chains, chained use(), anonymous exported routers", () => 
   done();
 });
 
+test("routes: a helper mounting routes on the router it is given", () => {
+  const { g, done } = fakeRepo({
+    "src/main.ts": 'import express from "express";\nimport admin from "./admin";\nimport owner from "./owner";\nconst app = express();\napp.use("/api", admin);\napp.use("/api", owner);\napp.listen(3000);\n',
+    "src/jobRoutes.ts": 'export function mountJobRoutes(router, { base, startPath, resolveId }) {\n  router.post(startPath ?? `${base}/start`, start);\n  router.get(`${base}/stream`, stream);\n}\n',
+    "src/admin.ts": 'import { Router } from "express";\nimport { mountJobRoutes } from "./jobRoutes";\nconst router = Router();\nmountJobRoutes(router, { base: "/admin/jobs", resolveId: (req) => req.user.id });\nexport default router;\n',
+    "src/owner.ts": 'import { Router } from "express";\nimport { mountJobRoutes } from "./jobRoutes";\nconst router = Router();\nmountJobRoutes(router, { base: "/owner/jobs", resolveId: (req) => req.params.id });\nexport default router;\n',
+  });
+  const got = ids(g);
+  for (const id of ["POST /api/admin/jobs/start", "GET /api/admin/jobs/stream", "POST /api/owner/jobs/start", "GET /api/owner/jobs/stream"]) assert.ok(got.includes(id), `${id} in ${got.join(", ")}`);
+  done();
+});
+
 test("routes: CommonJS require/module.exports and route lists mounted in a loop", () => {
   const { g, done } = fakeRepo({
     "src/app.js": 'const express = require("express");\nconst routes = require("./routes/v1");\nconst app = express();\napp.use("/v1", routes);\napp.listen(1);\n',

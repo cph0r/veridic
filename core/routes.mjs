@@ -6,11 +6,15 @@
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
-import { callExtent, isTestFile } from "./graph.mjs";
+import { callExtent, isTestFile, matchParen } from "./graph.mjs";
 import { chainsOf, anonymousRouterChains, stringValue } from "./chains.mjs";
 
 // A route path from a string or template literal: `/${page}` becomes /:page.
-const routePathOf = (raw) => stringValue(raw) ?? raw.match(/^`([^`]*)`$/)?.[1]?.replace(/\$\{\s*(?:[\w$.]*\.)?([\w$]+)[^}]*\}/g, ":$1") ?? null;
+const routePathOf = (raw) => {
+  const lit = (r) => stringValue(r) ?? r.match(/^`([^`]*)`$/)?.[1]?.replace(/\$\{\s*(?:[\w$.]*\.)?([\w$]+)[^}]*\}/g, ":$1") ?? null;
+  // `startPath ?? `${base}/start``: an optional override with a default.
+  return lit(raw) ?? (/\?\?/.test(raw) ? lit(raw.slice(raw.lastIndexOf("??") + 2).trim()) : null);
+};
 
 const METHODS = new Set(["get", "post", "put", "patch", "delete", "head", "options", "all"]);
 
@@ -264,14 +268,47 @@ export function routeInventory(g, { entry } = {}) {
     }
     return out;
   };
+  // A call's arguments split at top-level commas: `(router, { base: "/x", f: (a, b) => a })`.
+  const topLevelArgs = (inner) => {
+    const out = [];
+    let depth = 0, cur = "", q = null;
+    for (let i = 0; i < inner.length; i++) {
+      const ch = inner[i];
+      if (q) { cur += ch; if (ch === q && inner[i - 1] !== "\\") q = null; continue; }
+      if (ch === '"' || ch === "'" || ch === "`") { q = ch; cur += ch; continue; }
+      if ("([{".includes(ch)) depth++;
+      if (")]}".includes(ch)) depth--;
+      if (ch === "," && depth === 0) { out.push(cur.trim()); cur = ""; continue; }
+      cur += ch;
+    }
+    if (cur.trim()) out.push(cur.trim());
+    return out;
+  };
+  // The string values a helper call hands over, by the name its paths use: the
+  // properties of an object literal (`{ base: "/admin/jobs" }` -> base), or a string
+  // argument by its parameter's name.
+  const handedValues = (target, fnName, c) => {
+    const subs = {};
+    c.args.forEach((a, i) => {
+      if (i === c.index) return;
+      if (a.startsWith("{")) for (const m of a.matchAll(/([\w$]+)\s*:\s*(["'`])([^"'`$]*)\2/g)) subs[m[1]] = m[3];
+      else { const lit = stringValue(a); const p = lit != null && paramName(target, fnName, i); if (p) subs[p] = lit; }
+    });
+    return subs;
+  };
   // Calls that hand the app or router to another function: `registerAuthRoutes(app)`.
   const registrarCalls = (file, v) => {
     if (!v || v === "*") return [];
     const out = [];
-    for (const m of (g.text(file) ?? "").matchAll(/\b(\w+)\s*\(([^()]*)\)/g)) {
-      const args = m[2].split(",").map((a) => a.trim());
+    const src = g.text(file) ?? "";
+    for (const m of src.matchAll(/\b(\w+)\s*\(/g)) {
+      if (/^(use|get|post|put|patch|delete|all|listen|if|while|for|switch|return|function)$/.test(m[1])) continue;
+      const open = m.index + m[0].length - 1;
+      const close = matchParen(src, open);
+      if (close < 0) continue;
+      const args = topLevelArgs(src.slice(open + 1, close));
       const i = args.indexOf(v);
-      if (i >= 0 && !/^(use|get|post|put|patch|delete|all|listen|if|while|for|switch|return)$/.test(m[1])) out.push({ fn: m[1], index: i });
+      if (i >= 0) out.push({ fn: m[1], index: i, args });
     }
     return out;
   };
@@ -282,11 +319,11 @@ export function routeInventory(g, { entry } = {}) {
     const mounts = new Map(); // "file#var" -> { file, prefix, guards: [{name, at}] }
     const pathGuards = [];
     const seen = new Set();
-    const walk = (file, v, prefix, guards) => {
-      const key = `${file}#${v ?? "*"}`;
+    const walk = (file, v, prefix, guards, subs = null) => {
+      const key = `${file}#${v ?? "*"}${subs ? `#${JSON.stringify(subs)}` : ""}`;
       if (seen.has(key)) return;
       seen.add(key);
-      mounts.set(key, { file, prefix, guards });
+      mounts.set(key, { file, v: v ?? "*", prefix, guards, ...(subs ? { subs } : {}) });
       const imports = importsOf(file);
       const locals = localRouters(file);
       for (const use of usesOf(file, v)) {
@@ -338,7 +375,8 @@ export function routeInventory(g, { entry } = {}) {
           const dflt = imports[c.fn]?.name === "default" ? exportVar(target, "default") : null;
           const fnName = imports[c.fn] ? (imports[c.fn].name === "default" ? (dflt && dflt !== "*" ? dflt : c.fn) : imports[c.fn].name) : c.fn;
           const p = paramName(target, fnName, c.index);
-          if (p && !(target === file && p === r)) walk(target, p, prefix, guards);
+          const subs = c.args ? handedValues(target, fnName, c) : {};
+          if (p && !(target === file && p === r)) walk(target, p, prefix, guards, Object.keys(subs).length ? subs : null);
         }
       }
     };
@@ -373,7 +411,7 @@ export function routeInventory(g, { entry } = {}) {
         if (c.name === "route") return void (routePath = routePathOf(c.args[0]?.raw ?? ""));
         if (!METHODS.has(c.name)) return;
         const p = routePathOf(c.args[0]?.raw ?? "") ?? routePath;
-        if (!p || !/^[/*]/.test(p)) return; // `app.get("env")` reads a setting
+        if (!p || !/^[/*]|^:[\w$]+\//.test(p)) return; // `app.get("env")` reads a setting; `${base}/x` is a path
         const name = `${c.name.toUpperCase()} ${p}`;
         if (known.has(`${f}|${name}`)) return;
         known.add(`${f}|${name}`);
@@ -461,10 +499,18 @@ export function routeInventory(g, { entry } = {}) {
   };
 
   const routes = [];
-  for (const n of routeNodes) {
+  // A helper mounted with values (`mountJobRoutes(router, { base })`) is one mount per
+  // call; its routes repeat under each, with `:base` replaced by the value handed over.
+  const valued = (file, v) => [...mounts.values()].filter((m) => m.subs && m.file === file && (m.v === v || m.v === "*"));
+  const placed = routeNodes.flatMap((n) => {
+    const vs = valued(n.file, receiverOf(n));
+    if (vs.length) return vs.map((mount) => ({ n, mount }));
     const mount = mountFor(n.file, receiverOf(n)) ?? appParamMount(n);
-    if (!mount) continue; // not reachable from the entry: a different app, or a factory-mounted router
-    const [method, localPath] = n.name.split(" ");
+    return mount ? [{ n, mount }] : []; // else not reachable from the entry: a different app, or a factory-mounted router
+  });
+  for (const { n, mount } of placed) {
+    const [method, rawPath] = n.name.split(" ");
+    const localPath = mount.subs ? rawPath.replace(/:([\w$]+)/g, (m, k) => (k in mount.subs ? mount.subs[k].replace(/^\/+|\/+$/g, "") : m)) : rawPath;
     const fullPath = joinPath(mount.prefix, localPath);
     const src = g.text(n.file) ?? "";
     const [start, end] = n.extent ?? callExtent(src, n.start) ?? [n.start, n.end];
