@@ -12,7 +12,8 @@ import { routeInventory } from "./routes.mjs";
 import { effectManifest, readiness } from "./effects.mjs";
 import { auditTests, testCoverage } from "./tests.mjs";
 import { metrics, defaultSpecs, isSpecFile } from "./metrics.mjs";
-import { checkCitations } from "./citations.mjs";
+import { checkCitations, repoFiles } from "./citations.mjs";
+import { screenGroups } from "./screens.mjs";
 import { staleness } from "./staleness.mjs";
 import { doneWithoutSpec, loadClaim } from "./seam.mjs";
 import { findModules } from "./modules.mjs";
@@ -428,6 +429,13 @@ export async function collectReport(repo, { specs: specFiles } = {}) {
   const order = { high: 0, medium: 1, low: 2 };
   for (const f of out.findings) Object.assign(f, KINDS[f.kind] ?? { title: f.kind, why: "" });
   out.findings.sort((a, b) => order[a.severity] - order[b.severity]);
+  // The frontend's screens, grouped by who uses them, each with its own spec (see screens.mjs).
+  try {
+    out.screens = screenGroups(repo, { all: repoFiles(repo), routes: (out.routes ?? []).map((r) => ({ file: r.file ?? String(r.handler ?? "").replace(/:\d.*$/, "") })), specs: out.specs ?? [] });
+  } catch (e) {
+    out.screens = [];
+    out.errors.push(`screens: ${e.message}`);
+  }
   return out;
 }
 

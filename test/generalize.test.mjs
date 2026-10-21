@@ -300,6 +300,57 @@ test("modules: a WebSocket server is an entry point", async () => {
   done();
 });
 
+// ---- screen groups ----
+function screensRepo() {
+  const files = {
+    "api/package.json": "{}",
+    "api/src/orders.ts": 'router.get("/orders", list);\n',
+    "web/package.json": "{}",
+    "web/src/App.tsx": 'import { lazy } from "react";\nimport Landing from "./pages/landing";\nconst Order = lazy(() => import("./pages/order"));\nconst AdminOrders = lazy(() => import("./pages/admin-orders"));\nconst AdminMenu = lazy(() => import("./pages/admin-menu"));\nimport OwnerClients from "./pages/owner/clients";\nimport OwnerStats from "./pages/owner/stats";\nexport default () => (<Switch>\n  <Route path="/" component={Landing} />\n  <Route path="/t/:table" component={Order} />\n  <Route path="/admin/orders" component={AdminOrders} />\n  <Route path="/admin/menu" component={AdminMenu} />\n  <Route path="/owner/clients" component={OwnerClients} />\n  <Route path="/owner/stats" component={OwnerStats} />\n</Switch>);\n',
+    "web/src/pages/landing.tsx": 'import { Button } from "../components/Button";\nexport default function Landing() { return <Button />; }\n',
+    "web/src/pages/order.tsx": 'import { Button } from "../components/Button";\nimport { CartPanel } from "./order/CartPanel";\nexport default function Order() { return <CartPanel />; }\n',
+    "web/src/pages/order/CartPanel.tsx": 'export function CartPanel() { return <div />; }\n',
+    "web/src/pages/admin-orders.tsx": 'import { Button } from "../components/Button";\nexport default function AdminOrders() { return <Button />; }\n',
+    "web/src/pages/admin-menu.tsx": 'export default function AdminMenu() { return <div />; }\n',
+    "web/src/pages/owner/clients.tsx": 'import { Button } from "../../components/Button";\nexport default function OwnerClients() { return <Button />; }\n',
+    "web/src/pages/owner/stats.tsx": 'export default function OwnerStats() { return <div />; }\n',
+    "web/src/components/Button.tsx": 'export function Button() { return <button />; }\n',
+    "web/src/pages/owner/settings.tsx": 'export function OwnerSettingsPage() { return <div />; }\n',
+    "web/src/pages/order/components/Tip.tsx": 'export default function Tip() { return <div />; }\n',
+  };
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "veridic-screens-"));
+  for (const [f, t] of Object.entries(files)) fs.mkdirSync(path.dirname(path.join(repo, f)), { recursive: true }), fs.writeFileSync(path.join(repo, f), t);
+  const routes = [{ id: "GET /api/orders", method: "GET", path: "/api/orders", file: "api/src/orders.ts", start: 1, end: 1 }];
+  return { repo, all: Object.keys(files), routes, done: () => fs.rmSync(repo, { recursive: true, force: true }) };
+}
+
+test("screens group by URL area", async () => {
+  const { screenGroups } = await import("../core/screens.mjs");
+  const r = screensRepo();
+  const gs = screenGroups(r.repo, { all: r.all, routes: r.routes, specs: [] });
+  assert.deepEqual(gs.map((x) => x.id).sort(), ["admin", "guest", "owner"]);
+  const guest = gs.find((x) => x.id === "guest");
+  assert.ok(guest.files.includes("web/src/pages/order/CartPanel.tsx"));
+  assert.ok(guest.pages.includes("web/src/pages/landing.tsx"));
+  assert.ok(!gs.some((x) => x.files.includes("web/src/components/Button.tsx")), "a component every area uses is shared UI");
+  assert.equal(gs.find((x) => x.id === "admin").spec_path, "specs/admin-app/spec.md");
+  assert.equal(gs.find((x) => x.id === "owner").name, "Owner screens");
+  assert.ok(gs.find((x) => x.id === "owner").pages.includes("web/src/pages/owner/settings.tsx"), "a page in an area folder, not in the router");
+  assert.ok(!gs.some((x) => x.pages.includes("web/src/pages/order/components/Tip.tsx")), "a component folder under pages holds no pages");
+  r.done();
+});
+
+test("screen files are in their group, not in no part", async () => {
+  const { screenGroups } = await import("../core/screens.mjs");
+  const { specCoverage } = await import("../core/coverage.mjs");
+  const r = screensRepo();
+  const screens = screenGroups(r.repo, { all: r.all, routes: r.routes, specs: [] });
+  const c = specCoverage(r.repo, { specs: [], modules: [], screens }, { files: r.all });
+  assert.ok(!c.orphans.includes("web/src/pages/order/CartPanel.tsx"));
+  assert.ok(c.orphans.includes("web/src/components/Button.tsx"));
+  r.done();
+});
+
 test("ui: screens link to routes through generated clients, API objects and wrappers; in-app links don't count", async () => {
   const { linkUi } = await import("../core/ui.mjs");
   const { execFileSync } = await import("node:child_process");

@@ -38,7 +38,23 @@ export function moduleList(data) {
     screens: (m.screens ?? []).length,
     used_by: m.usedBy.map((u) => u.module),
     moves_money: m.stats.money > 0,
-  }));
+  })).concat((data.screens ?? []).map((g) => ({
+    id: g.id,
+    name: g.name,
+    kind: "screens",
+    routes: 0,
+    pages: g.pages.length,
+    does: [],
+    issues: { high: 0, medium: 0 },
+    untested: 0,
+    specs: g.specs,
+    specified: 0,
+    spec_path: g.specs[0] ?? g.spec_path,
+    tables: [],
+    screens: g.pages.length,
+    used_by: [],
+    moves_money: false,
+  })));
 }
 
 /** One module's context, as Markdown for an agent. */
