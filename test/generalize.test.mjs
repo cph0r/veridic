@@ -328,14 +328,14 @@ test("screens group by URL area", async () => {
   const { screenGroups } = await import("../core/screens.mjs");
   const r = screensRepo();
   const gs = screenGroups(r.repo, { all: r.all, routes: r.routes, specs: [] });
-  assert.deepEqual(gs.map((x) => x.id).sort(), ["admin", "guest", "owner"]);
-  const guest = gs.find((x) => x.id === "guest");
+  assert.deepEqual(gs.map((x) => x.id).sort(), ["admin-app", "guest-app", "owner-app"]);
+  const guest = gs.find((x) => x.id === "guest-app");
   assert.ok(guest.files.includes("web/src/pages/order/CartPanel.tsx"));
   assert.ok(guest.pages.includes("web/src/pages/landing.tsx"));
   assert.ok(!gs.some((x) => x.files.includes("web/src/components/Button.tsx")), "a component every area uses is shared UI");
-  assert.equal(gs.find((x) => x.id === "admin").spec_path, "specs/admin-app/spec.md");
-  assert.equal(gs.find((x) => x.id === "owner").name, "Owner screens");
-  assert.ok(gs.find((x) => x.id === "owner").pages.includes("web/src/pages/owner/settings.tsx"), "a page in an area folder, not in the router");
+  assert.equal(gs.find((x) => x.id === "admin-app").spec_path, "specs/admin-app/spec.md");
+  assert.equal(gs.find((x) => x.id === "owner-app").name, "Owner screens");
+  assert.ok(gs.find((x) => x.id === "owner-app").pages.includes("web/src/pages/owner/settings.tsx"), "a page in an area folder, not in the router");
   assert.ok(!gs.some((x) => x.pages.includes("web/src/pages/order/components/Tip.tsx")), "a component folder under pages holds no pages");
   r.done();
 });
@@ -364,6 +364,66 @@ test("prepare for a screen group lists its pages and the server rules its calls 
   assert.match(md, /POST \/api\/orders.*specs\/orders\/spec\.md FR-001/);
   assert.match(md, /specs\/guest-app\/spec\.md/);
   assert.match(md, /Not described by any spec yet[\s\S]*CartPanel\.tsx/);
+});
+
+// ---- final review fixes ----
+test("final: one package for server and frontend still has screen groups, and client timers are not server modules", async () => {
+  const { screenGroups } = await import("../core/screens.mjs");
+  const { findModules } = await import("../core/modules.mjs");
+  const files = {
+    "package.json": "{}",
+    "src/server/orders.ts": 'router.get("/orders", list);\n\n\n',
+    "src/client/App.tsx": 'import { lazy } from "react";\nconst A = lazy(() => import("./pages/admin-orders"));\nconst B = lazy(() => import("./pages/admin-menu"));\nexport default () => (<Switch>\n  <Route path="/admin/orders" component={A} />\n  <Route path="/admin/menu" component={B} />\n</Switch>);\n',
+    "src/client/pages/admin-orders.tsx": 'export default function A() { return <div />; }\n',
+    "src/client/pages/admin-menu.tsx": 'export default function B() { return <div />; }\n',
+    "src/client/hooks/usePolling.ts": "export function usePolling() {\n  setInterval(poll, 5000);\n}\n",
+  };
+  const { g, done } = fakeRepo(files);
+  const routes = [{ id: "GET /api/orders", method: "GET", path: "/api/orders", file: "src/server/orders.ts", start: 1, end: 3 }];
+  const gs = screenGroups(g.repo, { all: Object.keys(files), routes, specs: [] });
+  assert.deepEqual(gs.map((x) => x.id), ["admin-app"]);
+  const ms = findModules(g, { routes });
+  assert.ok(!ms.some((m) => m.entries.some((e) => e.file.startsWith("src/client/"))), "a client hook's timer is not a server entry point");
+  done();
+});
+
+test("final: Next.js app router pages and relative router paths form screen groups", async () => {
+  const { screenGroups } = await import("../core/screens.mjs");
+  const files = {
+    "web/package.json": "{}",
+    "web/app/page.tsx": "export default function Home() { return <div />; }\n",
+    "web/app/admin/orders/page.tsx": "export default function Orders() { return <div />; }\n",
+    "web/app/admin/menu/page.tsx": "export default function Menu() { return <div />; }\n",
+    "spa/package.json": "{}",
+    "spa/src/router.tsx": 'import Bills from "./screens/Bills";\nimport Plans from "./screens/Plans";\nexport const r = (<Routes><Route path="billing/bills" element={<Bills />} /><Route path="billing/plans" element={<Plans />} /></Routes>);\n',
+    "spa/src/screens/Bills.tsx": "export default function Bills() { return <div />; }\n",
+    "spa/src/screens/Plans.tsx": "export default function Plans() { return <div />; }\n",
+  };
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "veridic-next-"));
+  for (const [f, t] of Object.entries(files)) fs.mkdirSync(path.dirname(path.join(repo, f)), { recursive: true }), fs.writeFileSync(path.join(repo, f), t);
+  const gs = screenGroups(repo, { all: Object.keys(files), routes: [], specs: [] });
+  const admin = gs.find((x) => x.id === "admin-app");
+  assert.ok(admin && admin.pages.includes("web/app/admin/orders/page.tsx"), JSON.stringify(gs.map((x) => [x.id, x.pages])));
+  assert.equal(admin.urls["web/app/admin/orders/page.tsx"], "/admin/orders");
+  assert.ok(gs.some((x) => x.id === "billing-app" && x.pages.includes("spa/src/screens/Bills.tsx")));
+  fs.rmSync(repo, { recursive: true, force: true });
+});
+
+test("final: helper routes resolve same-file constants, keep a mount without values, never rewrite their own params, and don't repeat", () => {
+  const { g, done } = fakeRepo({
+    "src/main.ts": 'import express from "express";\nimport admin from "./admin";\nimport owner from "./owner";\nimport labels from "./labels";\nconst app = express();\napp.use("/api", admin);\napp.use("/api/o", owner);\napp.use("/api", labels);\napp.listen(3000);\n',
+    "src/jobRoutes.ts": 'export function mountJobRoutes(router, { base }) {\n  router.get(`${base}/stream`, stream);\n}\n',
+    "src/admin.ts": 'import { Router } from "express";\nimport { mountJobRoutes } from "./jobRoutes";\nconst BASE = "/admin/jobs";\nconst router = Router();\nmountJobRoutes(router, { base: BASE });\nexport default router;\n',
+    "src/owner.ts": 'import { Router } from "express";\nimport { mountJobRoutes } from "./jobRoutes";\nconst router = Router();\nmountJobRoutes(router);\nexport default router;\n',
+    "src/labelRoutes.ts": 'export function mountLabels(router, label) {\n  router.get("/labels/:label", show);\n}\n',
+    "src/labels.ts": 'import { Router } from "express";\nimport { mountLabels } from "./labelRoutes";\nconst router = Router();\nmountLabels(router, "admin");\nmountLabels(router, "owner");\nexport default router;\n',
+  });
+  const got = ids(g);
+  assert.ok(got.includes("GET /api/admin/jobs/stream"), got.join(", "));
+  assert.ok(got.some((x) => x.startsWith("GET /api/o/") && x.endsWith("/stream")), "the mount without values keeps its routes: " + got.join(", "));
+  assert.ok(got.includes("GET /api/labels/:label"), "a route's own param is not rewritten: " + got.join(", "));
+  assert.equal(got.filter((x) => x === "GET /api/labels/:label").length, 1, "no duplicate route");
+  done();
 });
 
 test("ui: screens link to routes through generated clients, API objects and wrappers; in-app links don't count", async () => {

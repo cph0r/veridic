@@ -1,5 +1,6 @@
 // Screen groups: a frontend's pages grouped by who uses them, so each group gets
-// a spec of its own (specs/<id>-app/spec.md). A page's area is the first segment of
+// a spec of its own (specs/<area>-app/spec.md; the group's id is <area>-app, so it
+// never clashes with a server module's id). A page's area is the first segment of
 // its URL in the router (/admin/orders -> admin), else the first word of its path
 // under pages/ (pages/owner/clients.tsx, owner-dashboard.tsx -> owner). Pages with
 // no segment, and areas with a single page, are the guest screens. A group holds
@@ -11,6 +12,7 @@ import path from "node:path";
 import { importResolver } from "./resolve.mjs";
 import { isTestFile } from "./graph.mjs";
 import { makeResolver } from "./citations.mjs";
+import { sides } from "./layout.mjs";
 
 const UI = /\.(?:[cm]?[jt]sx?|vue|svelte)$/;
 const JSX = /\.(?:[jt]sx|vue|svelte)$/;
@@ -29,29 +31,23 @@ const title = (s) => s.replace(/[-_]+/g, " ").replace(/\b\w/g, (c) => c.toUpperC
  */
 export function screenGroups(repo, { all, routes = [], specs = [], ui = [] }) {
   const read = (f) => { try { return fs.readFileSync(path.join(repo, f), "utf8"); } catch { return ""; } };
-  // A file's package: the nearest folder above it with a package.json.
-  const pkgMemo = new Map();
-  const pkgOf = (f) => {
-    for (let d = path.posix.dirname(f); ; d = path.posix.dirname(d)) {
-      if (pkgMemo.has(d)) return pkgMemo.get(d);
-      if (fs.existsSync(path.join(repo, d, "package.json")) || d === "." || d === "") { const v = d === "." ? "" : d; pkgMemo.set(d, v); return v; }
-    }
-  };
-  const server = new Set(routes.filter((r) => r.file).map((r) => pkgOf(r.file)));
-  const uiAll = all.filter((f) => UI.test(f) && !SKIP.test(f) && !isTestFile(f) && !server.has(pkgOf(f)));
+  const uiAll = all.filter((f) => UI.test(f) && !SKIP.test(f) && !isTestFile(f));
   const uiSet = new Set(uiAll);
-  const frontPkgs = new Set(uiAll.filter((f) => JSX.test(f)).map(pkgOf));
-  const front = uiAll.filter((f) => frontPkgs.has(pkgOf(f)));
+  const side = sides(repo, uiAll, routes.filter((r) => r.file).map((r) => r.file));
+  const front = uiAll.filter(side.isClient);
   if (!front.length) return [];
   const resolve = importResolver(repo);
+  const importMemo = new Map();
   const imports = (f) => {
+    if (importMemo.has(f)) return importMemo.get(f);
     const out = new Set();
     for (const m of read(f).matchAll(/(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s+)["']([^"']+)["']/g)) {
       const hit = resolve(f, m[1]);
       const file = typeof hit === "string" ? hit : hit?.file;
       if (file && uiSet.has(file)) out.add(file);
     }
-    return [...out];
+    importMemo.set(f, [...out]);
+    return importMemo.get(f);
   };
 
   // The router: <Route path="/admin/orders" component={X} />, element={<X />}, or { path, element|component }.
@@ -64,19 +60,24 @@ export function screenGroups(repo, { all, routes = [], specs = [], ui = [] }) {
     for (const m of src.matchAll(/(?:const|let)\s+([\w$]+)\s*=\s*lazy\(\s*\(\)\s*=>\s*import\(\s*["']([^"']+)["']/g)) ids.set(m[1], m[2]);
     const pairs = [];
     for (const m of src.matchAll(/<Route\b([^>]*?)\/?>/g)) {
-      const p = m[1].match(/\bpath\s*=\s*\{?\s*["'`](\/[^"'`]*)["'`]/)?.[1];
+      const p = m[1].match(/\bpath\s*=\s*\{?\s*["'`]([^"'`]*)["'`]/)?.[1];
       const c = m[1].match(/\b(?:component|element)\s*=\s*\{\s*<?\s*([\w$]+)/)?.[1];
       if (p && c) pairs.push([p, c]);
     }
-    for (const m of src.matchAll(/\bpath\s*:\s*["'`](\/[^"'`]*)["'`][^{}]{0,200}?\b(?:element|component|Component)\s*:\s*<?\s*([\w$]+)/g)) pairs.push([m[1], m[2]]);
+    for (const m of src.matchAll(/\bpath\s*:\s*["'`]([^"'`]*)["'`][^{}]{0,200}?\b(?:element|component|Component)\s*:\s*<?\s*([\w$]+)/g)) pairs.push([m[1], m[2]]);
     for (const [p, c] of pairs) {
       const spec = ids.get(c);
       const hit = spec && resolve(f, spec);
       const file = typeof hit === "string" ? hit : hit?.file;
-      if (file && uiSet.has(file) && !urlOf.has(file)) urlOf.set(file, p);
+      if (file && uiSet.has(file) && !urlOf.has(file)) urlOf.set(file, p.startsWith("/") ? p : "/" + p);
     }
   }
 
+  // Next.js app router: app/admin/orders/page.tsx is /admin/orders ((group) folders drop, [id] is :id).
+  for (const f of front) {
+    const m = f.match(/(?:^|\/)app\/((?:[^/]+\/)*)page\.[jt]sx$/);
+    if (m && !urlOf.has(f)) urlOf.set(f, "/" + m[1].split("/").filter((x) => x && !/^\(.*\)$/.test(x)).map((x) => x.replace(/^\[+\.*([^\]]+)\]+$/, ":$1")).join("/"));
+  }
   // Pages: what the router shows, and the files right under a pages folder.
   const underPages = (f) => { const m = f.match(/(?:^|\/)(?:pages?|views|screens)\/(.*)$/); return m ? m[1] : null; };
   const isPage = (f) => {
@@ -141,7 +142,7 @@ export function screenGroups(repo, { all, routes = [], specs = [], ui = [] }) {
       const callsOf = new Map(ui.map((u) => [u.file, u.routes ?? []]));
       const calls = [...new Set(g.files.flatMap((f) => callsOf.get(f) ?? []))].sort();
       const urls = Object.fromEntries(g.pages.filter((p) => urlOf.has(p)).map((p) => [p, urlOf.get(p)]));
-      return { id, name: `${title(id)} screens`, pages: g.pages.sort(), urls, files: g.files.sort(), calls, spec_path: `specs/${id}-app/spec.md`, specs: [...n].sort((a, b) => b[1] - a[1]).map(([sp]) => sp) };
+      return { id: `${id}-app`, name: `${title(id)} screens`, pages: g.pages.sort(), urls, files: g.files.sort(), calls, spec_path: `specs/${id}-app/spec.md`, specs: [...n].sort((a, b) => b[1] - a[1]).map(([sp]) => sp) };
     })
     .sort((a, b) => b.pages.length - a.pages.length);
 }

@@ -18,6 +18,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { footprintOf } from "./impact.mjs";
 import { entryPoints } from "./scope.mjs";
+import { sides } from "./layout.mjs";
 
 const AUTH = new Set("auth authentication login logout signin signup register session oauth sso token password passport".split(" "));
 const TECH = new Set("callback webhook event status log request response handler util helper hook middleware".split(" "));
@@ -199,24 +200,9 @@ export function findModules(g, inv) {
   const byId = new Map(out.map((m) => [m.id, m]));
   const handlerOf = new Map(out.flatMap((m) => m.files.map((f) => [f, m.id])));
   const ownerOf = (f) => handlerOf.get(f) ?? owner.get(f);
-  // A file's package: the nearest folder above it with a package.json (the code index
-  // lists only code, so this reads the disk).
-  const pkgDir = new Map();
-  const pkgOf = (f) => {
-    let d = path.posix.dirname(f);
-    const walked = [];
-    for (;;) {
-      if (pkgDir.has(d)) break;
-      walked.push(d);
-      if (fs.existsSync(path.join(g.repo, d, "package.json"))) { pkgDir.set(d, d === "." ? "" : d); break; }
-      if (d === "." || d === "") { pkgDir.set(d, ""); break; }
-      d = path.posix.dirname(d);
-    }
-    for (const w of walked) pkgDir.set(w, pkgDir.get(d));
-    return pkgDir.get(d);
-  };
-  const serverPkgs = new Set(routes.map((r) => pkgOf(r.file)));
-  const codeFiles = (g.files ?? []).filter((f) => /\.[cm]?[jt]sx?$/.test(f) && !TEST.test(f) && !f.includes("node_modules") && serverPkgs.has(pkgOf(f)));
+  // Only server code: the frontend's timers belong to its screens (see layout.mjs).
+  const side = sides(g.repo, g.files ?? [], routes.map((r) => r.file));
+  const codeFiles = (g.files ?? []).filter((f) => /\.[cm]?[jt]sx?$/.test(f) && !TEST.test(f) && !f.includes("node_modules") && side.isServer(f));
   const fresh = new Map(); // folder -> its new module
   const GENERIC = new Set(["src", "lib", "app", "server", "services", "utils", "jobs", "workers", "routes"]);
   for (const e of entryPoints(g, codeFiles)) {

@@ -10,14 +10,37 @@ import { repoFiles, makeResolver } from "./citations.mjs";
 
 const SOURCE = /\.[cm]?[jt]sx?$/;
 
-/** Why a file needs no spec, or null when it is behaviour. `head` is its first 10 lines. */
+const VENDORED = /(^|\/)(dist|build|out|coverage|vendors?|third[-_]party|\.next|\.nuxt)\/|\.(min|bundle)\.[cm]?js$/;
+const BANNER = /@generated|do not edit|auto-?generated/i;
+const MAX = 256_000; // a file this big is behaviour, not "types only", and isn't read whole
+
+/** The comments a file opens with, before its first line of code. */
+const leadingComments = (head) => {
+  const out = [];
+  let block = false;
+  for (const line of head.split("\n")) {
+    const t = line.trim();
+    if (block) { out.push(t); if (t.includes("*/")) block = false; continue; }
+    if (!t || t.startsWith("//") || t.startsWith("#!")) { out.push(t); continue; }
+    if (t.startsWith("/*")) { out.push(t); block = !t.includes("*/"); continue; }
+    break;
+  }
+  return out.join("\n");
+};
+
+/** Why a file needs no spec, or null when it is behaviour. `head` is its first 10 lines;
+ *  `text()` its text, or null when the file is too big to read whole. */
 export function skipReason(file, head, text) {
   if (isTestFile(file) || /(^|\/)(testkit|fixtures|__mocks__)\//.test(file)) return "test";
-  if (/\/generated\//.test(file) || /@generated|do not edit|auto-?generated/i.test(head)) return "generated";
+  if (VENDORED.test(file)) return "vendored or built";
+  if (/\/generated\//.test(file) || BANNER.test(leadingComments(head))) return "generated";
   if (/\.d\.[cm]?ts$/.test(file)) return "types only";
-  if (/(^|\/)[^/]*\.config\.[cm]?[jt]s$|(^|\/)build\.[cm]?[jt]s$|(^|\/)(eslint|vite|vitest|jest|tsconfig)[^/]*$/.test(file)) return "config or build";
-  if (/(^|\/)scripts\/|(^|\/)seeds?\b|seedData/.test(file)) return "seed or script";
-  if (!/\b(function|class|const|let|var)\b|=>|module\.exports|exports\./.test(codeOnly(text()))) return "types only";
+  if (/(^|\/)[^/]*\.config\.[cm]?[jt]s$|(^|\/)build\.[cm]?[jt]s$|(^|\/)(eslint|vite|vitest|jest|webpack|rollup|babel|tsconfig)\.[^/]*$/.test(file)) return "config or build";
+  if (/(^|\/)scripts\/|(^|\/)seeds?(\/|\.)|seedData/.test(file)) return "seed or script";
+  const t = text();
+  if (t == null || t.length > MAX) return null;
+  // Runtime code: declarations, arrows, enums, exported objects and arrays, object methods.
+  if (!/\b(function|class|const|let|var|enum)\b|=>|module\.exports|exports\.|export\s+default\s*[{[]|^\s*[\w$]+\s*\([^)]*\)\s*\{/m.test(codeOnly(t))) return "types only";
   return null;
 }
 
@@ -32,7 +55,7 @@ const headOf = (abs) => {
     return "";
   }
 };
-const read = (abs) => { try { return fs.readFileSync(abs, "utf8"); } catch { return ""; } };
+const read = (abs) => { try { return fs.statSync(abs).size > MAX ? null : fs.readFileSync(abs, "utf8"); } catch { return ""; } };
 
 /**
  * @param data collectReport output: specs[].requirements[].cites[], modules[].files/code, screens[].files

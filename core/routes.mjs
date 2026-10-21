@@ -287,12 +287,21 @@ export function routeInventory(g, { entry } = {}) {
   // The string values a helper call hands over, by the name its paths use: the
   // properties of an object literal (`{ base: "/admin/jobs" }` -> base), or a string
   // argument by its parameter's name.
-  const handedValues = (target, fnName, c) => {
+  const handedValues = (target, fnName, c, caller) => {
     const subs = {};
+    const src = g.text(caller) ?? "";
+    // A string literal, or a constant in the calling file that holds one (`const BASE = "/x"`).
+    const valueOf = (expr) => {
+      const lit = stringValue(expr);
+      if (lit != null) return lit;
+      if (!/^[\w$]+$/.test(expr)) return null;
+      const m = src.match(new RegExp(`\\b(?:const|let|var)\\s+${expr.replace(/\$/g, "\\$")}\\s*(?::[^=;]+)?=\\s*(["'\`])([^"'\`$]*)\\1`));
+      return m ? m[2] : null;
+    };
     c.args.forEach((a, i) => {
       if (i === c.index) return;
-      if (a.startsWith("{")) for (const m of a.matchAll(/([\w$]+)\s*:\s*(["'`])([^"'`$]*)\2/g)) subs[m[1]] = m[3];
-      else { const lit = stringValue(a); const p = lit != null && paramName(target, fnName, i); if (p) subs[p] = lit; }
+      if (a.startsWith("{")) for (const m of a.matchAll(/([\w$]+)\s*:\s*([^,}\n]+)/g)) { const v = valueOf(m[2].trim()); if (v != null) subs[m[1]] = v; }
+      else { const v = valueOf(a); const p = v != null && paramName(target, fnName, i); if (p) subs[p] = v; }
     });
     return subs;
   };
@@ -375,7 +384,7 @@ export function routeInventory(g, { entry } = {}) {
           const dflt = imports[c.fn]?.name === "default" ? exportVar(target, "default") : null;
           const fnName = imports[c.fn] ? (imports[c.fn].name === "default" ? (dflt && dflt !== "*" ? dflt : c.fn) : imports[c.fn].name) : c.fn;
           const p = paramName(target, fnName, c.index);
-          const subs = c.args ? handedValues(target, fnName, c) : {};
+          const subs = c.args ? handedValues(target, fnName, c, file) : {};
           if (p && !(target === file && p === r)) walk(target, p, prefix, guards, Object.keys(subs).length ? subs : null);
         }
       }
@@ -501,16 +510,18 @@ export function routeInventory(g, { entry } = {}) {
   const routes = [];
   // A helper mounted with values (`mountJobRoutes(router, { base })`) is one mount per
   // call; its routes repeat under each, with `:base` replaced by the value handed over.
-  const valued = (file, v) => [...mounts.values()].filter((m) => m.subs && m.file === file && (m.v === v || m.v === "*"));
+  const mountsOf = (file, v) => [...mounts.values()].filter((m) => m.file === file && (m.v === v || m.v === "*"));
   const placed = routeNodes.flatMap((n) => {
-    const vs = valued(n.file, receiverOf(n));
-    if (vs.length) return vs.map((mount) => ({ n, mount }));
+    const ms = mountsOf(n.file, receiverOf(n));
+    if (ms.some((m) => m.subs)) return ms.map((mount) => ({ n, mount }));
     const mount = mountFor(n.file, receiverOf(n)) ?? appParamMount(n);
     return mount ? [{ n, mount }] : []; // else not reachable from the entry: a different app, or a factory-mounted router
   });
   for (const { n, mount } of placed) {
     const [method, rawPath] = n.name.split(" ");
-    const localPath = mount.subs ? rawPath.replace(/:([\w$]+)/g, (m, k) => (k in mount.subs ? mount.subs[k].replace(/^\/+|\/+$/g, "") : m)) : rawPath;
+    // Only names the path took from `${…}` are values; a route's own `:id` stays.
+    const fromTemplate = mount.subs ? new Set([...(n.handlerText ?? g.lines(n.file).slice(n.start - 1, n.end ?? n.start).join("\n")).matchAll(/\$\{\s*(?:[\w$.]*\.)?([\w$]+)/g)].map((m) => m[1])) : null;
+    const localPath = mount.subs ? rawPath.replace(/:([\w$]+)/g, (m, k) => (k in mount.subs && fromTemplate.has(k) ? mount.subs[k].replace(/^\/+|\/+$/g, "") : m)) : rawPath;
     const fullPath = joinPath(mount.prefix, localPath);
     const src = g.text(n.file) ?? "";
     const [start, end] = n.extent ?? callExtent(src, n.start) ?? [n.start, n.end];
@@ -536,6 +547,9 @@ export function routeInventory(g, { entry } = {}) {
       ...(n.handlerText ? { handlerText: n.handlerText } : {}),
     });
   }
+  // A helper mounted twice at one prefix gives the same route twice: keep one.
+  const once = new Set();
+  for (let i = routes.length - 1; i >= 0; i--) { const k = `${routes[i].id}|${routes[i].file}|${routes[i].start}`; if (once.has(k)) routes.splice(i, 1); else once.add(k); }
   routes.sort((a, b) => a.file.localeCompare(b.file) || a.start - b.start);
 
   const reachable = new Set([...mounts.values()].map((m) => m.file));
