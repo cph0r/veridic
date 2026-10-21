@@ -68,7 +68,7 @@ Or see everything at once:
 veridic report      # or: veridic ui, or /veridic:report in Claude Code
 ```
 
-One page opens in your browser, written for someone who knows the requirements rather than the code. It starts with a verdict in a sentence ("11 problems to fix, and most of it isn't tested yet") and three gauges: requirements proven by tests, actions a test calls, and safety problems. Then the app as a graph of its parts: each circle's ring shows its requirements proven or broken, and the lines show which part uses, reads or changes another's data. Tap a part to see what it should do, what's broken, who can do what, and how it connects. Below, what to fix first and what can wait. It only shows: it never changes anything. It's one local file, `.veridic/report.html` (git-ignored): no server, no network, nothing uploaded.
+One page opens in your browser: your app's specs and nothing else. A sentence says how they stand ("1 rule is broken and 4 are out of date"), two gauges show how many rules still match the code and how many a test proves, and every spec is a card whose ring shows its rules proven, broken or out of date. Open a spec to read its user stories and scenarios and every rule, with where it lives in the code and which tests prove it. Below, what to fix first and which rules still need a test. It only shows: it never changes anything. It's one local file, `.veridic/report.html` (git-ignored): no server, no network, nothing uploaded.
 
 ## How it works
 

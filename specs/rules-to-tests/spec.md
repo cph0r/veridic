@@ -32,6 +32,6 @@ Veridic turns a module's written rules into tests it counts. Each requirement be
 - **FR-012**: A test runner that cannot start MUST be reported as could-not-run, never as failing rules. [evidence: core/tests.mjs:476-482]
 - **FR-013**: `veridic tests --module <id>` MUST print the work list as Markdown with module totals and end with a line naming the next command. [evidence: core/worklist.mjs:120-142, skill/scripts/tests.mjs:26-33]
 - **FR-016**: `--mutate N` MUST change one thing in the cited code of up to N tested rules, run each rule's named tests, count the rules whose tests fail, and always restore the file. [evidence: core/testmut.mjs:39-71]
-- **FR-015**: The report MUST show a broken rule as "broken, proven". [evidence: core/report-page.js:41]
+- **FR-015**: The report MUST show a broken rule as "broken, proven". [evidence: core/report-page.js:23]
 - **FR-017**: `veridic tests --module <id> --link ID=file:line[,line] …` MUST put each rule id at the front of the test title on that line (after any ids already there, with `(<module>)` for an ambiguous id), change nothing else, and refuse non-test files, describe blocks, missing files and tests already named for the rule. [evidence: core/link.mjs:19-70]
 - **FR-018**: The work list MUST give each rule's whole text, the cited code of rules not yet tested (at most 60 lines a cite, 400 in all), an example test per package, and a `--link` next command when there are tests to link. [evidence: core/worklist.mjs:105-119]
