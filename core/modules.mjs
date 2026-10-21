@@ -17,6 +17,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { footprintOf } from "./impact.mjs";
+import { entryPoints } from "./scope.mjs";
 
 const AUTH = new Set("auth authentication login logout signin signup register session oauth sso token password passport".split(" "));
 const TECH = new Set("callback webhook event status log request response handler util helper hook middleware".split(" "));
@@ -188,6 +189,67 @@ export function findModules(g, inv) {
     }
     m.uses = [...uses].map(([id, via]) => ({ module: id, via: via.sort() })).sort((a, b) => b.via.length - a.via.length);
   }
+  // Entry points that aren't routes (timers, WebSocket handlers), looked for only in the
+  // server's own package (the frontend's timers belong to its screens). One joins, in
+  // order: the module owning its file; the module owning most files in its folder; the
+  // module whose own code it shares most (Jaccard >= 0.3, as above). Else its folder is a
+  // module of its own (named from the folder, or the file when the folder is generic).
+  const strip = ({ kind, id, name, file, start, end }) => ({ kind, id, name, file, start, end });
+  for (const m of out) m.entries = [];
+  const byId = new Map(out.map((m) => [m.id, m]));
+  const handlerOf = new Map(out.flatMap((m) => m.files.map((f) => [f, m.id])));
+  const ownerOf = (f) => handlerOf.get(f) ?? owner.get(f);
+  // A file's package: the nearest folder above it with a package.json (the code index
+  // lists only code, so this reads the disk).
+  const pkgDir = new Map();
+  const pkgOf = (f) => {
+    let d = path.posix.dirname(f);
+    const walked = [];
+    for (;;) {
+      if (pkgDir.has(d)) break;
+      walked.push(d);
+      if (fs.existsSync(path.join(g.repo, d, "package.json"))) { pkgDir.set(d, d === "." ? "" : d); break; }
+      if (d === "." || d === "") { pkgDir.set(d, ""); break; }
+      d = path.posix.dirname(d);
+    }
+    for (const w of walked) pkgDir.set(w, pkgDir.get(d));
+    return pkgDir.get(d);
+  };
+  const serverPkgs = new Set(routes.map((r) => pkgOf(r.file)));
+  const codeFiles = (g.files ?? []).filter((f) => /\.[cm]?[jt]sx?$/.test(f) && !TEST.test(f) && !f.includes("node_modules") && serverPkgs.has(pkgOf(f)));
+  const fresh = new Map(); // folder -> its new module
+  const GENERIC = new Set(["src", "lib", "app", "server", "services", "utils", "jobs", "workers", "routes"]);
+  for (const e of entryPoints(g, codeFiles)) {
+    const dir = path.posix.dirname(e.file);
+    const reach = new Set([e.file, ...footprintOf(g, e).map((n) => n.file).filter((x) => !TEST.test(x) && !x.includes("node_modules") && !shared.has(x))]);
+    let home = ownerOf(e.file) ?? fresh.get(dir)?.id;
+    if (!home) {
+      const votes = new Map();
+      for (const f of codeFiles) if (f !== e.file && path.posix.dirname(f) === dir && ownerOf(f)) votes.set(ownerOf(f), (votes.get(ownerOf(f)) ?? 0) + 1);
+      home = [...votes].sort((a, b) => b[1] - a[1])[0]?.[0];
+    }
+    if (!home) {
+      let best = null;
+      for (const m of out) { const sc = jac(reach, new Set([...m.files, ...m.code])); if (sc >= 0.3 && (!best || sc > best[0])) best = [sc, m.id]; }
+      home = best?.[1];
+    }
+    let m = home && (byId.get(home) ?? [...fresh.values()].find((x) => x.id === home));
+    if (!m) {
+      const folder = dir.split("/").pop();
+      const base = GENERIC.has(folder) || !folder || folder === "." ? e.file.split("/").pop().replace(/\.[^.]+$/, "") : folder;
+      const name = title(base.replace(/([a-z])([A-Z])/g, "$1 $2"));
+      let id = slug(name);
+      const n = (seen.get(id) ?? 0) + 1;
+      seen.set(id, n);
+      if (n > 1) id = `${id}-${n}`;
+      m = { id, name, pinned: false, routes: [], files: [], code: [], shared: [], uses: [], entries: [] };
+      fresh.set(dir, m);
+    }
+    m.entries.push(strip(e));
+    if (!m.routes.length && !m.files.includes(e.file)) m.files.push(e.file);
+    for (const f of reach) if (!ownerOf(f)) { owner.set(f, m.id); if (!m.files.includes(f)) m.code.push(f); }
+  }
+  out.push(...fresh.values());
   for (const m of out) m.usedBy = out.filter((x) => x.uses.some((u) => u.module === m.id)).map((x) => ({ module: x.id, via: x.uses.find((u) => u.module === m.id).via }));
-  return out.map((m) => ({ id: m.id, name: m.name, pinned: m.pinned, routes: m.routes.map((r) => r.id), files: m.files, code: m.code, shared: m.shared, uses: m.uses, usedBy: m.usedBy }));
+  return out.map((m) => ({ id: m.id, name: m.name, pinned: m.pinned, routes: m.routes.map((r) => r.id), entries: m.entries, files: m.files, code: [...new Set(m.code)].sort(), shared: m.shared, uses: m.uses, usedBy: m.usedBy }));
 }

@@ -351,6 +351,9 @@ export async function collectReport(repo, { specs: specFiles } = {}) {
         };
         const order = (r) => (r.moves_money ? 0 : r.effect === "destructive" ? 1 : r.effect === "write" ? 2 : 3);
         const actions = [...new Set([...rs].sort((a, b) => order(a) - order(b)).map(phrase).filter(Boolean))].slice(0, 6);
+        // A module with no routes (timers, WebSocket handlers) says what runs it.
+        const entryWord = (e) => `${e.kind === "timer" ? "runs" : "serves a socket in"} ${e.name ?? e.file.split("/").pop().replace(/\.[^.]+$/, "")}`;
+        if (!actions.length) actions.push(...[...new Set((m.entries ?? []).map(entryWord))].slice(0, 6));
         out.modules.push({
           ...m,
           does: actions,

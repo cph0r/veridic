@@ -227,6 +227,67 @@ test("modules: same feature across files joins, a file of many features splits b
   done();
 });
 
+// ---- entry points beyond routes join the split ----
+const entryRepo = (extra) => {
+  const r = (method, p, file, line) => ({ id: `${method} ${p}`, method, path: p, file, start: line, end: line + 2 });
+  const routes = [r("GET", "/api/orders", "src/orders.ts", 1), r("POST", "/api/orders", "src/orders.ts", 4)];
+  const files = { "src/orders.ts": 'router.get("/orders", list);\n\n\nrouter.post("/orders", create);\n\n\n', ...extra };
+  return { routes, ...fakeRepo(files) };
+};
+
+test("modules: a timer that shares nothing becomes its own module", async () => {
+  const { findModules } = await import("../core/modules.mjs");
+  const { routes, g, done } = entryRepo({ "src/jobs/retryPushes.ts": "export function start() {\n  setInterval(retry, 60000);\n}\n" });
+  const ms = findModules(g, { routes });
+  const m = ms.find((x) => x.id === "retry-pushes");
+  assert.ok(m, "a module for the timer's file");
+  assert.equal(m.entries[0].kind, "timer");
+  assert.equal(m.routes.length, 0);
+  assert.ok(m.files.includes("src/jobs/retryPushes.ts"));
+  assert.deepEqual(ms.find((x) => x.routes.includes("GET /api/orders")).entries, []);
+  done();
+});
+
+test("modules: an entry point in a module's file joins that module", async () => {
+  const { findModules } = await import("../core/modules.mjs");
+  const { routes, g, done } = entryRepo({});
+  g.text = (f) => (f === "src/orders.ts" ? 'router.get("/orders", list);\n\n\nrouter.post("/orders", create);\nsetInterval(sweep, 1000);\n' : null);
+  const ms = findModules(g, { routes });
+  assert.equal(ms.length, 1);
+  assert.equal(ms[0].entries.length, 1);
+  done();
+});
+
+test("modules: entry points join the module owning their folder, stay in the server package, and leftovers group by folder", async () => {
+  const { findModules } = await import("../core/modules.mjs");
+  const { routes, g, done } = entryRepo({
+    "package.json": "{}",
+    "src/cleanup.ts": "export function start() {\n  setInterval(sweep, 1000);\n}\n",
+    "src/realtime/index.ts": 'import { WebSocketServer } from "ws";\nconst wss = new WebSocketServer({ port: 1 });\n',
+    "src/realtime/connection.ts": 'import { WebSocket } from "ws";\nexport function c(wss) {\n  wss.on("connection", (ws) => ws);\n}\n',
+    "web/package.json": "{}",
+    "web/src/hooks/usePolling.ts": "export function usePolling() {\n  setInterval(poll, 5000);\n}\n",
+  });
+  g.files = [...g.files, "package.json", "web/package.json"];
+  routes[0].file = routes[1].file = "src/orders.ts";
+  const ms = findModules(g, { routes });
+  const orders = ms.find((m) => m.routes.includes("GET /api/orders"));
+  assert.ok(orders.entries.some((e) => e.file === "src/cleanup.ts"), "a timer next to a module's handlers joins it");
+  const rt = ms.find((m) => m.entries.some((e) => e.file === "src/realtime/index.ts"));
+  assert.ok(rt.entries.some((e) => e.file === "src/realtime/connection.ts"), "one module per folder of leftovers");
+  assert.equal(rt.id, "realtime");
+  assert.ok(!ms.some((m) => m.entries.some((e) => e.file.startsWith("web/"))), "frontend timers are not server entry points");
+  done();
+});
+
+test("modules: a WebSocket server is an entry point", async () => {
+  const { entryPoints } = await import("../core/scope.mjs");
+  const { g, done } = fakeRepo({ "src/realtime/index.ts": 'export function attach(server) {\n  const wss = new WebSocketServer({ server });\n  wss.on("connection", (ws) => onConn(ws));\n}\n' });
+  const es = entryPoints(g, ["src/realtime/index.ts"]);
+  assert.ok(es.some((e) => e.kind === "socket" && e.file === "src/realtime/index.ts"));
+  done();
+});
+
 test("ui: screens link to routes through generated clients, API objects and wrappers; in-app links don't count", async () => {
   const { linkUi } = await import("../core/ui.mjs");
   const { execFileSync } = await import("node:child_process");

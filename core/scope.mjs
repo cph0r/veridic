@@ -69,18 +69,7 @@ export function scope(g, inv, seeds, opts = {}) {
   for (const r of inv.routes) {
     units.push({ kind: WEBHOOK_PATH.test(r.path) ? "webhook" : "route", id: r.id, file: r.file, start: r.start, end: r.end, guards: r.guards.map((x) => x.name) });
   }
-  for (const f of codeFiles) {
-    const src = g.text(f) ?? "";
-    for (const m of src.matchAll(TIMER_CALL)) {
-      const open = m.index + m[0].length - 1;
-      const close = matchParen(src, open);
-      if (close < 0) continue;
-      const start = lineAt(src, m.index);
-      const end = lineAt(src, close);
-      const name = g.enclosing(f, start)?.name;
-      units.push({ kind: "timer", id: `${m[1].replace(/\s+/, " ")} ${name ?? "(anonymous)"} @ ${f}:${start}`, name: name ?? null, file: f, start, end, every: intervalOf(src.slice(open, close)) });
-    }
-  }
+  for (const e of entryPoints(g, codeFiles)) if (e.kind === "timer") units.push(e);
 
   // --- closures --------------------------------------------------------------
   // (Computed twice: once to measure reach, then with reach-ubiquitous symbols cut.)
@@ -306,6 +295,38 @@ function intervalOf(args) {
 }
 
 /** Drizzle/Sequelize/Mongoose table definitions: `export const ordersTable = pgTable("orders", ...)`. */
+// A WebSocket server, or a "connection"/"upgrade" handler in a file that uses WebSockets
+// (a database pool's "connection" event is not one).
+const SOCKET_CALL = /new\s+WebSocketServer\s*\(|\b[\w$]+\s*\.\s*on\s*\(\s*["'](?:connection|upgrade)["']/g;
+const USES_SOCKETS = /WebSocket|socket\.io|from\s+["']ws["']|require\(\s*["']ws["']\s*\)/;
+
+/** Entry points that are not routes: timers and WebSocket handlers, each with its extent. */
+export function entryPoints(g, files) {
+  const out = [];
+  for (const f of files) {
+    const src = g.text(f) ?? "";
+    const at = (m, kind, label) => {
+      const open = m.index + m[0].indexOf("(");
+      const close = matchParen(src, open);
+      if (close < 0) return null;
+      const start = lineAt(src, m.index);
+      const end = lineAt(src, close);
+      const name = g.enclosing?.(f, start)?.name ?? null;
+      return { kind, id: `${label} ${name ?? "(anonymous)"} @ ${f}:${start}`, name, file: f, start, end, open, close };
+    };
+    for (const m of src.matchAll(TIMER_CALL)) {
+      const e = at(m, "timer", m[1].replace(/\s+/, " "));
+      if (e) { const { open, close, ...rest } = e; out.push({ ...rest, every: intervalOf(src.slice(open, close)) }); }
+    }
+    if (!USES_SOCKETS.test(src)) continue;
+    for (const m of src.matchAll(SOCKET_CALL)) {
+      const e = at(m, "socket", "socket");
+      if (e) { const { open, close, ...rest } = e; out.push(rest); }
+    }
+  }
+  return out;
+}
+
 export function tableDefs(g, codeFiles) {
   const out = [];
   const DEF = /(?:export\s+)?const\s+(\w+)\s*=\s*(?:pgTable|mysqlTable|sqliteTable|\w+\.define|mongoose\.model|model)\s*(?:<[^>]*>)?\(\s*["'`](\w+)["'`]/g;
