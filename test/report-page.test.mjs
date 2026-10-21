@@ -118,3 +118,19 @@ test("report page: no coverage data, no gauge", () => {
   assert.equal(m.counts.behaviour, 0);
   assert.ok(!m.later.some((c) => /files no spec describes/.test(c.html)));
 });
+
+// ---- the specs table: filters and sorters ----
+test("report page: the specs table filters by health and text, and sorts by any column", () => {
+  const m = load()(data());
+  // orders: 1 proven, 1 broken, 1 stale, 1 untested; menu: 1 proven, 1 pointing at code that's gone
+  const rows = (o) => [...m.rows(o).map((r) => r.path)];
+  assert.deepEqual(rows({}), ["specs/orders/spec.md", "specs/menu/spec.md"], "worst first by default");
+  assert.deepEqual(rows({ filter: "broken" }), ["specs/orders/spec.md"]);
+  assert.deepEqual(rows({ filter: "stale" }), ["specs/orders/spec.md", "specs/menu/spec.md"], "out of date includes code gone");
+  assert.deepEqual(rows({ filter: "proven" }), []);
+  assert.deepEqual(rows({ q: "MENU" }), ["specs/menu/spec.md"]);
+  assert.deepEqual(rows({ sort: "rules", dir: "asc" }), ["specs/menu/spec.md", "specs/orders/spec.md"]);
+  assert.deepEqual(rows({ sort: "name", dir: "asc" }), ["specs/menu/spec.md", "specs/orders/spec.md"]);
+  const orders = m.rows({}).find((r) => r.path === "specs/orders/spec.md");
+  assert.deepEqual({ rules: orders.rules.length, proven: orders.proven.length, broken: orders.broken.length, outdated: orders.outdated, untested: orders.untested.length, files: orders.files, health: orders.health }, { rules: 4, proven: 1, broken: 1, outdated: 1, untested: 2, files: 1, health: "Broken" });
+});

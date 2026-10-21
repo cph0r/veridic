@@ -63,12 +63,33 @@ var veridicModel = (D) => {
       broken: by("broken"), lost: by("lost"), stale: by("stale"), proven: by("proven"), weak: by("weak"),
       untested: rules.filter((r) => statusOf(r).tone === "none") };
     sp.tone = !rules.length ? "none" : sp.broken.length ? "bad" : sp.lost.length || sp.stale.length || sp.weak.length ? "warn" : sp.untested.length ? "todo" : "good";
+    sp.outdated = sp.stale.length + sp.lost.length;
+    sp.health = { bad: "Broken", warn: sp.outdated ? "Out of date" : "Weak tests", todo: "Not tested", good: "Proven", none: "No rules" }[sp.tone];
+    sp.files = new Set(rules.flatMap((r) => (r.cites || []).map((c) => c.file).filter(Boolean))).size;
     return sp;
   });
   const TONE = { bad: 0, warn: 1, todo: 2, none: 3, good: 4 };
   const trouble = (s) => s.broken.length + s.stale.length + s.lost.length;
   specs.sort((a, b) => TONE[a.tone] - TONE[b.tone] || trouble(b) - trouble(a) || b.rules.length - a.rules.length);
   const S = new Map(specs.map((s) => [s.path, s]));
+
+  // The specs table: filter by health and text, sort by any column (default: worst first).
+  const FILTERS = {
+    all: () => true, fix: (s) => s.broken.length || s.outdated, broken: (s) => s.broken.length,
+    stale: (s) => s.outdated, untested: (s) => s.untested.length, proven: (s) => s.tone === "good",
+  };
+  const SORTS = {
+    name: (s) => s.name.toLowerCase(), health: (s) => TONE[s.tone], rules: (s) => s.rules.length,
+    proven: (s) => (s.rules.length ? s.proven.length / s.rules.length : -1), broken: (s) => s.broken.length,
+    outdated: (s) => s.outdated, untested: (s) => s.untested.length, stories: (s) => s.stories.length, files: (s) => s.files,
+  };
+  const rows = ({ q = "", filter = "all", sort = null, dir = "desc" } = {}) => {
+    const needle = String(q).trim().toLowerCase();
+    const out = specs.filter((s) => (FILTERS[filter] || FILTERS.all)(s) && (!needle || (s.name + " " + s.path).toLowerCase().includes(needle)));
+    if (!sort || !SORTS[sort]) return out; // already worst first
+    const k = SORTS[sort], sign = dir === "asc" ? 1 : -1;
+    return out.map((s, i) => [s, i]).sort(([a, i], [b, j]) => { const x = k(a), y = k(b); return x < y ? -sign : x > y ? sign : i - j; }).map(([s]) => s);
+  };
 
   // ---- the numbers: rules, counted the way the cards count them ----
   const sum = (f) => specs.reduce((n, s) => n + f(s), 0);
@@ -115,7 +136,7 @@ var veridicModel = (D) => {
     : 'Every rule is true to the code <em class="c-good">and proven.</em>';
   const app = D.app || {};
 
-  return { specs, S, counts, fix, later, verdict, title: app.title || D.name, stateOf, statusOf, ruleText, RANK, plural, esc, cap, REQ };
+  return { rows, specs, S, counts, fix, later, verdict, title: app.title || D.name, stateOf, statusOf, ruleText, RANK, plural, esc, cap, REQ };
 };
 
 (() => {
@@ -134,13 +155,16 @@ var veridicModel = (D) => {
   const SUN = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>';
   const MOON = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>';
   const hid = (g) => (g ? ' data-g="' + g + '"' : "");
+  let open = null; // the spec open in the sheet
 
   // ---- the shell ----
   $("#app").innerHTML = `<div class="wrap">
   <div class="top"><div class="brand"><span class="logo"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5 9-10"/></svg></span>Veridic</div>
     <div class="when"><span id="when"></span><button class="icon-btn" id="theme" aria-label="Switch theme"></button></div></div>
   <section class="hero"><div class="rv"><div class="eyebrow" id="appname"></div><h1 class="verdict" id="verdict"></h1><p class="about" id="stats"></p></div><div class="rings rv" id="rings" style="animation-delay:.12s"></div></section>
-  <section id="specs-sec"><h2 class="rv" style="animation-delay:.2s">Your specs <span class="hint">· tap one to read it</span></h2><div class="grid rv" style="animation-delay:.25s" id="grid"></div></section>
+  <section id="specs-sec"><h2 class="rv" style="animation-delay:.2s">Your specs <span class="hint">· click a row to read it, a heading to sort</span></h2>
+  <div class="tools rv" style="animation-delay:.22s"><input id="q" type="search" placeholder="Search specs" aria-label="Search specs"><div class="seg" id="filters" role="group" aria-label="Show"></div></div>
+  <div class="tablewrap rv" style="animation-delay:.25s"><table class="specs"><thead><tr id="thead"></tr></thead><tbody id="tbody"></tbody></table><div class="noresults" id="noresults" hidden>No spec matches.</div></div></section>
   <section id="fix-sec"><h2 class="rv" style="animation-delay:.3s">Fix first</h2><div class="cards rv" style="animation-delay:.35s" id="fix"></div></section>
   <section id="later-sec"><h2 class="rv" style="animation-delay:.35s">When you have time</h2><div class="cards rv" style="animation-delay:.4s" id="later"></div></section>
   <footer class="foot" id="foot"></footer>
@@ -162,20 +186,39 @@ var veridicModel = (D) => {
     ring(pct(counts.proven, counts.rules), "Proven", counts.proven + " of " + plural(counts.rules, "rule") + (counts.broken ? " · " + counts.broken + " broken" : ""), counts.broken ? "var(--bad)" : null) +
     (counts.behaviour ? ring(pct(counts.covered, counts.behaviour), "Covered", counts.covered + " of " + counts.behaviour + " files described by a spec") : "");
 
-  // ---- every spec, as a card: its ring is its rules, proven, broken and out of date ----
-  const C = (r) => 2 * Math.PI * r;
-  function specRing(s) {
-    const r = 22, n = s.rules.length || 1, segs = [[s.proven.length, "var(--good)"], [s.broken.length, "var(--bad)"], [s.stale.length + s.lost.length, "var(--warn)"]];
-    let at = 0, out = '<svg class="sring" viewBox="0 0 56 56" aria-hidden="true"><circle cx="28" cy="28" r="' + r + '" fill="none" stroke="var(--line)" stroke-width="6"/>';
-    for (const [k, color] of segs) { if (!k) continue; const f = k / n; out += '<circle class="arc" cx="28" cy="28" r="' + r + '" fill="none" stroke="' + color + '" stroke-width="6" stroke-dasharray="' + C(r) + '" stroke-dashoffset="' + C(r) + '" data-to="' + C(r) * (1 - f) + '" transform="rotate(' + (-90 + at * 360) + ' 28 28)"/>'; at += f; }
-    return out + '<text x="28" y="33" text-anchor="middle" class="sring-n">' + s.rules.length + "</text></svg>";
+  // ---- every spec, as a row: filter by health or text, sort by any column ----
+  const COLS = [
+    ["name", "Spec", "text"], ["health", "Health", "text"], ["rules", "Rules", "num"], ["proven", "Proven", "num"],
+    ["broken", "Broken", "num"], ["outdated", "Out of date", "num"], ["untested", "Not tested", "num"], ["stories", "Stories", "num"], ["files", "Files", "num"],
+  ];
+  const FILTER = [["all", "All"], ["fix", "Needs fixing"], ["stale", "Out of date"], ["untested", "Not tested"], ["proven", "Proven"]];
+  let view = { q: "", filter: "all", sort: null, dir: "desc" };
+  try { view = { ...view, ...JSON.parse(store.get("table:" + D.name) || "{}") }; } catch {}
+  const num = (n, cls) => (n ? '<span class="' + (cls || "") + '">' + n + "</span>" : '<span class="zero">–</span>');
+  const rowHTML = (s) => {
+    const pct = s.rules.length ? Math.round((100 * s.proven.length) / s.rules.length) : 0;
+    return '<tr data-spec="' + esc(s.path) + '" tabindex="0"' + (open === s.path ? ' class="sel"' : "") + '><td class="c-name"><div class="snm"><i class="sh ' + s.tone + '">' + SH[s.tone] + "</i>" + esc(s.name) + '</div><div class="spath">' + esc(s.path) + "</div></td>" +
+      '<td><span class="hl ' + s.tone + '">' + esc(s.health) + "</span></td>" +
+      '<td class="num">' + s.rules.length + "</td>" +
+      '<td class="num"><div class="pv"><span>' + s.proven.length + (s.rules.length ? '<small> /' + s.rules.length + "</small>" : "") + '</span><i class="pbar"><b style="width:' + pct + '%"></b></i></div></td>' +
+      '<td class="num">' + num(s.broken.length, "c-bad") + '</td><td class="num">' + num(s.outdated, "c-warn") + '</td><td class="num">' + num(s.untested.length) + '</td><td class="num">' + num(s.stories.length) + '</td><td class="num">' + num(s.files) + "</td></tr>";
+  };
+  function drawTable() {
+    store.set("table:" + D.name, JSON.stringify(view));
+    $("#thead").innerHTML = COLS.map(([k, label, kind]) => '<th class="' + kind + '" aria-sort="' + (view.sort === k ? (view.dir === "asc" ? "ascending" : "descending") : "none") + '"><button data-sort="' + k + '">' + label + '<span class="arrow">' + (view.sort === k ? (view.dir === "asc" ? "↑" : "↓") : "") + "</span></button></th>").join("");
+    $("#filters").innerHTML = FILTER.map(([k, label]) => '<button data-filter="' + k + '" aria-pressed="' + (view.filter === k) + '">' + label + '<span class="n">' + M.rows({ filter: k }).length + "</span></button>").join("");
+    const list = M.rows(view);
+    $("#tbody").innerHTML = list.map(rowHTML).join("");
+    $("#noresults").hidden = list.length > 0;
   }
-  const flag = (n, word, cls) => (n ? '<span class="flag ' + cls + '">' + n + " " + word + "</span>" : "");
-  if (specs.length) $("#grid").innerHTML = specs.map((s) => '<button class="scard" data-spec="' + esc(s.path) + '">' + specRing(s) + '<span class="sbody"><span class="snm"><i class="sh ' + s.tone + '">' + SH[s.tone] + "</i>" + esc(s.name) + '</span><span class="ssub">' + [plural(s.rules.length, "rule"), s.stories.length ? plural(s.stories.length, "story", "stories") : ""].filter(Boolean).join(" · ") + '</span><span class="flags">' + flag(s.broken.length, "broken", "bad") + flag(s.stale.length, "out of date", "warn") + flag(s.lost.length, "code gone", "warn") + (s.rules.length ? '<span class="flag">' + s.proven.length + " of " + s.rules.length + " proven</span>" : '<span class="flag">no rules yet</span>') + "</span></span></button>").join("");
+  if (specs.length) {
+    $("#q").value = view.q;
+    $("#q").addEventListener("input", () => { view.q = $("#q").value; drawTable(); });
+    drawTable();
+  }
   else { $("#specs-sec").remove(); $("#foot").insertAdjacentHTML("beforebegin", '<div class="allgood">This repo has no specs yet. Ask Claude to <b>write a spec</b> for a part of your app (<code>veridic modules</code> lists the parts), then run <code>veridic report</code> again.</div>'); }
 
   // ---- a spec, in a sheet: what needs attention, its stories, its rules ----
-  let open = null;
   const fold = (g, items, render, n, label) => items.slice(0, n).map((x) => render(x)).join("") + items.slice(n).map((x) => render(x, g)).join("") + (items.length > n ? '<button class="showall" data-unfold="' + g + '">' + label(items.length - n) + " →</button>" : "");
   function ruleHTML(r, g) {
     const t = M.ruleText(r), st = M.stateOf(r);
@@ -209,7 +252,7 @@ var veridicModel = (D) => {
     const s = S.get(path); if (!s) return;
     const panel = $("#panel");
     if (open === path && panel.classList.contains("open") && !rule) { closeSpec(); return; }
-    document.querySelectorAll(".scard").forEach((c) => c.classList.toggle("sel", c.dataset.spec === path));
+    document.querySelectorAll("#tbody tr").forEach((c) => c.classList.toggle("sel", c.dataset.spec === path));
     open = path;
     $("#part").innerHTML = specHTML(s);
     panel.scrollTop = 0;
@@ -230,13 +273,22 @@ var veridicModel = (D) => {
     open = null;
     $("#panel").classList.remove("open");
     document.body.classList.remove("sheet-open");
-    document.querySelectorAll(".scard.sel").forEach((c) => c.classList.remove("sel"));
+    document.querySelectorAll("#tbody tr.sel").forEach((c) => c.classList.remove("sel"));
     try { history.replaceState(null, "", location.pathname + location.search); } catch {}
   }
-  document.addEventListener("keydown", (ev) => { if (ev.key === "Escape" && open) closeSpec(); });
+  document.addEventListener("keydown", (ev) => {
+    if (ev.key === "Escape" && open) closeSpec();
+    const tr = ev.target.closest && ev.target.closest("#tbody tr");
+    if (tr && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); openSpec(tr.dataset.spec); }
+  });
   $("#scrim").addEventListener("click", closeSpec);
   document.addEventListener("click", (ev) => {
     const t = ev.target;
+    const so = t.closest("[data-sort]");
+    // First click: names A to Z, numbers high to low; the next click reverses.
+    if (so) { const k = so.dataset.sort, first = k === "name" ? "asc" : "desc"; view = { ...view, dir: view.sort === k ? (view.dir === "asc" ? "desc" : "asc") : first, sort: k }; drawTable(); return; }
+    const fi = t.closest("[data-filter]");
+    if (fi) { view.filter = fi.dataset.filter; drawTable(); return; }
     const ref = t.closest("[data-ref]");
     if (ref) { ev.stopPropagation(); showRule(ref.dataset.ref); return; }
     const sp = t.closest("[data-spec]");
