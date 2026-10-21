@@ -14,6 +14,7 @@ import { auditTests, testCoverage } from "./tests.mjs";
 import { metrics, defaultSpecs, isSpecFile } from "./metrics.mjs";
 import { checkCitations, repoFiles } from "./citations.mjs";
 import { screenGroups } from "./screens.mjs";
+import { specCoverage } from "./coverage.mjs";
 import { staleness } from "./staleness.mjs";
 import { doneWithoutSpec, loadClaim } from "./seam.mjs";
 import { findModules } from "./modules.mjs";
@@ -437,6 +438,13 @@ export async function collectReport(repo, { specs: specFiles } = {}) {
   } catch (e) {
     out.screens = [];
     out.errors.push(`screens: ${e.message}`);
+  }
+  // How much of the app the specs describe (see coverage.mjs); the per-file map stays out.
+  try {
+    const { cited, ...cov } = specCoverage(repo, out);
+    out.coverage = cov;
+  } catch (e) {
+    out.errors.push(`coverage: ${e.message}`);
   }
   return out;
 }

@@ -102,3 +102,19 @@ test("report page: a rule reads as plain words: its first clause, the rest on ta
   assert.equal(t.head, "Must reject a new order whose body is invalid, whose table does not belong to the restaurant, whose restaurant is unknown");
   assert.match(t.rest, /log it/);
 });
+
+test("report page: the dashboard shows how much of the app the specs describe", () => {
+  const m = load()(data({ coverage: { behaviour: 10, covered: 7, pct: 70, parts: [{ id: "orders", name: "Orders", total: 5, covered: 2, uncovered: ["a", "b", "c"] }], orphans: [] } }));
+  assert.equal(m.counts.covered, 7);
+  assert.equal(m.counts.behaviour, 10);
+  const card = m.later.find((c) => /files no spec describes/.test(c.html));
+  assert.match(card.html, /3 files no spec describes/);
+  assert.match(card.w, /Most in Orders \(3\)/);
+  assert.equal(card.spec, "specs/orders/spec.md"); // the part with the most, through its spec
+});
+
+test("report page: no coverage data, no gauge", () => {
+  const m = load()(data());
+  assert.equal(m.counts.behaviour, 0);
+  assert.ok(!m.later.some((c) => /files no spec describes/.test(c.html)));
+});

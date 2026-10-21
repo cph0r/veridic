@@ -77,6 +77,8 @@ var veridicModel = (D) => {
     proven: sum((s) => s.proven.length), broken: sum((s) => s.broken.length), stale: sum((s) => s.stale.length), lost: sum((s) => s.lost.length),
     weak: sum((s) => s.weak.length), untested: sum((s) => s.untested.length),
     true: sum((s) => s.rules.filter((r) => !r.stale && !lost(r)).length),
+    // how much of the app's behaviour code the specs cite (veridic coverage)
+    behaviour: (D.coverage && D.coverage.behaviour) || 0, covered: (D.coverage && D.coverage.covered) || 0,
   };
 
   // Fix first: rules the code breaks, then rules that point at code that's gone or describe code that changed.
@@ -88,6 +90,16 @@ var veridicModel = (D) => {
   for (const s of specs) if (s.weak.length) later.push({ tone: "warn", spec: s.path, rule: s.weak[0].id, html: esc(plural(s.weak.length, "rule") + (s.weak.length === 1 ? " has a test" : " have tests") + " that don't really check " + (s.weak.length === 1 ? "it" : "them")), w: "A test that checks nothing passes even when the code is wrong." });
   const most = [...specs].filter((s) => s.untested.length).sort((a, b) => b.untested.length - a.untested.length);
   if (most.length) { const n = most.reduce((k, s) => k + s.untested.length, 0); later.push({ tone: "todo", spec: most[0].path, html: esc(plural(n, "rule") + (n === 1 ? " has" : " have") + " no test yet"), w: esc(most.length === 1 ? "All in " + most[0].name + "." : "Across " + plural(most.length, "spec") + "; most in " + most[0].name + " (" + most[0].untested.length + ").") }); }
+
+  // The files no spec describes yet, pointing at the part with the most (through its spec).
+  const gap = counts.behaviour - counts.covered;
+  if (counts.behaviour && gap > 0) {
+    const cov = D.coverage, parts = [...(cov.parts || [])].sort((a, b) => b.uncovered.length - a.uncovered.length);
+    const top = parts[0] && parts[0].uncovered.length >= (cov.orphans || []).length ? { name: parts[0].name, n: parts[0].uncovered.length, id: parts[0].id } : { name: "code in no part", n: (cov.orphans || []).length, id: null };
+    const owner = [...(D.modules || []), ...(D.screens || [])].find((m) => m.id === top.id);
+    const spec = owner && (owner.specs || []).find((p) => S.has(p)) || null;
+    later.push({ tone: "todo", spec, html: esc(plural(gap, "file") + " no spec describes"), w: esc("Most in " + top.name + " (" + top.n + "). veridic coverage lists them.") });
+  }
 
   // ---- the headline ----
   const is = (n, one, many) => (n === 1 ? one : many);
@@ -147,7 +159,8 @@ var veridicModel = (D) => {
   const pct = (a, b) => (b ? Math.round((100 * a) / b) : 0);
   if (counts.rules) $("#rings").innerHTML =
     ring(pct(counts.true, counts.rules), "Up to date", counts.true + " of " + plural(counts.rules, "rule") + " match the code") +
-    ring(pct(counts.proven, counts.rules), "Proven", counts.proven + " of " + plural(counts.rules, "rule") + (counts.broken ? " · " + counts.broken + " broken" : ""), counts.broken ? "var(--bad)" : null);
+    ring(pct(counts.proven, counts.rules), "Proven", counts.proven + " of " + plural(counts.rules, "rule") + (counts.broken ? " · " + counts.broken + " broken" : ""), counts.broken ? "var(--bad)" : null) +
+    (counts.behaviour ? ring(pct(counts.covered, counts.behaviour), "Covered", counts.covered + " of " + counts.behaviour + " files described by a spec") : "");
 
   // ---- every spec, as a card: its ring is its rules, proven, broken and out of date ----
   const C = (r) => 2 * Math.PI * r;
@@ -236,7 +249,7 @@ var veridicModel = (D) => {
   });
 
   // ---- fix first, then what can wait ----
-  const card = (l, s, i, g) => '<button class="card' + (i >= 6 ? " x" : "") + '"' + hid(i >= 6 ? g : "") + ' data-spec="' + esc(l.spec) + '"' + (l.rule ? ' data-rule="' + esc(l.rule) + '"' : "") + '><i class="sh ' + (l.tone || s) + '">' + SH[l.tone || s] + '</i><span><div class="t">' + l.html + '</div><div class="w">' + l.w + '</div><div class="p">' + esc(S.get(l.spec).name) + " →</div></span></button>";
+  const card = (l, s, i, g) => '<button class="card' + (i >= 6 ? " x" : "") + '"' + hid(i >= 6 ? g : "") +  (l.spec ? ' data-spec="' + esc(l.spec) + '"' : "") + (l.rule ? ' data-rule="' + esc(l.rule) + '"' : "") + '><i class="sh ' + (l.tone || s) + '">' + SH[l.tone || s] + '</i><span><div class="t">' + l.html + '</div><div class="w">' + l.w + '</div>' + (l.spec ? '<div class="p">' + esc(S.get(l.spec).name) + " →</div>" : "") + "</span></button>";
   const deal = (sec, id, list, s) => {
     if (!list.length) { $(sec).remove(); return; }
     $("#" + id).innerHTML = list.map((l, i) => card(l, s, i, id)).join("");
