@@ -27,7 +27,9 @@ frontend, screen groups (`guest`, `admin`, …). Use its split, never your own.
    usage, and that nothing in the app's code changes. Unless the user named the
    parts, ask how many to do now (suggest the first four, or all of them if
    there are four or fewer) and wait for the answer.
-3. **Write, one agent per part,** at most four at a time. Run the agents in
+3. **Write, one agent per part,** at most four at a time. Never give two agents
+   the same spec at once: parts that write or extend the same spec file go to
+   one agent, together. Run the agents in
    the foreground, never in the background, and wait until every one has
    replied before going on: the specs are only done when the agents are. Give
    each agent this, with the part filled in:

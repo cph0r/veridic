@@ -168,3 +168,20 @@ Placement (after step 3's Jaccard joins, before naming): an entry whose file a g
 - [ ] **Step 2:** Same on juice-shop from the bench cache (it has an Angular frontend): coverage before/after, specs added.
 - [ ] **Step 3:** Write the numbers (App A anonymised) under "Results" here; success is ≥ 74% on App A with every new spec clean, at no more than the hand-directed cost.
 - [ ] **Step 4: Commit** `plan: measured coverage before and after /veridic:specs`.
+
+## Results (2026-10-22)
+
+**App A** (private Express + React app; a fresh copy with its original 19 specs; `/veridic:specs` headless on Sonnet, before the final-review fixes):
+
+| | Before | After `/veridic:specs` | Hand-directed (6 agents, Opus) |
+|---|---|---|---|
+| Behaviour files cited by a spec | 149 / 384 (39%) | **380 / 384 (99%)** | 289 / 388 (74%) |
+| Specs | 19 | 44 | 30 |
+| Agents | | 30 (3 screen groups, 5 parts with gaps, 22 folders in no part) | 6 |
+| Cost, time | | $15.43, 37 min, 43 turns | not recorded |
+
+Checked independently after the run: every citation in all 44 specs resolves and `veridic claims` passes on all of them; 3 specs carry 4 range warnings (a citation starting on an import or a blank line), which their agents had reported as clean. The 4 files left: one an agent explained (a provider-name map), three in parts under the one-fifth threshold. No app code changed.
+
+Found by the run and fixed: two agents extended the same spec at once (it merged cleanly, by luck); `/veridic:specs` now gives parts that share a spec to one agent. Screen specs were written to `specs/<area>` rather than `specs/<area>-app`; the final-review fix makes screen ids `<area>-app`, matching their spec paths.
+
+**juice-shop** (public, Angular frontend, no specs): `veridic coverage` only, 0 / 371, 39 parts, no screen groups. Not run through `/veridic:specs`: Angular routes (no leading slash, no pages/ folder) give no screen groups, and data/static/codefixes (80 sample files) count as behaviour; both are recorded gaps.
