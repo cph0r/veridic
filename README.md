@@ -40,7 +40,7 @@ veridic init              # builds the code index; checks your routes are found
 veridic init --enforce    # optional: Claude can't finish while Veridic says NOT DONE
 ```
 
-`init` also splits your app into its modules (orders, menu, auth…), found from the code. If they have no specs yet, it offers to start Claude Code on `/veridic:specs`, which writes one spec per module, riskiest first, and asks before starting.
+`init` also splits your app into its parts, found from the code: server modules (orders, menu, auth…) with their timers and WebSocket handlers, and your frontend's screens grouped by who uses them (guest, admin…). If they have no specs yet, it offers to start Claude Code on `/veridic:specs`, which writes specs until the whole app is covered, riskiest parts first, and asks before starting.
 
 That's all. From now on Claude uses Veridic on its own when it changes, reviews or documents your code.
 
@@ -62,13 +62,19 @@ Claude claims the refund route, sees what that code reaches before touching it, 
 
 > Write specs for every module (or run `/veridic:specs`).
 
+> How much of our app do the specs describe?
+
 Or see everything at once:
 
 ```bash
 veridic report      # or: veridic ui, or /veridic:report in Claude Code
 ```
 
-One page opens in your browser: your app's specs and nothing else. A sentence says how they stand ("1 rule is broken and 4 are out of date"), two gauges show how many rules still match the code and how many a test proves, and every spec is a card whose ring shows its rules proven, broken or out of date. Open a spec to read its user stories and scenarios and every rule, with where it lives in the code and which tests prove it. Below, what to fix first and which rules still need a test. It only shows: it never changes anything. It's one local file, `.veridic/report.html` (git-ignored): no server, no network, nothing uploaded.
+One page opens in your browser: your app's specs and nothing else.
+
+<img src="assets/dashboard.png" alt="The Veridic dashboard: a headline saying 3 rules are broken, gauges for rules up to date, proven and covered, a sortable table of specs, and the broken rules to fix first" width="720">
+
+A sentence says how the specs stand ("3 rules are broken"). Three gauges show how many rules still match the code, how many a test proves, and how much of the app the specs cover. Every spec is a row you can search, filter (needs fixing, out of date, not tested, proven) and sort by any column; click one to read its user stories and scenarios and every rule, with where it lives in the code and which tests prove it. Below: what to fix first, and what can wait. It only shows: it never changes anything. It's one local file, `.veridic/report.html` (git-ignored): no server, no network, nothing uploaded.
 
 ## How it works
 
@@ -89,7 +95,7 @@ flowchart LR
 | Finishing | `veridic done` | **DONE**, or exactly which change strayed outside the claim, which changed route has no real test, which new test asserts nothing |
 | Checking an API for agents | `veridic agent-ready` | What every route really does: reads, writes, deletes, moves money, and which act on ids the caller doesn't own |
 | Writing a spec | `/veridic:spec checkout` | Spec Kit–format requirements, each citing the lines that implement it and checked against them |
-| Writing specs for the whole app | `/veridic:specs` | One spec per module (`veridic modules`), riskiest first, each from `veridic prepare --module <id>`: what every route really does, its tables, screens, tests and open findings |
+| Writing specs for the whole app | `/veridic:specs` | Specs until the app is covered: parts with no spec first (riskiest first), then specs that miss their own files, then code in no part. Each agent works from `veridic prepare --module <id>`: what every route really does, its tables, screens, tests and open findings |
 | How much of the app the specs describe | `veridic coverage` | Every behaviour file and the spec that cites it, per module and screen group; what's in no part; every file left out (tests, generated code, types, config, seeds) with its reason |
 | Asked "why is it like this?" | `veridic why FR-002` | The commits that wrote that code |
 
@@ -137,6 +143,8 @@ Measured on 10 public Express apps (OWASP Juice Shop, NodeGoat, hackathon-starte
 
 Writing a feature spec, against plain Claude Code on two production apps: **$0.94 instead of $2.46, 4.3 instead of 6.6 minutes**, and 100% of stated facts found in the cited code (versus 79–89%).
 
+Covering a whole app: on a production Express + React app, `/veridic:specs` took the share of its code described by a spec **from 39% to 99%** (380 of 384 files) in 37 minutes, for $15, with every citation pointing at real code.
+
 ## FAQ
 
 <details>
@@ -166,7 +174,7 @@ Only when the work isn't finished. The Stop hook is off until you run `veridic i
 <details>
 <summary><strong>Which frameworks?</strong></summary>
 
-Express (JavaScript and TypeScript) today; Fastify, NestJS and Next.js route handlers are next. Effects are recognized for SQL, Drizzle, MongoDB/Mongoose, Sequelize and Prisma.
+Express (JavaScript and TypeScript) today; Fastify, NestJS and Next.js route handlers are next. Effects are recognized for SQL, Drizzle, MongoDB/Mongoose, Sequelize and Prisma. Frontend screens are grouped for React apps (React Router, wouter, Next.js app router, or a `pages/` folder); Angular screens aren't yet, and fall under code in no part.
 </details>
 
 <details>
