@@ -130,3 +130,37 @@ test("review: following helpers stays fast on a big helper module", () => {
   matrix({ "lib/h.ts": helpers, "app/api/x/route.ts": `import { ${Array.from({ length: n }, (_, i) => `h${i}`).join(", ")} } from "@/lib/h";\nexport async function POST(req) {\n${body}\n  return Response.json({});\n}\n` });
   assert.ok(Date.now() - t < 5000, `took ${Date.now() - t} ms`);
 });
+
+test("review: on a public route, a userId set only when signed in doesn't scope the URL's id", () => {
+  const { m } = matrix({
+    "app/api/chat/[chatId]/messages/route.ts": [
+      "export async function POST(req, { params }) {",
+      "  const session = await getServerSession(authOptions);",
+      '  const viewerId = new URL(req.url).searchParams.get("viewerId");',
+      "  let userId;",
+      "  if (session) userId = session.user.id;",
+      "  await validateChatAccess({ chatId: params.chatId, userId, viewerId });",
+      "  await prisma.message.create({ data: { chatId: params.chatId } });",
+      "  return Response.json({});",
+      "}",
+    ].join("\n"),
+  });
+  const r = m["POST /api/chat/:chatId/messages"];
+  assert.equal(r.access, "public");
+  assert.notEqual(r.scoped, "yes");
+  assert.ok(r.flags.includes("id-param-without-caller-scope"));
+});
+
+test("review: a sign-in call wrapped in parentheses and a type cast is still a sign-in check", () => {
+  const { m } = matrix({
+    "pages/api/teams/[teamId]/mode.ts": [
+      "export default async function handle(req, res) {",
+      "  const session = (await getServerSession(req, res, authOptions)) as Session | null;",
+      '  if (!session?.user?.id) return res.status(401).json({ error: "Unauthorized" });',
+      "  await prisma.team.updateMany({ where: { id: req.query.teamId, users: { some: { userId: session.user.id } } }, data: {} });",
+      "  return res.json({});",
+      "}",
+    ].join("\n"),
+  });
+  assert.equal(m["ALL /api/teams/:teamId/mode"].access, "auth");
+});

@@ -117,10 +117,15 @@ export function accessMatrix(g, inv) {
     // Without sign-in anywhere on the route, req.user can't be the caller (it's whatever was loaded).
     const identity = access !== "public" && (CALLER_IN_HANDLER.test(body) || CALLER_IN_HANDLER.test(text)); // text: an inline handler
     // A framework adapter marks a guard that checks the caller's membership of the URL's ids.
-    const ownerChecked = guards.some((n) => OWNER_GUARD.test(n)) || (r.guards ?? []).some((x) => x.scope === "caller") || OWNER_HELPER.test(body) || OWNER_HELPER.test(text) || factoryChecked(g, r, handlerNames.get(r));
+    // On a public Next.js route an owner helper has no signed-in caller to compare with.
+    const ownerHelper = (OWNER_HELPER.test(body) || OWNER_HELPER.test(text)) && (r.framework !== "nextjs" || access !== "public");
+    const ownerChecked = guards.some((n) => OWNER_GUARD.test(n)) || (r.guards ?? []).some((x) => x.scope === "caller") || ownerHelper || factoryChecked(g, r, handlerNames.get(r));
     const tenantScoped = guards.some((n) => MEMBER_GUARD.test(n)) && (TENANT_USE.test(text) || TENANT_USE.test(body));
     const callerIdiom = access !== "public" && !!idiom.caller && (idiom.caller.test(text) || idiom.caller.test(body));
-    let scoped = CALLER.test(text) || identity || ownerChecked || tenantScoped || callerIdiom || guards.some((n) => OWNER_GUARD.test(n)) ? "yes" : CLIENT_SCOPE.test(text) || CLIENT_SCOPE.test(body) ? "weak" : "no";
+    // Express's loose caller words stand as they were; on a Next.js route they count only once
+    // sign-in is required (a userId set only when a session exists scopes nothing).
+    const callerWords = CALLER.test(text) && (r.framework !== "nextjs" || access !== "public");
+    let scoped = callerWords || identity || ownerChecked || tenantScoped || callerIdiom || guards.some((n) => OWNER_GUARD.test(n)) ? "yes" : CLIENT_SCOPE.test(text) || CLIENT_SCOPE.test(body) ? "weak" : "no";
     const flags = [];
     // Identity or ownership supplied by the client on a write. Not when middleware put the
     // caller's own user id there (`appendUserId()`) and that is the field used.

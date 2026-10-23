@@ -416,10 +416,10 @@ function middlewareGuard(g, dir) {
 
 // Sign-in checks in a handler: the call, the names it binds, and an early exit when they're missing.
 const SIGN_IN = [
-  [/\b(?:const|let)\s+(\{[^=]*\}|[\w$]+)\s*=\s*(?:await\s+)?auth\s*\(\s*\)/g, "auth()"],
-  [/\b(?:const|let)\s+(\{[^=]*\}|[\w$]+)\s*=\s*(?:await\s+)?getServerSession\s*\(/g, "getServerSession()"],
-  [/\b(?:const|let)\s+(\{[^=]*\}|[\w$]+)\s*=\s*(?:await\s+)?currentUser\s*\(\s*\)/g, "currentUser()"],
-  [/\b(?:const|let)\s+(\{[^=]*\}|[\w$]+)\s*=\s*(?:await\s+)?[\w$.]*\bauth\s*\.\s*getUser\s*\(/g, "supabase.auth.getUser()"],
+  [/\b(?:const|let)\s+(\{[^=]*\}|[\w$]+)\s*=\s*\(?\s*(?:await\s+)?auth\s*\(\s*\)/g, "auth()"],
+  [/\b(?:const|let)\s+(\{[^=]*\}|[\w$]+)\s*=\s*\(?\s*(?:await\s+)?getServerSession\s*\(/g, "getServerSession()"],
+  [/\b(?:const|let)\s+(\{[^=]*\}|[\w$]+)\s*=\s*\(?\s*(?:await\s+)?currentUser\s*\(\s*\)/g, "currentUser()"],
+  [/\b(?:const|let)\s+(\{[^=]*\}|[\w$]+)\s*=\s*\(?\s*(?:await\s+)?[\w$.]*\bauth\s*\.\s*getUser\s*\(/g, "supabase.auth.getUser()"],
 ];
 /** The sign-in checks in a handler's text that turn a caller away: [{ name, line }] (line within the text). */
 function signInGuards(text) {
