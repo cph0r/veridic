@@ -1,15 +1,51 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="600" height="200" viewBox="0 0 600 200" role="img" aria-label="Veridic">
+<svg xmlns="http://www.w3.org/2000/svg" width="880" height="240" viewBox="0 0 880 240" role="img" aria-label="Veridic">
   <defs>
-    <linearGradient id="ink" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0" stop-color="#14B8A6"/>
-      <stop offset="1" stop-color="#0E7490"/>
-    </linearGradient>
+    <pattern id="fine" width="10" height="10" patternUnits="userSpaceOnUse">
+      <path d="M10 0H0V10" fill="none" stroke="#dcebff" stroke-opacity=".07" stroke-width="1"/>
+    </pattern>
+    <pattern id="bold" width="50" height="50" patternUnits="userSpaceOnUse">
+      <path d="M50 0H0V50" fill="none" stroke="#dcebff" stroke-opacity=".14" stroke-width="1"/>
+    </pattern>
+    <marker id="arrow" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="9" markerHeight="9" orient="auto-start-reverse">
+      <path d="M0 1L10 5L0 9" fill="none" stroke="#f2f7ff" stroke-width="1.4"/>
+    </marker>
   </defs>
-  <!-- the mark: a citation bracket holding a check -->
-  <path d="M58 42 H34 V158 H58" fill="none" stroke="url(#ink)" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M130 42 H154 V158 H130" fill="none" stroke="url(#ink)" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
-  <path d="M66 102 L86 122 L124 78" fill="none" stroke="url(#ink)" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
-  <!-- wordmark -->
-  <text x="190" y="118" font-family="ui-sans-serif, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="80" font-weight="800" letter-spacing="-2" fill="#0E7490">veridic</text>
-  <text x="194" y="154" font-family="ui-monospace, SFMono-Regular, Menlo, Consolas, monospace" font-size="17" fill="#8B95A5">what your code really does, with proof</text>
+
+  <!-- blueprint paper -->
+  <rect width="880" height="240" rx="10" fill="#17457f"/>
+  <rect width="880" height="240" rx="10" fill="url(#fine)"/>
+  <rect width="880" height="240" rx="10" fill="url(#bold)"/>
+  <!-- the drawing's border, drawn twice like a sheet frame -->
+  <rect x="12" y="12" width="856" height="216" fill="none" stroke="#f2f7ff" stroke-opacity=".55" stroke-width="1.5"/>
+  <rect x="18" y="18" width="844" height="204" fill="none" stroke="#f2f7ff" stroke-opacity=".22" stroke-width="1"/>
+
+  <!-- construction lines through the mark -->
+  <g stroke="#dcebff" stroke-opacity=".38" stroke-width="1" stroke-dasharray="10 4 2 4" fill="none">
+    <path d="M58 120H258"/>
+    <path d="M158 34V206"/>
+    <circle cx="158" cy="120" r="58"/>
+  </g>
+
+  <!-- the mark: a citation bracket holding a check, in white line -->
+  <g fill="none" stroke="#f2f7ff" stroke-linecap="square" stroke-linejoin="miter">
+    <path d="M100 54H76V186H100" stroke-width="5"/>
+    <path d="M216 54H240V186H216" stroke-width="5"/>
+    <path d="M118 122L146 150L198 92" stroke-width="6"/>
+  </g>
+  <!-- small registration ticks at the bracket's ends -->
+  <g stroke="#f2f7ff" stroke-opacity=".6" stroke-width="1">
+    <path d="M70 54H64M70 186H64M246 54H252M246 186H252"/>
+  </g>
+
+  <!-- wordmark, drawn as outline lettering -->
+  <text x="300" y="138" textLength="520" lengthAdjust="spacingAndGlyphs"
+        font-family="'DIN Alternate', 'DIN', 'Bahnschrift', 'Roboto Condensed', 'Arial Narrow', 'Helvetica Neue', Arial, sans-serif"
+        font-size="92" font-weight="600" letter-spacing="10"
+        fill="none" stroke="#f2f7ff" stroke-width="2.2" stroke-linejoin="round">VERIDIC</text>
+
+  <!-- a dimension line under the name: extension lines and arrows -->
+  <g stroke="#f2f7ff" fill="none">
+    <path d="M300 152V184M820 152V184" stroke-opacity=".5" stroke-width="1"/>
+    <path d="M306 176H814" stroke-width="1.2" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+  </g>
 </svg>

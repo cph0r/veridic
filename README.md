@@ -1,10 +1,6 @@
 <div align="center">
 
-<img src="assets/veridic.svg" alt="veridic" width="460">
-
-# Veridic
-
-### Specs for every part of your app, kept true by the code.
+<img src="assets/veridic.svg" alt="Veridic" width="720">
 
 [![npm](https://img.shields.io/npm/v/veridic?style=flat-square&color=0E7490&label=npm)](https://www.npmjs.com/package/veridic)
 [![license: MIT](https://img.shields.io/badge/license-MIT-111111?style=flat-square)](LICENSE)
