@@ -256,3 +256,12 @@ summary, journeys and guarantees above the parts table with their states (4 of 5
 on the phone" (a README promise) has no rule that enforces it; paid features in the README have no
 part rules yet. Noted for the user: with many guarantees the section pushes the parts table below
 the fold.
+
+**Phase 3 (2026-10-24).** On the launchpad copy (static reach; the frozen copy has no
+node_modules, so `--run` and runtime coverage can't run there): 576 -> 584 named tests reach their
+rule's code, 368 -> 371 rules proven. The 8: `scripts/smoke.test.mjs` (spawns the server script)
+and `src/lib/database.test.ts`. Runtime coverage is proven on a node:test repo (a computed
+import, invisible statically, now reaches); vitest and jest use their own lcov reporters and fall
+back to static reach, saying why, when the coverage tool isn't installed. Env-gated tests:
+none on launchpad. Compatibility: a spec stamped with hashes (`~3f9a1c`) can't be read by
+Veridic before 0.12 (its citations don't parse); worth a line in the release notes.
