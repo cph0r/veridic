@@ -307,3 +307,21 @@ test("report page: a part's success criteria are listed apart, never as rules", 
   assert.deepEqual(p.criteria, [{ id: "SC-001", text: "Every order is paid once" }]);
   assert.ok(!p.rules.some((r) => r.id === "SC-001"));
 });
+
+test("report page: the product spec, above the parts table, each journey and guarantee in its state", () => {
+  const product = {
+    path: "specs/product/spec.md", title: "Shop", summary: "People order food.",
+    journeys: [{ id: "J-001", title: "Order dinner", state: "stale", steps: [{ text: "Pick a dish", refs: ["orders:FR-001"], state: "proven" }, { text: "Pay", refs: ["orders:FR-003"], state: "stale" }] }],
+    guarantees: [{ id: "G-001", text: "A paid order is never charged twice", refs: ["orders:FR-002"], state: "broken" }],
+  };
+  const m = load()(data({ product }));
+  const html = m.productHTML();
+  assert.match(html, /Order dinner/);
+  assert.match(html, /class="mark warn"[^>]*>[^<]*<\/span><span class="tx">J-001/);
+  assert.match(html, /A paid order is never charged twice/);
+  assert.match(html, /class="mark bad"/);
+  assert.match(html, /orders:FR-003/);
+  assert.equal(load()(data()).productHTML(), "", "no section without a product spec");
+  // In the shell, the product section comes before the parts table.
+  assert.ok(src.indexOf('id="product"') > 0 && src.indexOf('id="product"') < src.indexOf('id="specs-sec"'));
+});

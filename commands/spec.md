@@ -7,6 +7,14 @@ allowed-tools: Bash(veridic:*)
 
 Write a spec for: $ARGUMENTS
 
+If the argument is `product`, write or refresh the app's product spec instead,
+`specs/product/spec.md`: one sentence on what the app does (from the README),
+`## Journeys` (`### J-001: Title`, numbered steps, each ending with the part
+rules that make it work, `(apps:FR-003, auth:FR-001)`), and `## Guarantees`
+(`- **G-001**: promise [rules: apps:FR-003, apps-host:FR-002]`). It cites part
+rules, never code. Read the README, `veridic modules` and the part specs; run
+`veridic check --spec specs/product/spec.md` until it's clean; then stop.
+
 Follow the veridic skill. This command uses its cheapest proven path: gather
 the feature's context once, before reading anything else.
 

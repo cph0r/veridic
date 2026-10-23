@@ -216,7 +216,21 @@ var veridicModel = (D) => {
       .sort((a, b) => RANK[stateOf(a.rule).key] - RANK[stateOf(b.rule).key]);
   };
   const ruleCounts = (p) => Object.fromEntries(Object.keys(RULE_STATES).map((k) => [k, partRules(p, { state: k }).length]));
-  return { storiesOf, rulesInNoStory, partRules, ruleCounts, rows, page, parts, partOf, P, ruleHome, cleanView, specs, S, counts, fix, later, verdict, title: app.title || D.name, stateOf, statusOf, ruleText, RANK, plural, esc, cap, REQ };
+  // ---- the product spec: what the app does end to end, in the state of the part rules it names ----
+  const MARK = { proven: ["good", "✓", "Proven: every rule it names is proven"], broken: ["bad", "✕", "Broken: a rule it names is broken"], stale: ["warn", "Δ", "Out of date: a rule it names is out of date"], untested: ["none", "–", "Not proven yet: some rules it names have no test"] };
+  const mark = (st) => { const [cls, ch, tip] = MARK[st] || ["none", "?", "A rule it names isn't in any spec"]; return '<span class="mark ' + cls + '" title="' + tip + '">' + ch + "</span>"; };
+  function productHTML() {
+    const pr = D.product;
+    if (!pr || (!pr.journeys.length && !pr.guarantees.length)) return "";
+    const refs = (rs) => rs.map((r) => "<code>" + esc(r) + "</code>").join(" ");
+    const journeys = pr.journeys.map((j) => '<details class="pj"><summary>' + mark(j.state) + '<span class="tx">' + esc(j.id) + " " + esc(j.title) + "</span></summary><ol>" +
+      j.steps.map((st) => "<li>" + mark(st.state) + "<span>" + esc(st.text) + " " + refs(st.refs) + "</span></li>").join("") + "</ol></details>").join("");
+    const guarantees = pr.guarantees.map((g) => '<div class="pg">' + mark(g.state) + '<span class="tx">' + esc(g.id) + " " + esc(g.text) + " " + refs(g.refs) + "</span></div>").join("");
+    return (pr.summary ? '<p class="psum">' + esc(pr.summary) + "</p>" : "") +
+      (journeys ? '<div class="sub-h">Journeys</div>' + journeys : "") + (guarantees ? '<div class="sub-h">Guarantees</div>' + guarantees : "");
+  }
+
+  return { productHTML, storiesOf, rulesInNoStory, partRules, ruleCounts, rows, page, parts, partOf, P, ruleHome, cleanView, specs, S, counts, fix, later, verdict, title: app.title || D.name, stateOf, statusOf, ruleText, RANK, plural, esc, cap, REQ };
 };
 
 (() => {
@@ -237,6 +251,7 @@ var veridicModel = (D) => {
   // ---- the shell ----
   $("#app").innerHTML = `<div class="wrap">
   <section class="hero"><div class="rv"><h1 class="verdict" id="appname"></h1></div><div class="rings rv" id="rings" style="animation-delay:.12s"></div></section>
+  <section id="product" class="product rv" hidden></section>
   <section id="specs-sec"><h2 class="sr">Your app</h2>
   <div class="tools rv" style="animation-delay:.22s"><input id="q" type="search" placeholder="Search parts and specs" aria-label="Search parts and specs"><label class="pick"><span>Show</span><select id="filters" aria-label="Show"></select></label></div>
   <div class="tablewrap rv" style="animation-delay:.25s"><table class="specs"><thead><tr id="thead"></tr></thead><tbody id="tbody"></tbody></table><div class="noresults" id="noresults" hidden>No part matches.</div></div><div class="pager" id="pager"></div></section>
@@ -246,6 +261,10 @@ var veridicModel = (D) => {
 <div class="scrim" id="scrim"></div>
 <aside class="sheet" id="panel" aria-label="Spec"><div class="grab"></div><div class="part" id="part"></div></aside>
 <div class="confetti" id="confetti"></div>`;
+
+  // ---- the product spec, when there is one ----
+  const productBody = M.productHTML();
+  if (productBody) { $("#product").innerHTML = productBody; $("#product").hidden = false; }
 
   // ---- hero: the app's name and the gauges ----
   $("#appname").textContent = M.title;

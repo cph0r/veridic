@@ -273,3 +273,15 @@ table.specs { width: 100%; border-collapse: collapse; font-size: 14px; }
 /* Success criteria: listed as written, no state. */
 .crit { padding: 6px 2px; color: var(--ink2); font-size: 13px; line-height: 1.45; border-bottom: 1px solid var(--line); }
 .crit b { font-family: var(--mono); color: var(--ink); margin-right: 6px; }
+
+/* The product spec, above the parts: journeys (open for their steps) and guarantees. */
+.product { margin: 8px 0 26px; }
+.product .psum { color: var(--ink2); margin: 0 0 12px; max-width: 70ch; }
+.product .pj, .product .pg { border-bottom: 1px solid var(--line); }
+.product summary, .product .pg { display: flex; gap: 10px; align-items: flex-start; padding: 7px 2px; cursor: default; list-style: none; }
+.product summary { cursor: pointer; }
+.product summary::-webkit-details-marker { display: none; }
+.product ol { margin: 0 0 8px 34px; padding: 0; list-style: none; }
+.product li { display: flex; gap: 8px; align-items: flex-start; padding: 4px 0; color: var(--ink2); font-size: 13px; }
+.product li .mark { width: 18px; height: 18px; font-size: 10px; }
+.product code { font-size: 11px; color: var(--ink3); }
