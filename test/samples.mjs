@@ -25,7 +25,9 @@ for (const s of samples.filter((x) => !want.length || want.includes(x.name))) {
     git(dir, "init", "-q");
     git(dir, "remote", "add", "origin", s.url);
   }
-  if (!git(dir, "rev-parse", "HEAD").startsWith(s.sha)) {
+  let head = "";
+  try { head = git(dir, "rev-parse", "HEAD"); } catch {} // a fresh clone has no commit yet
+  if (!head.startsWith(s.sha)) {
     const full = git(dir, "ls-remote", "origin").split("\n").map((l) => l.split("\t")[0]).find((h) => h.startsWith(s.sha)) ?? s.sha;
     git(dir, "fetch", "-q", "--depth", "1", "origin", full);
     git(dir, "checkout", "-q", "FETCH_HEAD");

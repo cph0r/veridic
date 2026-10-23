@@ -3,6 +3,7 @@
 // (github.com/tatethurston/nextjs-routes, MIT): (group) folders drop, [id] is :id, [...slug]
 // and [[...slug]] are *, @slot and _private folders aren't routes.
 
+import fs from "node:fs";
 import path from "node:path";
 import { codeOnly } from "../graph.mjs";
 import { functionExtent } from "./paths.mjs";
@@ -11,23 +12,41 @@ const HTTP = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"];
 const SRC = /\.(?:[cm]?[jt]sx?)$/;
 const ignored = (f) => /(?:^|\/)(?:node_modules|\.next|dist|build|out)\//.test(f);
 
-/** The folders of packages that depend on next ("" for the repo root). */
+// A file's text from the index, else from disk: the code index lists source files only, so
+// package.json and some configs are read from the repo.
+const textOf = (g, f) => {
+  const t = g.text(f);
+  if (t != null) return t;
+  try {
+    return fs.readFileSync(path.join(g.repo, f), "utf8");
+  } catch {
+    return null;
+  }
+};
+
+/** The folders of packages that depend on next ("" for the repo root): the root and every folder holding an indexed file. */
 function appDirs(g) {
-  const out = [];
+  if (g.__nextApps) return g.__nextApps;
+  const dirs = new Set([""]);
   for (const f of g.files ?? []) {
-    if (!/(?:^|\/)package\.json$/.test(f) || ignored(f)) continue;
+    if (ignored(f)) continue;
+    for (let d = path.posix.dirname(f); d !== "." && !dirs.has(d); d = path.posix.dirname(d)) dirs.add(d);
+  }
+  const out = [];
+  for (const d of dirs) {
     try {
-      const p = JSON.parse(g.text(f) ?? "{}");
-      if (p.dependencies?.next || p.devDependencies?.next) out.push(path.posix.dirname(f) === "." ? "" : path.posix.dirname(f));
+      const p = JSON.parse(textOf(g, d ? `${d}/package.json` : "package.json") ?? "null");
+      if (p?.dependencies?.next || p?.devDependencies?.next) out.push(d);
     } catch {}
   }
-  return out;
+  g.__nextApps = out.sort();
+  return g.__nextApps;
 }
 
 /** `basePath` from the app's next.config, when it's a string literal. */
 function basePathOf(g, dir) {
   for (const n of ["next.config.js", "next.config.mjs", "next.config.ts", "next.config.cjs"]) {
-    const m = (g.text(dir ? `${dir}/${n}` : n) ?? "").match(/\bbasePath\s*:\s*["'`](\/[^"'`]*)["'`]/);
+    const m = (textOf(g, dir ? `${dir}/${n}` : n) ?? "").match(/\bbasePath\s*:\s*["'`](\/[^"'`]*)["'`]/);
     if (m) return m[1].replace(/\/$/, "");
   }
   return "";
@@ -90,7 +109,7 @@ function nextRoutes(g) {
       const p = appPath(m[1] ? m[1].split("/") : []);
       if (p == null) continue;
       const url = (base + p).replace(/(.)\/$/, "$1") || "/";
-      for (const h of handlers(g.text(f) ?? "")) routes.push({ id: `${h.method} ${url}`, method: h.method, path: url, file: f, start: h.start, end: h.end, guards: [] });
+      for (const h of handlers(textOf(g, f) ?? "")) routes.push({ id: `${h.method} ${url}`, method: h.method, path: url, file: f, start: h.start, end: h.end, guards: [] });
     }
   }
   return { routes };

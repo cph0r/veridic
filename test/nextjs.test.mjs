@@ -56,3 +56,13 @@ test("next: re-exported handlers are routes", () => {
     ["POST /api/hook", 1, 3],
   ]);
 });
+
+test("next: an app is found from package.json on disk, which the code index doesn't list", () => {
+  const { g, done } = fakeRepo({ ...PKG, "apps/web/package.json": PKG["package.json"], "app/api/x/route.ts": H("GET"), "apps/web/app/api/y/route.ts": H("POST") });
+  g.files = g.files.filter((f) => !f.endsWith("package.json")); // as CodeGraph: source files only
+  const text = g.text;
+  g.text = (f) => (f.endsWith("package.json") ? null : text(f));
+  const got = ids(g);
+  done();
+  assert.deepEqual(got, ["GET /api/x", "POST /api/y"]);
+});
