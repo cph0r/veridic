@@ -36,7 +36,7 @@ veridic report
 
 ## Proof
 
-On 10 public Express apps: all 353 routes found, 37 of 39 flagged problems real. Details in [veridic-bench](https://github.com/cph0r/veridic-bench).
+On 15 public Express and Next.js apps: 1,378 of 1,379 routes found, 87 of 100 flagged problems real. Details in [veridic-bench](https://github.com/cph0r/veridic-bench).
 
 Your code never leaves your machine ([privacy](PRIVACY.md)). Without Claude Code: `npm i -g veridic`, then `veridic help`.
 

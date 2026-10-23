@@ -1,6 +1,6 @@
 {
   "name": "veridic",
-  "version": "0.11.0",
+  "version": "0.12.0",
   "description": "Turn your app into specs, kept true by the code. Every rule points at the code that does it and is proven by your tests, a blueprint dashboard shows it all, and your coding agent can't call a change done until it's in scope and tested. Claude Code plugin + CLI for Express apps.",
   "type": "module",
   "bin": {
