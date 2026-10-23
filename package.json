@@ -1,7 +1,7 @@
 {
   "name": "veridic",
   "version": "0.10.1",
-  "description": "Know what your code really does, with proof, before you change it. Evidence-backed specs, honest test coverage and an agent-readiness report for existing codebases.",
+  "description": "Turn your app into specs, kept true by the code. Every rule points at the code that does it and is proven by your tests, a blueprint dashboard shows it all, and your coding agent can't call a change done until it's in scope and tested. Claude Code plugin + CLI for Express apps.",
   "type": "module",
   "bin": {
     "veridic": "bin/veridic"

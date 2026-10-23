@@ -2,7 +2,7 @@
   "name": "veridic",
   "displayName": "Veridic",
   "version": "0.10.1",
-  "description": "Know what your code really does, with proof, before you change it: evidence-backed specs that stay in sync, tests that must really assert, risk and access checks, and an agent-readiness report for exposing your API to AI agents.",
+  "description": "Turn your app into specs, kept true by the code. Every rule points at the code that does it and is proven by your tests, a blueprint dashboard shows it all, and your coding agent can't call a change done until it's in scope and tested. Claude Code plugin + CLI for Express apps.",
   "keywords": [
     "spec-driven-development",
     "specs",
