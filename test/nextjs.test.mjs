@@ -234,3 +234,43 @@ test("next: a verb map answers only its verbs, and a renamed re-export is follow
     ["POST /api/legacy", "pages/api/legacy.ts", 4, 7],
   ]);
 });
+
+test("next: statuses from NextResponse, Response, notFound and redirect; request body fields", async () => {
+  const { handlerFacts } = await import("../core/contract.mjs");
+  const { g, done } = fakeRepo({
+    ...PKG,
+    "app/api/items/[id]/route.ts": [
+      'import { NextResponse } from "next/server";',
+      'import { notFound, redirect } from "next/navigation";',
+      "export async function POST(req: Request) {",
+      "  const { name } = await req.json();",
+      '  if (!name) return NextResponse.json({ error: "name" }, { status: 400 });',
+      "  const form = await req.formData();",
+      '  const email = form.get("email");',
+      "  if (!email) notFound();",
+      '  if (email === "x") redirect("/login");',
+      "  if (name === email) return new Response(null, { status: 204 });",
+      '  if (!form) return Response.json({ error: "x" }, { status: 422 });',
+      "  return NextResponse.json({ ok: true });",
+      "}",
+    ].join("\n"),
+  });
+  const r = routeInventory(g).routes.find((x) => x.id === "POST /api/items/:id");
+  const f = handlerFacts(g, r);
+  done();
+  assert.deepEqual([...new Set(f.statuses.map((s) => s.status))].sort(), [200, 204, 307, 400, 404, 422]);
+  assert.ok(f.statuses.find((s) => s.status === 200).implicit, "a response with no status is an implicit 200");
+  assert.deepEqual(f.fields.map((x) => x.field).sort(), ["email", "name"]);
+});
+
+test("next: a status a called helper answers with counts as returned", async () => {
+  const { calledStatuses } = await import("../core/contract.mjs");
+  const { g, done } = fakeRepo({
+    ...PKG,
+    "app/api/x/route.ts": 'import { NextResponse } from "next/server";\nfunction forbidden() {\n  return NextResponse.json({ error: "no" }, { status: 403 });\n}\nexport async function GET() {\n  if (!ok()) return forbidden();\n  return NextResponse.json({});\n}\n',
+  });
+  const r = routeInventory(g).routes.find((x) => x.id === "GET /api/x");
+  const st = calledStatuses(g, r).map((s) => s.status);
+  done();
+  assert.ok(st.includes(403));
+});

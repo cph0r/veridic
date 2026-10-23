@@ -565,5 +565,18 @@ const entryCandidates = (g) => {
   return [...out];
 };
 
+// How an Express handler answers and reads its request (the contract check reads handlers with these).
+export const idioms = {
+  // Explicit statuses: res.status(404), res.sendStatus(204), and helpers that take the response and a status: sendError(res, 404, …)
+  status: [/\.(?:status|sendStatus)\(\s*(\d{3})\s*\)/g, /\w+\(\s*res\s*,\s*(\d{3})\b/g],
+  // An answer with no status: 200.
+  implicit: /\bres\s*\.\s*(?:json|send|write|end)\s*\(/,
+  // [pattern, status] answers that carry a fixed status, implicit (res.redirect is a 302).
+  fixed: [[/\bres\s*\.\s*redirect\s*\(/, 302, true]],
+  // Expressions that hold the request body, and lines that make another name for it.
+  body: ["req\\.body"],
+  bodyAlias: /(?:const|let|var)\s+(\w+)\s*(?::[^=]+)?=\s*\(?\s*req\.body\b/,
+};
+
 // Express runs on every repo: it finds nothing where there is no Express app.
-export default { name: "express", detect: () => true, routes: expressRoutes };
+export default { name: "express", detect: () => true, routes: expressRoutes, idioms };

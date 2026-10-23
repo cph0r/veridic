@@ -7,6 +7,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { codeOnly } from "../graph.mjs";
 import { functionExtent, jsonc } from "./paths.mjs";
+import { idioms as expressIdioms } from "./express.mjs";
 
 const HTTP = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"];
 const SRC = /\.(?:[cm]?[jt]sx?)$/;
@@ -318,4 +319,16 @@ function nextRoutes(g) {
   return { routes };
 }
 
-export default { name: "nextjs", detect: (g) => appDirs(g).length > 0, routes: nextRoutes };
+// How a Next.js handler answers and reads its request: pages/api handlers use Express's forms;
+// route handlers and actions answer with Response / NextResponse, notFound() and redirect().
+export const idioms = {
+  status: [...expressIdioms.status, /\bstatus\s*:\s*(\d{3})\b/g],
+  implicit: /\bres\s*\.\s*(?:json|send|write|end)\s*\(|\b(?:NextResponse|Response)\s*\.\s*json\s*\(|\bnew\s+(?:Next)?Response\s*\(/,
+  fixed: [[/\bres\s*\.\s*redirect\s*\(/, 302, true], [/(?<!res\s*\.\s*)\bredirect\s*\(/, 307, true], [/\bnotFound\s*\(\s*\)/, 404, false]],
+  body: ["req\\.body"],
+  bodyAlias: /(?:const|let|var)\s+(\w+)\s*(?::[^=]+)?=\s*\(?\s*(?:req\.body\b|await\s+(?:req|request)\s*\.\s*json\s*\(\s*\))/,
+  // Fields read straight from a parsed body or a form: `const { name } = await req.json()`, `form.get("email")`.
+  bodyFields: [/\{([^}]*)\}\s*(?::[^=]+)?=\s*await\s+(?:req|request)\s*\.\s*json\s*\(/, /\.get\(\s*["']([\w-]+)["']\s*\)/g],
+};
+
+export default { name: "nextjs", detect: (g) => appDirs(g).length > 0, routes: nextRoutes, idioms };

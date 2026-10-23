@@ -10,6 +10,7 @@ import { parseYaml } from "./yaml.mjs";
 import { codeOnly, cache } from "./graph.mjs";
 import { joinPath, normRoute } from "./routes.mjs";
 import { functionSpan } from "./frameworks/paths.mjs";
+import { idiomsOf } from "./frameworks/index.mjs";
 
 const METHODS = ["get", "post", "put", "patch", "delete", "head", "options"];
 const AUTH_GUARD = /auth|admin|owner|require|session|verify|login|perm|role|token|csrf/i;
@@ -81,17 +82,16 @@ export function handlerFacts(g, route) {
   const fields = [];
   let validatedBy = null;
   const aliases = new Set();
+  const id = idiomsOf(route);
   code.forEach((l, i) => {
     const line = route.start + i;
-    for (const m of l.matchAll(/\.(?:status|sendStatus)\(\s*(\d{3})\s*\)/g)) statuses.push({ status: Number(m[1]), line });
-    // Helpers that take the response and a status: sendError(res, 404, ...)
-    for (const m of l.matchAll(/\w+\(\s*res\s*,\s*(\d{3})\b/g)) statuses.push({ status: Number(m[1]), line });
-    if (/\bres\s*\.\s*(?:json|send|write|end)\s*\(/.test(l)) statuses.push({ status: 200, line, implicit: true });
-    if (/\bres\s*\.\s*redirect\s*\(/.test(l)) statuses.push({ status: 302, line, implicit: true });
+    for (const re of id.status) for (const m of l.matchAll(re)) statuses.push({ status: Number(m[1]), line });
+    if (id.implicit.test(l)) statuses.push({ status: 200, line, implicit: true });
+    for (const [re, status, implicit] of id.fixed) if (re.test(l)) { statuses.push({ status, line, ...(implicit ? { implicit: true } : {}) }); if (implicit) break; }
 
     const v = l.match(/(\w+)(?:\.\w+\(\))?\.(?:safeParse|parse|validate)\(\s*req\.body\b/);
     if (v) validatedBy = v[1];
-    const alias = l.match(/(?:const|let|var)\s+(\w+)\s*(?::[^=]+)?=\s*\(?\s*req\.body\b/);
+    const alias = l.match(id.bodyAlias);
     // `const body = req.body as {...}` aliases the body; `const x = (req.body as T).field` does not.
     if (alias && !/req\.body(?:\s+as[^)]*)?\s*\)?\s*\??\.\w/.test(l)) aliases.add(alias[1]);
   });
@@ -104,6 +104,13 @@ export function handlerFacts(g, route) {
       if (d) for (const f of d[1].split(",").map((s) => s.trim().split(/[\s:=]/)[0]).filter((s) => /^\w+$/.test(s))) fields.push({ field: f, line });
     }
   });
+  // Fields some frameworks read without a body object: destructured from a parsed body, or a form's get("x").
+  const raw = (g.lines(route.file) ?? []).slice(route.start - 1, route.end);
+  for (const re of id.bodyFields ?? [])
+    raw.forEach((l, i) => {
+      for (const m of re.global ? l.matchAll(re) : [l.match(re)].filter(Boolean))
+        for (const f of m[1].split(",").map((s) => s.trim().split(/[\s:=]/)[0]).filter((s) => /^[\w-]+$/.test(s))) fields.push({ field: f, line: route.start + i });
+    });
   return { statuses, fields: dedupeBy(fields, (f) => f.field), validated_by: validatedBy };
 }
 
@@ -289,8 +296,11 @@ export function calledStatuses(g, route) {
   const statusOf = errorClasses(g);
   const out = [];
   const seen = new Set();
+  // The forms this route's framework adds to Express's (NextResponse.json(x, { status: 403 })…).
+  const extra = idiomsOf(route).status.filter((re) => !idiomsOf(null).status.includes(re));
   const scan = (text, file, depth, via) => {
     for (const st of statusesIn(text)) out.push({ status: st, line: null, via });
+    for (const re of extra) for (const m of text.matchAll(re)) out.push({ status: Number(m[1]), line: null, via });
     for (const m of text.matchAll(/\b(?:throw|next\()\s*new\s+(\w+)\s*\(/g)) {
       const st = statusOf(m[1]);
       if (st) out.push({ status: st, line: null, via: via ?? m[1] });
