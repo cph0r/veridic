@@ -1,7 +1,8 @@
 // The parts of the app and the spec files each part's one spec is made of. The same
-// rule as the dashboard (report-page.js): a spec file belongs to the part whose code
-// its rules cite most (ties: the first part, modules before screens); with no
-// citations, to the part its folder is named after (orders, orders-…); else to none.
+// rule as the dashboard (report-page.js): a spec file in a folder named exactly after a
+// part is that part's; else it belongs to the part whose code its rules cite most
+// (ties: the first part, modules before screens); else to the part whose id is the
+// longest prefix of its folder (orders-…); else to none.
 
 const rulesOf = (s) => (s.requirements ?? []).filter((r) => r.requirement !== false);
 
@@ -17,8 +18,9 @@ export function specHomes(data) {
     let best = null;
     for (const p of parts) { const n = cited.filter((f) => p.files.has(f)).length; if (n && (!best || n > best[1])) best = [p.id, n]; }
     const dir = String(s.path).split("/").slice(-2)[0];
-    const named = parts.find((p) => dir === p.id || dir.startsWith(p.id + "-"));
-    homes.set(s.path, best ? best[0] : named ? named.id : null);
+    const exact = parts.find((p) => dir === p.id);
+    const prefix = parts.filter((p) => dir.startsWith(p.id + "-")).sort((a, b) => b.id.length - a.id.length)[0];
+    homes.set(s.path, exact ? exact.id : best ? best[0] : prefix ? prefix.id : null);
   }
   return homes;
 }

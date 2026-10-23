@@ -5,6 +5,7 @@
 // an agent writes the tests, Veridic verifies them (`veridic tests --module --run`).
 
 import { execFileSync } from "node:child_process";
+import { specHomes } from "./parts.mjs";
 import fs from "node:fs";
 import path from "node:path";
 import { testCoverage, testsIn } from "./tests.mjs";
@@ -24,7 +25,6 @@ const read = (repo, f) => {
 };
 
 /** The module a spec belongs to: the one it's named after, else the first that claims it. */
-const ownerOf = (modules, spec) => modules.find((m) => spec.includes(`/${m.id}/`)) ?? modules.find((m) => (m.specs ?? []).includes(spec)) ?? null;
 
 /** Where a new test for a cited file goes, by the package's layout. */
 function targetFor(recipe, file) {
@@ -42,11 +42,20 @@ function targetFor(recipe, file) {
 export async function workList(repo, moduleId, opts = {}) {
   const data = opts.data ?? (await (await import("./modulectx.mjs")).loadModules(repo)).data;
   const modules = data.modules ?? [];
-  const m = modules.find((x) => x.id.toLowerCase() === String(moduleId).toLowerCase() || x.name?.toLowerCase() === String(moduleId).toLowerCase());
+  let m = modules.find((x) => x.id.toLowerCase() === String(moduleId).toLowerCase() || x.name?.toLowerCase() === String(moduleId).toLowerCase());
+  // A screen part works the same way: its own spec, its own code.
+  if (!m) {
+    const g = (data.screens ?? []).find((x) => x.id === String(moduleId).toLowerCase() || x.name?.toLowerCase() === String(moduleId).toLowerCase());
+    if (g) m = { id: g.id, name: g.name, specs: g.specs ?? [], routes: [], files: g.files ?? [], code: [] };
+  }
   if (!m) return { error: `no part "${moduleId}"; \`veridic parts\` lists them`, modules: modules.map((x) => x.id) };
-  const own = (m.specs ?? []).filter((s) => ownerOf(modules, s) === m);
+  // The part's spec files, by the same rule as the dashboard and veridic parts (core/parts.mjs).
+  // Specs a module names but the report hasn't read (no rules yet) count too, by their folder.
+  const named = [...new Set(modules.flatMap((x) => x.specs ?? []))].filter((p) => !(data.specs ?? []).some((s) => s.path === p)).map((p) => ({ path: p, requirements: [] }));
+  const homes = specHomes({ ...data, specs: [...(data.specs ?? []), ...named] });
+  const own = [...(data.specs ?? []).map((s) => s.path), ...named.map((s) => s.path)].filter((p) => homes.get(p) === m.id);
   if (!own.length) {
-    const owners = [...new Set((m.specs ?? []).map((s) => ownerOf(modules, s)).filter((o) => o && o !== m).map((o) => o.name))];
+    const owners = [...new Set((m.specs ?? []).map((s) => homes.get(s)).filter((o) => o && o !== m.id).map((o) => modules.find((x) => x.id === o)?.name ?? o))];
     return { error: `the ${m.name} part has no spec of its own` + (owners.length ? `; its rules are in ${owners.join(", ")}'s spec` : `; \`/veridic:specs ${m.id}\` writes one`) };
   }
   const files = execFileSync("git", ["ls-files", "--cached", "--others", "--exclude-standard"], { cwd: repo, encoding: "utf8", maxBuffer: 64 << 20 }).split("\n").filter(Boolean);

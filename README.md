@@ -94,7 +94,7 @@ flowchart LR
 | About to edit | `veridic claim "POST /api/refund"` | Every route that code reaches and what each really does (money and deletes first), and the tests that cover it |
 | Finishing | `veridic done` | **DONE**, or exactly which change strayed outside the claim, which changed route has no real test, which new test asserts nothing |
 | Checking an API for agents | `veridic agent-ready` | What every route really does: reads, writes, deletes, moves money, and which act on ids the caller doesn't own |
-| Writing a spec | `/veridic:spec checkout` | Spec Kit–format rules, each citing the lines that implement it and checked against them |
+| Writing a spec | `/veridic:spec checkout` | A Spec Kit–format spec, each rule citing the lines that implement it and checked against them |
 | Writing specs for the whole app | `/veridic:specs` | Specs until the app is covered: parts with no spec first (riskiest first), then specs that miss their own files, then code in no part. Each agent works from `veridic prepare --module <id>`: what every route really does, its tables, screens, tests and open findings |
 | How much of the app the specs describe | `veridic coverage` | Every behaviour file and the spec that cites it, per part (a server feature or a group of screens); what's in no part; every file left out (tests, generated code, types, config, seeds) with its reason |
 | Asked "why is it like this?" | `veridic why FR-002` | The commits that wrote that code |

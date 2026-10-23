@@ -210,3 +210,22 @@ test("parts: opening a rule finds it in any file of the part", () => {
   assert.deepEqual({ ...m.ruleHome("FR-001", "specs/notes/spec.md") }, { part: "specs/notes/spec.md", spec: "specs/notes/spec.md" });
   assert.equal(m.P.get("orders").name, "Orders");
 });
+
+// ---- final review fixes (simplify) ----
+test("final: the table finds a part by its specs' titles, and the dashboard groups like core/parts", () => {
+  const m = load()(partsData({ specs: [spec("specs/orders-payment/spec.md", [rule("FR-001", "none", { cites: [cite("src/orders.ts")] })], { title: "Checkout" })] }));
+  assert.deepEqual([...m.rows({ q: "checkout" }).map((p) => p.id)], ["orders"]);
+  const m2 = load()(data({ modules: [{ id: "admin", name: "Admin", files: [], code: [] }], screens: [{ id: "admin-app", name: "Admin screens", files: [] }], specs: [spec("specs/admin-app/spec.md", [rule("FR-001", "none", { cites: [] })])] }));
+  assert.equal(m2.partOf("specs/admin-app/spec.md"), "admin-app");
+  const m3 = load()(partsData({ specs: [spec("specs/orders/spec.md", [rule("FR-001", "none", { cites: [cite("src/menu.ts")] })])] }));
+  assert.equal(m3.partOf("specs/orders/spec.md"), "orders", "named after the part beats citations");
+});
+
+test("final: a saved view from before is cleaned: unknown sorts and empty filters reset", () => {
+  const m = load()(partsData());
+  assert.deepEqual({ ...m.cleanView({ sort: "files", filter: "all" }) }.sort, null);
+  assert.equal(m.cleanView({ sort: "rules", filter: "all" }).sort, "rules");
+  const allSpecced = load()(data());
+  assert.equal(allSpecced.cleanView({ filter: "nospec" }).filter, "all");
+  assert.equal(m.cleanView({ filter: "nospec" }).filter, "nospec");
+});

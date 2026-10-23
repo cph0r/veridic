@@ -12,7 +12,7 @@ frontend, its screens grouped by who uses them (`guest-app`, `admin-app`, …). 
 
 1. **Plan.** Run `veridic coverage` and `veridic modules`. The parts to do are
    the ones named in the arguments, or else, in this order:
-   1. parts whose `specs` list is empty, riskiest first: `moves_money`, then
+   1. parts whose `part_specs` list is empty, riskiest first: `moves_money`, then
       `issues.high`, then `issues.medium`, then size (routes, or pages);
    2. parts with a spec that misses more than a fifth of their files
       (`parts[].uncovered` against `total` in `veridic coverage`);

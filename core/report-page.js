@@ -74,9 +74,10 @@ var veridicModel = (D) => {
   const S = new Map(specs.map((s) => [s.path, s]));
 
   // ---- the parts of the app, each with its one spec ----
-  // A spec file belongs to the part whose code its rules cite most (ties: the first);
-  // with no citations, to the part its folder is named after (orders, orders-…); else
-  // it stands alone as a part of its own ("other"). A part may have no spec yet.
+  // The same rule as core/parts.mjs: a spec file in a folder named exactly after a part
+  // is that part's; else the part whose code its rules cite most (ties: the first); else
+  // the part whose id is the longest prefix of its folder (orders-…); else it stands
+  // alone as a part of its own ("other"). A part may have no spec yet.
   const partDefs = [
     ...(D.modules || []).map((m) => ({ id: m.id, name: m.name, kind: "module", files: new Set([...(m.files || []), ...(m.code || [])]) })),
     ...(D.screens || []).map((g) => ({ id: g.id, name: g.name, kind: "screens", files: new Set(g.files || []) })),
@@ -87,8 +88,9 @@ var veridicModel = (D) => {
     let best = null;
     for (const d of partDefs) { const n = cited.filter((f) => d.files.has(f)).length; if (n && (!best || n > best[1])) best = [d.id, n]; }
     const dir = String(sp.path).split("/").slice(-2)[0];
-    const named = partDefs.find((d) => dir === d.id || dir.startsWith(d.id + "-"));
-    home.set(sp.path, best ? best[0] : named ? named.id : sp.path);
+    const exact = partDefs.find((d) => dir === d.id);
+    const prefix = partDefs.filter((d) => dir.startsWith(d.id + "-")).sort((a, b) => b.id.length - a.id.length)[0];
+    home.set(sp.path, exact ? exact.id : best ? best[0] : prefix ? prefix.id : sp.path);
   }
   const partOf = (specPath) => home.get(specPath) || specPath;
   const coverOf = new Map(((D.coverage || {}).parts || []).map((c) => [c.id, c]));
@@ -125,7 +127,7 @@ var veridicModel = (D) => {
   };
   const rows = ({ q = "", filter = "all", sort = null, dir = "desc" } = {}) => {
     const needle = String(q).trim().toLowerCase();
-    const out = parts.filter((s) => (FILTERS[filter] || FILTERS.all)(s) && (!needle || (s.name + " " + s.id + " " + s.specs.map((x) => x.path).join(" ")).toLowerCase().includes(needle)));
+    const out = parts.filter((s) => (FILTERS[filter] || FILTERS.all)(s) && (!needle || (s.name + " " + s.id + " " + s.specs.map((x) => x.path + " " + x.name).join(" ")).toLowerCase().includes(needle)));
     if (!sort || !SORTS[sort]) return out; // already worst first
     const k = SORTS[sort], sign = dir === "asc" ? 1 : -1;
     return out.map((s, i) => [s, i]).sort(([a, i], [b, j]) => { const x = k(a), y = k(b); return x < y ? -sign : x > y ? sign : i - j; }).map(([s]) => s);
@@ -184,9 +186,12 @@ var veridicModel = (D) => {
     return { items, page: at, pages, total, from: total ? (size > 0 ? (at - 1) * size + 1 : 1) : 0, to: size > 0 ? Math.min(at * size, total) : total };
   };
   const P = new Map(parts.map((p) => [p.id, p]));
+  // A view saved by an earlier version: a sort with no column, or a filter with no rows, resets.
+  const VISIBLE_SORTS = ["name", "health", "rules", "proven", "broken", "outdated", "untested", "stories", "covered"];
+  const cleanView = (v) => ({ ...v, sort: VISIBLE_SORTS.includes(v.sort) ? v.sort : null, filter: v.filter && FILTERS[v.filter] && (v.filter === "all" || rows({ filter: v.filter }).length) ? v.filter : "all" });
   // Where a rule lives: its part, and the spec file it is in (ids repeat across a part's files).
   const ruleHome = (id, specPath) => ({ part: partOf(specPath), spec: specPath });
-  return { rows, page, parts, partOf, P, ruleHome, specs, S, counts, fix, later, verdict, title: app.title || D.name, stateOf, statusOf, ruleText, RANK, plural, esc, cap, REQ };
+  return { rows, page, parts, partOf, P, ruleHome, cleanView, specs, S, counts, fix, later, verdict, title: app.title || D.name, stateOf, statusOf, ruleText, RANK, plural, esc, cap, REQ };
 };
 
 (() => {
@@ -243,7 +248,7 @@ var veridicModel = (D) => {
   ];
   const FILTER = [["all", "All"], ["fix", "Needs fixing"], ["stale", "Out of date"], ["untested", "Not tested"], ["proven", "Proven"], ["nospec", "No spec"]];
   let view = { q: "", filter: "all", sort: null, dir: "desc", page: 1, size: 10 };
-  try { view = { ...view, ...JSON.parse(store.get("table:" + D.name) || "{}") }; } catch {}
+  try { view = M.cleanView({ ...view, ...JSON.parse(store.get("table:" + D.name) || "{}") }); } catch {}
   const num = (n, cls) => (n ? '<span class="' + (cls || "") + '">' + n + "</span>" : '<span class="zero">–</span>');
   // Under a part's name: its spec file (or how many), and how many code files its spec cites.
   const specLine = (p) => (!p.specs.length ? "no spec yet" : (p.specs.length === 1 ? p.specs[0].path : plural(p.specs.length, "spec file")) + (p.files ? " · cites " + plural(p.files, "file") : ""));
@@ -323,10 +328,10 @@ var veridicModel = (D) => {
     };
     return head + '<div class="cols"><div>' + p.specs.map(section).join('<div class="gap"></div>') + "</div></div>";
   }
-  function openPart(id, rule, inSpec) {
+  function openPart(id, rule, inSpec, keep) {
     const p = M.P.get(id); if (!p) return;
     const panel = $("#panel");
-    if (open === id && panel.classList.contains("open") && !rule) { closeSpec(); return; }
+    if (open === id && panel.classList.contains("open") && !rule && !keep) { closeSpec(); return; }
     document.querySelectorAll("#tbody tr").forEach((c) => c.classList.toggle("sel", c.dataset.part === id));
     open = id;
     $("#part").innerHTML = partHTML(p);
@@ -337,7 +342,7 @@ var veridicModel = (D) => {
     if (rule) showRule(rule, inSpec);
   }
   // A spec path (from a card or an old link) opens the part it belongs to.
-  const openSpec = (path, rule) => openPart(M.ruleHome(rule, path).part, rule, path);
+  const openSpec = (path, rule) => openPart(M.ruleHome(rule, path).part, rule, path, true);
   // open a rule in the sheet: unfold its group, open it, bring it into view
   function showRule(id, inSpec) {
     const el = [...document.querySelectorAll("#part [data-rule]")].find((x) => x.dataset.rule === id && (!inSpec || x.dataset.in === inSpec)); if (!el) return;

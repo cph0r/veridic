@@ -16,6 +16,7 @@ import { routeInventory } from "../../core/routes.mjs";
 import { defaultSpecs } from "../../core/metrics.mjs";
 import { renderCard } from "../../core/card.mjs";
 import { loadModules } from "../../core/modulectx.mjs";
+import { specHomes } from "../../core/parts.mjs";
 import { parseArgs, emit, fail, run, writeAll } from "./_cli.mjs";
 
 const usage = "init.mjs --repo <path> [--install] [--enforce] [--specs | --no-specs] [--json]";
@@ -100,7 +101,9 @@ run(async () => {
           const i = rows.findIndex(([k]) => k === "specs");
           rows[i] = ["specs", `${all} *spec.md, ${all - specs.length} not committed yet`, null];
         }
-        result.modules_without_spec = modules.filter((m) => !m.specs.length).map((m) => m.id);
+        // Parts with no spec, by the same rule as veridic parts and the dashboard.
+        const homes = specHomes(data);
+        result.modules_without_spec = modules.filter((m) => !(data.specs ?? []).some((s) => homes.get(s.path) === m.id)).map((m) => m.id);
         rows.push(["parts", `${modules.length} found${result.modules_without_spec.length ? `, ${result.modules_without_spec.length} with no spec` : ", every one has a spec"}`, result.modules_without_spec.length ? null : true]);
       } catch (e) {
         rows.push(["parts", e.message, null]);

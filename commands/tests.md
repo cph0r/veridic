@@ -1,12 +1,14 @@
 ---
 description: Turn a part's rules into tests Veridic counts (link existing tests, write the rest); or, given a spec, which rules have real tests
-argument-hint: "<module id> [more ids] [--yes] | <spec.md> [run | scaffold <test path>]"
+argument-hint: "<part id> [more ids] [--yes] | <spec.md> [run | scaffold <test path>]"
 allowed-tools: Bash(veridic:*), Agent, Read
 ---
 
 Arguments: `$ARGUMENTS`.
 
 ## Part ids: turn the rules into tests
+
+Any part `veridic parts` lists works: a server part (`orders`) or a group of screens (`guest-app`).
 
 1. **Plan.** For each part, run `veridic tests --module <id>` and read it: its
    totals, its test recipe, and per rule the status, link candidates and test

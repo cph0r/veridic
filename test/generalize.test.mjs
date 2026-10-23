@@ -1046,3 +1046,52 @@ test("people read part, spec and rule", async () => {
   said.push(workListMarkdown(await workList("/nowhere", "nope", { data: d })));
   for (const s of said) assert.doesNotMatch(prose(s), OLD_WORDS, s.slice(0, 200));
 });
+
+// ---- final review fixes (simplify) ----
+test("final: the spec file named after a part is that part's, whatever it cites", async () => {
+  const { specHomes, partSpec } = await import("../core/parts.mjs");
+  const { moduleMarkdown } = await import("../core/modulectx.mjs");
+  const d = { modules: [{ id: "orders", files: ["src/orders.ts"], code: [] }, { id: "payments", files: ["src/pay.ts"], code: [] }], screens: [], specs: [specOf("specs/orders/spec.md", 3, "src/pay.ts")] };
+  assert.equal(specHomes(d).get("specs/orders/spec.md"), "orders");
+  assert.deepEqual(partSpec(d, "orders").specs, ["specs/orders/spec.md"]);
+  const m = { id: "orders", name: "Orders", files: ["src/orders.ts"], code: [], shared: [], specs: [], specified: 0, stats: { routes: 0, high: 0, medium: 0, money: 0 }, does: [], tests: { files: [], untested: [] }, usedBy: [], uses: [], data: { owns: [], uses: [] } };
+  assert.doesNotMatch(moduleMarkdown({ ...d, name: "x", routes: [], findings: [], modules: [m] }, m), /None yet/);
+});
+
+test("final: an uncited spec goes to the part its folder names most exactly", async () => {
+  const { specHomes } = await import("../core/parts.mjs");
+  const d = { modules: [{ id: "admin", files: [], code: [] }, { id: "orders", files: [], code: [] }], screens: [{ id: "admin-app", files: [] }, { id: "orders-admin", files: [] }], specs: [specOf("specs/admin-app/spec.md", 1, "nowhere.ts"), specOf("specs/orders-admin-v2/spec.md", 1, "nowhere.ts")] };
+  const h = specHomes(d);
+  assert.equal(h.get("specs/admin-app/spec.md"), "admin-app");
+  assert.equal(h.get("specs/orders-admin-v2/spec.md"), "orders-admin");
+});
+
+test("final: tests --module uses the same ownership as the dashboard, and explains screen parts", async () => {
+  const { workList } = await import("../core/worklist.mjs");
+  const d = { name: "x", routes: [], findings: [], screens: [{ id: "guest-app", name: "Guest screens", files: [] }],
+    modules: [{ id: "orders", name: "Orders", files: ["src/orders.ts"], code: [], specs: ["specs/orders-payment/spec.md"] }, { id: "payments", name: "Payments", files: ["src/pay.ts"], code: [], specs: ["specs/orders-payment/spec.md"] }],
+    specs: [specOf("specs/orders-payment/spec.md", 2, "src/pay.ts")] };
+  const orders = await workList("/nowhere", "orders", { data: d });
+  assert.match(orders.error, /no spec of its own/);
+  assert.match(orders.error, /Payments/);
+});
+
+test("final: tests --module works on a screen part too, with its own spec", async () => {
+  const { workList } = await import("../core/worklist.mjs");
+  const { execFileSync } = await import("node:child_process");
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "veridic-screenwl-"));
+  const put = (f, t) => { fs.mkdirSync(path.dirname(path.join(repo, f)), { recursive: true }); fs.writeFileSync(path.join(repo, f), t); };
+  put("package.json", '{"devDependencies":{"vitest":"1.0.0"}}');
+  put("web/src/pages/order.tsx", "export default function Order() {\n  return null;\n}\n");
+  put("specs/guest-app/spec.md", "- **FR-001**: The order page shows the cart. [evidence: web/src/pages/order.tsx:1-3]\n");
+  execFileSync("git", ["init", "-q"], { cwd: repo });
+  execFileSync("git", ["add", "-A"], { cwd: repo });
+  const d = { name: "x", routes: [], findings: [], modules: [{ id: "orders", name: "Orders", files: ["api/orders.ts"], code: [], specs: [] }],
+    screens: [{ id: "guest-app", name: "Guest screens", files: ["web/src/pages/order.tsx"], specs: ["specs/guest-app/spec.md"] }],
+    specs: [{ path: "specs/guest-app/spec.md", requirements: [{ id: "FR-001", requirement: true, text: "The order page shows the cart.", status: "none", cites: [{ file: "web/src/pages/order.tsx", start: 1, end: 3, cite: "web/src/pages/order.tsx:1-3" }], tests: [] }] }] };
+  const wl = await workList(repo, "guest-app", { data: d });
+  assert.ok(!wl.error, wl.error);
+  assert.deepEqual([...wl.specs], ["specs/guest-app/spec.md"]);
+  assert.equal(wl.module.name, "Guest screens");
+  fs.rmSync(repo, { recursive: true, force: true });
+});
