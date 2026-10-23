@@ -172,3 +172,64 @@ test("citations: checked by their text", async () => {
   assert.deepEqual(check(), { state: "moved", start: 7, end: 8 });
   fsm.rmSync(repo, { recursive: true, force: true });
 });
+
+// A temp git repo for the freshness tests: a.ts committed, then edited in the working tree.
+const freshRepo = () => {
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "veridic-fresh-"));
+  const g = (...a) => execFileSync("git", a, { cwd: repo, stdio: ["ignore", "pipe", "ignore"] });
+  g("init", "-q"); g("config", "user.email", "t@t"); g("config", "user.name", "t");
+  const body = ["export function pay(order) {", "  if (order.paid) throw new Error('paid');", "  order.paid = true;", "}", "export const other = 1;"];
+  fs.writeFileSync(path.join(repo, "a.ts"), body.join("\n") + "\n");
+  g("add", "."); g("commit", "-qm", "a");
+  const edit = (lines) => fs.writeFileSync(path.join(repo, "a.ts"), lines.join("\n") + "\n");
+  return { repo, g, body, edit, done: () => fs.rmSync(repo, { recursive: true, force: true }) };
+};
+
+test("stale: a hashed citation is fresh while its text is unchanged, whatever git says; moved keeps its hash", async () => {
+  const { citeHash } = await import("../core/citations.mjs");
+  const r = freshRepo();
+  const h = citeHash(r.body.slice(1, 3));
+  const spec = `- **FR-001**: pays once [evidence: a.ts:2-3~${h}]\n`;
+  r.edit([...r.body.slice(0, 4), "export const other = 2;"]); // an unrelated uncommitted edit
+  assert.deepEqual(staleness(r.repo, spec, { range: "HEAD" }).stale, []);
+  r.edit(["// a", "// b", ...r.body]); // moved down two lines
+  const res = staleness(r.repo, spec, { range: "HEAD" });
+  r.done();
+  assert.deepEqual(res.stale, []);
+  assert.deepEqual(res.fixes.map((f) => f.replacement), [`a.ts:4-5~${h}`]);
+});
+
+test("stale --fix: never moves a correct citation in a spec that isn't committed", async () => {
+  const { syncSpec } = await import("../core/staleness.mjs");
+  const r = freshRepo();
+  r.edit(["// a", "// b", ...r.body]); // uncommitted lines above the code
+  const specPath = path.join(r.repo, "spec.md");
+  fs.writeFileSync(specPath, "- **FR-001**: pays once [evidence: a.ts:4-5]\n"); // right for the working tree
+  const s = syncSpec(r.repo, specPath, { range: "HEAD" });
+  r.done();
+  assert.equal(s.applied, 0);
+  assert.deepEqual(s.open, []);
+});
+
+test("stale: hashed and unhashed citations in one committed spec, each judged its own way", async () => {
+  const { citeHash } = await import("../core/citations.mjs");
+  const r = freshRepo();
+  const spec = `- **FR-001**: pays once [evidence: a.ts:2-3~${citeHash(r.body.slice(1, 3))}]\n- **FR-002**: other is one [evidence: a.ts:5]\n`;
+  fs.writeFileSync(path.join(r.repo, "spec.md"), spec);
+  r.g("add", "."); r.g("commit", "-qm", "spec");
+  r.edit([...r.body.slice(0, 4), "export const other = 2;"]);
+  const res = staleness(r.repo, spec, { range: "HEAD", specFile: "spec.md" });
+  r.done();
+  assert.deepEqual(res.stale.map((s) => s.fr), ["FR-002"]);
+});
+
+test("stale --stamp: adds hashes to resolving citations, skips the rest", async () => {
+  const { stampSpec } = await import("../core/staleness.mjs");
+  const { citeHash } = await import("../core/citations.mjs");
+  const r = freshRepo();
+  const out = stampSpec(r.repo, "- **FR-001**: pays once [evidence: a.ts:2-3#pay@1]\n- **FR-002**: gone [evidence: b.ts:1]\n");
+  r.done();
+  assert.equal(out.stamped, 1);
+  assert.match(out.spec, new RegExp(`a\\.ts:2-3#pay@1~${citeHash(r.body.slice(1, 3))}`));
+  assert.deepEqual(out.skipped.map((s) => s.cite), ["b.ts:1"]);
+});

@@ -7,7 +7,7 @@ import path from "node:path";
 import { makeRepo } from "./fixture.mjs";
 import { parseSpec, checkCitations } from "../core/citations.mjs";
 import { openSymbols, enclosingSymbol, applyEdits, lineMentions } from "../core/anchors.mjs";
-import { fixSpec, prCheck } from "../core/staleness.mjs";
+import { fixSpec, prCheck, stampSpec } from "../core/staleness.mjs";
 import { guard } from "../core/guard.mjs";
 
 const repos = [];
@@ -141,7 +141,9 @@ test("prCheck fails a PR that changes cited code without touching the spec, and 
 
 test("guard rewrites moved citations in place and reports edited ones", () => {
   const { repo } = gitRepo();
-  fs.writeFileSync(path.join(repo, "spec.md"), "- **FR-001**: places [evidence: src/services/orders.ts:4-5#placeOrder@3]\n- **FR-002**: logs [evidence: src/log.ts:2]\n");
+  // A spec not committed yet: its citations are judged by their hashes (render stamps them).
+  const unstamped = "- **FR-001**: places [evidence: src/services/orders.ts:4-5#placeOrder@3]\n- **FR-002**: logs [evidence: src/log.ts:2]\n";
+  fs.writeFileSync(path.join(repo, "spec.md"), stampSpec(repo, unstamped).spec);
   insertTop(repo, "src/services/orders.ts", ["// header"]);
   syncIndex(repo, "src/services/orders.ts", 1);
   fs.writeFileSync(path.join(repo, "src/log.ts"), "export function log(msg) {\n  console.error(msg);\n}\n");
@@ -149,7 +151,17 @@ test("guard rewrites moved citations in place and reports edited ones", () => {
   assert.equal(report.specs[0].fixed, 1);
   assert.equal(report.problems, 1);
   assert.deepEqual(report.specs[0].stale.map((s) => s.fr), ["FR-002"]);
-  assert.match(fs.readFileSync(path.join(repo, "spec.md"), "utf8"), /orders\.ts:5-6#placeOrder@4/);
+  assert.match(fs.readFileSync(path.join(repo, "spec.md"), "utf8"), /orders\.ts:5-6#placeOrder@4~[0-9a-f]{6}/);
+});
+
+test("guard leaves an uncommitted spec without hashes alone: it can't know what its citations meant", () => {
+  const { repo } = gitRepo();
+  const text = "- **FR-001**: places [evidence: src/services/orders.ts:4-5#placeOrder@3]\n";
+  fs.writeFileSync(path.join(repo, "spec.md"), text);
+  insertTop(repo, "src/services/orders.ts", ["// header"]);
+  syncIndex(repo, "src/services/orders.ts", 1);
+  guard(repo, { sync: false, env: { VERIDIC_SPECS: "spec.md" } });
+  assert.equal(fs.readFileSync(path.join(repo, "spec.md"), "utf8"), text);
 });
 
 test("applyEdits replaces each citation once, on its own line", () => {

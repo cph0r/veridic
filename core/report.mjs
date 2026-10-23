@@ -160,7 +160,8 @@ function specSection(repo, file, m) {
   } catch {}
   let stale = new Set();
   try {
-    stale = new Set((staleness(repo, text, { range: "HEAD" }).summary.stale_requirements ?? []).map((x) => x.fr ?? x));
+    // Hashed citations by their text; the rest against HEAD only when the spec itself is committed.
+    stale = new Set((staleness(repo, text, { range: "HEAD", specFile: path.relative(repo, file) }).summary.stale_requirements ?? []).map((x) => x.fr ?? x));
   } catch {}
   const citesBy = new Map();
   for (const c of cite.citations ?? []) (citesBy.get(c.fr) ?? citesBy.set(c.fr, []).get(c.fr)).push(c);

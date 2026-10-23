@@ -8,14 +8,14 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { staleness, syncSpec, prCheck } from "../../core/staleness.mjs";
+import { staleness, syncSpec, prCheck, stampSpec } from "../../core/staleness.mjs";
 import { openSymbols } from "../../core/anchors.mjs";
 import { parseArgs, emit, fail, run } from "./_cli.mjs";
 
-const usage = "stale.mjs --repo <path> --spec <spec.md> [--range origin/main...HEAD | A..B | <rev> (vs working tree)] [--base <dir>] [--fix] [--strict] [--no-index] [--pr]";
+const usage = "stale.mjs --repo <path> --spec <spec.md> [--range origin/main...HEAD | A..B | <rev> (vs working tree)] [--base <dir>] [--fix] [--stamp] [--strict] [--no-index] [--pr]";
 
 run(() => {
-  const a = parseArgs(process.argv.slice(2), { flags: ["repo", "spec", "range", "base"], bools: ["fix", "strict", "no-index", "pr"] });
+  const a = parseArgs(process.argv.slice(2), { flags: ["repo", "spec", "range", "base"], bools: ["fix", "stamp", "strict", "no-index", "pr"] });
   const specPath = a.spec ?? a._[0];
   if (!a.repo || !specPath) fail("need --repo and --spec", usage);
   if (a.pr) {
@@ -27,8 +27,16 @@ run(() => {
       r.unaddressed.length + r.pending_fixes.length,
     );
   }
+  if (a.stamp) {
+    // Record what each citation points at (a hash of its lines, from the working tree), so it's
+    // judged by its text from now on. Only citations that resolve; run `veridic check` first.
+    const s = stampSpec(a.repo, fs.readFileSync(specPath, "utf8"), { bases: a.base ? [a.base] : [] });
+    if (s.stamped) fs.writeFileSync(specPath, s.spec);
+    emit({ repo: a.repo, spec: specPath, stamped: s.stamped, skipped: s.skipped }, s.skipped.length);
+  }
   const spec = fs.readFileSync(specPath, "utf8");
-  const opts = { range: a.range, bases: a.base ? [a.base] : [], symbols: a["no-index"] ? null : openSymbols(a.repo) };
+  const rel = path.relative(a.repo, path.resolve(specPath));
+  const opts = { range: a.range, bases: a.base ? [a.base] : [], symbols: a["no-index"] ? null : openSymbols(a.repo), ...(rel.startsWith("..") ? {} : { specFile: rel }) };
   let result;
   if (a.fix) {
     // A spec tracked in the repo is compared with its committed version, so --fix is safe to rerun.

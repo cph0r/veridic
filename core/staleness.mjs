@@ -7,6 +7,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { parseSpec, makeResolver } from "./citations.mjs";
 import { locateAnchor, formatCite, applyEdits } from "./anchors.mjs";
+import { citeHash, textCheck, checkCitations } from "./citations.mjs";
 
 const git = (repo, args) => {
   try {
@@ -126,8 +127,30 @@ export function staleness(repo, spec, opts = {}) {
     if (replacement !== c.cite.replace(/^`|`$/g, "")) fixes.push({ ...at, replacement, method });
   };
 
+  // A spec that isn't committed, or is edited, was written against the working tree: a diff
+  // from the range's base doesn't apply to its citations. Hashed citations are judged by their
+  // text either way.
+  const dirty = opts.specFile ? specChanged(repo, opts.specFile) : false;
+  const resolveNow = makeResolver(repo, { aliases: parsed.aliases, bases: [...(opts.bases ?? []), ...parsed.bases] });
+
   for (const c of parsed.citations) {
     const at = { fr: c.fr, spec_line: c.spec_line, cite: c.cite };
+    if (c.hash) {
+      const t = textCheck(repo, c, resolveNow);
+      const now = resolveNow(c.file).file ?? c.file;
+      if (t.state === "fresh") untouched++;
+      else if (t.state === "stale") stale.push({ ...at, file: now, change: "edited (the cited text changed)", hunk: null });
+      else if (t.state === "moved") {
+        shifted.push({ ...at, file: now, now: `${t.file ?? now}:${t.start}-${t.end}`, ...(t.file ? { renamed_to: t.file } : {}) });
+        const anchor = c.anchor ? { name: c.anchor.name, line: c.anchor.line + t.start - c.start } : null;
+        fixes.push({ ...at, replacement: formatCite(t.file ?? c.file, t.start, t.end, anchor, c.hash), method: "text" });
+      }
+      continue;
+    }
+    if (dirty) {
+      untouched++;
+      continue;
+    }
     const file = !c.bad && resolve(c.file).file;
     if (!file || c.start < 1 || c.end > lengthAt(file)) {
       unresolved.push({ ...at, problem: c.bad ?? (file ? `outside ${file} at base` : "file not found at base") });
@@ -183,6 +206,7 @@ export function staleness(repo, spec, opts = {}) {
     range,
     base,
     head: head ?? "working tree",
+    ...(dirty ? { baseline: "spec not committed: unhashed citations taken as of the working tree" } : {}),
     summary: {
       citations: parsed.citations.length,
       stale: stale.length,
@@ -270,9 +294,12 @@ export function syncSpec(repo, specFile, opts = {}) {
       tracked = true;
     } catch {}
   }
+  const inside = !rel.startsWith("..") && !path.isAbsolute(rel);
   if (!tracked) {
-    const { result, spec, applied } = fixSpec(repo, current, opts);
-    return { mode: "outside repo (citations taken as of the range base)", spec, applied, open: result.stale, conflicts: result.conflicts, result };
+    // Inside the repo, an uncommitted spec was written against the working tree: only its
+    // hashed citations can be checked (and moved). Outside, it describes the range's base.
+    const { result, spec, applied } = fixSpec(repo, current, { ...opts, ...(inside ? { specFile: rel } : {}) });
+    return { mode: inside ? "new spec (not yet committed): checked by its citations' hashes" : "outside repo (citations taken as of the range base)", spec, applied, open: result.stale, conflicts: result.conflicts, result };
   }
   const r = prCheck(repo, rel, { ...opts, range: opts.range ?? "HEAD" });
   if (r.new_spec) return { mode: "new spec (not yet committed)", spec: current, applied: 0, open: [], conflicts: [], result: null };
@@ -292,3 +319,34 @@ export function fixSpec(repo, spec, opts = {}) {
 }
 
 const nowAt = (ch, c) => `${ch.new}:${shiftLine(ch.hunks, c.start)}-${shiftLine(ch.hunks, c.end)}`;
+
+/** Whether a spec file is untracked or differs from HEAD (staged or not). */
+function specChanged(repo, specFile) {
+  try {
+    return git(repo, ["status", "--porcelain", "--", specFile]).trim() !== "";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Add a hash of the cited text to every citation that resolves and has none, from the
+ * working tree. Old specs opt in with `veridic stale --stamp`; render stamps new ones.
+ * @returns {{ spec, stamped, skipped: [{ cite, why }] }}
+ */
+export function stampSpec(repo, spec, opts = {}) {
+  const parsed = parseSpec(spec);
+  const checked = checkCitations(repo, spec, opts).citations;
+  const edits = [], skipped = [];
+  const cache = new Map();
+  parsed.citations.forEach((c, i) => {
+    const k = checked[i];
+    if (c.hash) return;
+    if (!k?.resolves) return skipped.push({ cite: c.cite, why: k?.problem ?? "doesn't resolve" });
+    if (!cache.has(k.file)) cache.set(k.file, fs.readFileSync(path.join(repo, k.file), "utf8").split("\n"));
+    const hash = citeHash(cache.get(k.file).slice(c.start - 1, c.end));
+    edits.push({ fr: c.fr, spec_line: c.spec_line, cite: c.cite, replacement: formatCite(c.file, c.start, c.end, c.anchor ?? null, hash) });
+  });
+  const { spec: out, applied } = applyEdits(spec, edits);
+  return { spec: out, stamped: applied, skipped };
+}

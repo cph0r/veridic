@@ -8,6 +8,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { validate, renderMarkdown, generatedSections, renderScaffolding } from "../../core/specdata.mjs";
 import { testCoverage, traceabilityTable } from "../../core/tests.mjs";
+import { stampSpec } from "../../core/staleness.mjs";
 import { checkDecisions, committedSpec } from "../../core/decisions.mjs";
 import { parseArgs, emit, fail, run } from "./_cli.mjs";
 
@@ -30,7 +31,8 @@ run(() => {
 
   const dir = a["out-dir"] ?? path.dirname(specPath);
   const generated = generatedSections(a.repo, spec.seeds);
-  const md = renderMarkdown(spec, generated);
+  // Each citation records what it points at now (a hash of its lines), so it's judged by its text.
+  const md = stampSpec(a.repo, renderMarkdown(spec, generated)).spec;
   const mdPath = path.join(dir, "spec.md");
   fs.writeFileSync(mdPath, md);
   const cov = testCoverage(a.repo, md, { specPath: mdPath, run: !!a["run-tests"] });

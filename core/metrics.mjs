@@ -58,7 +58,8 @@ export function specMetrics(repo, file, opts = {}) {
       const s = syncSpec(repo, file, { symbols });
       Object.assign(m, { stale_requirements: s.open.length, citations_to_update: s.applied, conflicts: s.conflicts.length, freshness_baseline: "committed spec vs working tree" });
     } else {
-      const r = staleness(repo, text, { range: "HEAD", symbols });
+      const rel = path.relative(repo, file);
+      const r = staleness(repo, text, { range: "HEAD", symbols, ...(rel.startsWith("..") ? {} : { specFile: rel }) });
       Object.assign(m, { stale_requirements: r.summary.stale_requirements.length, citations_to_update: r.fixes.length, conflicts: r.conflicts.length, freshness_baseline: "HEAD vs working tree (spec outside repo)" });
     }
   } catch (e) {

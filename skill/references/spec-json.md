@@ -35,6 +35,8 @@ them. Fix every problem `render` reports and run it again.
 }
 ```
 
+Write evidence as `path:start-end`; `veridic render` adds a hash of the cited lines (`path:start-end~3f9a1c`) so the rule is judged by that text later. Don't write or edit hashes by hand.
+
 - Ids: `FR-001`, `INV-1`, `R1`, `US1`; unique. Evidence: `path:line` or `path:start-end`.
 - **Verification criteria**: give a requirement `"verification": [{"id": "VC1", "text": "…"}]`,
   one checkable condition each. Name tests `FR-001 VC1: …` (or the domain
