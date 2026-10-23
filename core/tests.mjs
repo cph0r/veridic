@@ -579,9 +579,56 @@ export function runJest(repo, testFiles) {
 }
 
 /** Run named test files with each package's own framework (from the test recipe). */
-export function runByFramework(repo, testFiles, files) {
+/** Each test file's framework (vitest, jest, node:test) from the repo's test recipes. */
+function frameworkOfFile(repo, files) {
   const recipes = testRecipe(repo, files);
-  const frameworkOf = (f) => [...recipes.values()].filter((r) => r.dir === "." || f.startsWith(r.dir + "/")).sort((a, b) => b.dir.length - a.dir.length)[0]?.framework ?? null;
+  return (f) => [...recipes.values()].filter((r) => r.dir === "." || f.startsWith(r.dir + "/")).sort((a, b) => b.dir.length - a.dir.length)[0]?.framework ?? null;
+}
+
+/**
+ * The lines one test file's run covered, from the runner's own coverage (lcov): node:test's
+ * --experimental-test-coverage, vitest's v8 provider (needs @vitest/coverage-v8), jest's
+ * --coverage. -> Map<repo file, Set<line>>, or { unavailable: why }. Per file of tests, not
+ * per test: a test counts as reaching lines its file's run covered.
+ */
+export function fileCoverage(repo, framework, testFile) {
+  const abs = path.join(repo, testFile);
+  let pkg = path.dirname(abs);
+  while (pkg.startsWith(repo) && pkg !== repo && !fs.existsSync(path.join(pkg, "package.json"))) pkg = path.dirname(pkg);
+  const installed = (mod) => {
+    for (let d = pkg; ; d = path.dirname(d)) {
+      if (fs.existsSync(path.join(d, "node_modules", mod))) return true;
+      if (d === repo || d === path.dirname(d)) return false;
+    }
+  };
+  const out = fs.mkdtempSync(path.join(os.tmpdir(), "veridic-cov-"));
+  const lcov = path.join(out, "lcov.info");
+  const rel = path.relative(pkg, abs);
+  // As in runNodeTest: a nested `node --test` must report on its own, not to a parent run.
+  const { NODE_TEST_CONTEXT, ...env } = testEnv(repo);
+  const opts = { cwd: pkg, encoding: "utf8", timeout: 600_000, env };
+  if (framework === "node:test") spawnSync(process.execPath, ["--test", "--experimental-test-coverage", "--test-reporter=lcov", `--test-reporter-destination=${lcov}`, rel], opts);
+  else if (framework === "vitest") {
+    if (!installed("@vitest/coverage-v8")) return { unavailable: "@vitest/coverage-v8 not installed" };
+    spawnSync("npx", ["--no-install", "vitest", "run", rel, "--coverage.enabled", "--coverage.provider=v8", "--coverage.reporter=lcov", `--coverage.reportsDirectory=${out}`, "--coverage.all=false"], opts);
+  } else if (framework === "jest") spawnSync("npx", ["--no-install", "jest", rel, "--coverage", "--coverageReporters=lcov", `--coverageDirectory=${out}`], opts);
+  else return { unavailable: framework ? `no coverage for ${framework}` : "no test framework found" };
+  if (!fs.existsSync(lcov)) return { unavailable: `${framework} wrote no coverage report` };
+  const hits = new Map();
+  let file = null;
+  for (const l of fs.readFileSync(lcov, "utf8").split("\n")) {
+    if (l.startsWith("SF:")) file = relKey(repo, path.resolve(pkg, l.slice(3)));
+    else if (file && l.startsWith("DA:")) {
+      const [n, c] = l.slice(3).split(",").map(Number);
+      if (c > 0) (hits.get(file) ?? hits.set(file, new Set()).get(file)).add(n);
+    }
+  }
+  fs.rmSync(out, { recursive: true, force: true });
+  return hits;
+}
+
+export function runByFramework(repo, testFiles, files) {
+  const frameworkOf = frameworkOfFile(repo, files);
   const groups = new Map();
   for (const f of testFiles) {
     const fw = frameworkOf(f);
@@ -711,12 +758,24 @@ export function testCoverage(repo, spec, opts = {}) {
 
   const named = [...new Set(tagged.filter((t) => !t.todo).map((t) => t.file))];
   const run = opts.run ? (opts.runner ? opts.runner(repo, named) : runByFramework(repo, named, files)) : null;
+  // With --run, the runner's coverage decides what a test reaches, where it's available.
+  const covOf = new Map();
+  if (run && !opts.runner && opts.coverage !== false) {
+    const fw = frameworkOfFile(repo, files);
+    for (const f of named) covOf.set(f, fileCoverage(repo, fw(f), f));
+  }
+  const unavailable = [...new Set([...covOf.values()].filter((c) => c.unavailable).map((c) => c.unavailable))];
+  const reachesNow = (t, id) => {
+    const cov = covOf.get(t.file);
+    if (!cov || cov.unavailable) return reaches(t.file, cited.get(id));
+    return (cites.get(id) ?? []).some((c) => { const m = c.match(/^(.*):(\d+)(?:-(\d+))?$/); if (!m) return false; const hit = cov.get(m[1]); if (!hit) return false; for (let n = Number(m[2]); n <= Number(m[3] ?? m[2]); n++) if (hit.has(n)) return true; return false; });
+  };
   const requirements = [...cited.keys()].map((id) => {
     const tests = tagged
       .filter((t) => t.id === id)
       .map((t) => {
         const result = run?.results.get(`${t.file}\0${t.title}`);
-        return { at: `${t.file}:${t.line}`, title: t.title, todo: t.todo, ...(t.needs ? { needs: t.needs } : {}), ...(t.expectFail ? { expect_fail: true } : {}), ...(t.brokenSkip ? { broken_skip: true } : {}), ...(t.strength ? { strength: t.strength } : {}), reaches_cited_code: reaches(t.file, cited.get(id)), ...(run ? { result: result ?? "not run" } : {}) };
+        return { at: `${t.file}:${t.line}`, title: t.title, todo: t.todo, ...(t.needs ? { needs: t.needs } : {}), ...(t.expectFail ? { expect_fail: true } : {}), ...(t.brokenSkip ? { broken_skip: true } : {}), ...(t.strength ? { strength: t.strength } : {}), reaches_cited_code: reachesNow(t, id), ...(run ? { result: result ?? "not run" } : {}) };
       });
     const real = tests.filter((t) => !t.todo && !t.expect_fail && t.reaches_cited_code && checks(t));
     const proving = tests.filter((t) => !t.todo && t.expect_fail && t.reaches_cited_code && checks(t));
@@ -773,6 +832,7 @@ export function testCoverage(repo, spec, opts = {}) {
       untested: count("none"),
     },
     requirements,
+    ...(run ? { coverage: !covOf.size ? "static (no tests run)" : unavailable.length ? `static (${unavailable.join("; ")})` : "runtime" } : {}),
     criteria: successCriteria(spec),
     // Bare ids another spec also declares: counted for neither until the title names its spec.
     ambiguous: [...ambiguous].flatMap(([id, ats]) => ats.map((at) => ({ id, at }))),

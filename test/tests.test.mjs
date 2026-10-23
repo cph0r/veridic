@@ -330,3 +330,34 @@ test("tests: a test that needs an env flag says so, and counts once the flag is 
   assert.deepEqual(before.map((r) => [r.id, r.status, r.needs]), [["FR-001", "skipped", ["DB_TESTS"]], ["FR-002", "skipped", ["DB_TESTS"]], ["FR-003", "skipped", ["DB_TESTS"]]]);
   assert.deepEqual(after.map((r) => r.status), ["covered", "covered", "covered"]);
 });
+
+test("tests: with --run, coverage decides what a test reaches", () => {
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "veridic-cov-"));
+  const w = (f, t) => (fs.mkdirSync(path.dirname(path.join(repo, f)), { recursive: true }), fs.writeFileSync(path.join(repo, f), t));
+  w("package.json", JSON.stringify({ name: "x", type: "module", scripts: { test: "node --test" } }));
+  w("src/pay.mjs", 'export function pay(o) {\n  if (o.paid) throw new Error("paid");\n  o.paid = true;\n  return o;\n}\nexport function refund(o) {\n  o.paid = false;\n}\n');
+  // The import is computed: reading the file can't tell what it runs.
+  w("test/pay.test.mjs", 'import { test } from "node:test";\nimport assert from "node:assert";\nconst mod = await import("../src/" + ["pay", "mjs"].join("."));\ntest("FR-001: pays once", () => { assert.equal(mod.pay({}).paid, true); });\ntest("FR-002: refunds", () => { assert.ok(true); });\n');
+  execFileSync("git", ["init", "-q"], { cwd: repo });
+  execFileSync("git", ["add", "."], { cwd: repo });
+  const spec = "- **FR-001**: pays once [evidence: src/pay.mjs:2-3]\n- **FR-002**: refunds [evidence: src/pay.mjs:7]\n";
+  const stat = testCoverage(repo, spec);
+  const run = testCoverage(repo, spec, { run: true });
+  fs.rmSync(repo, { recursive: true, force: true });
+  assert.equal(stat.requirements[0].tests[0].reaches_cited_code, false, "statically, the computed import is invisible");
+  assert.equal(run.coverage, "runtime");
+  assert.equal(run.requirements[0].tests[0].reaches_cited_code, true);
+  assert.equal(run.requirements[0].status, "passing");
+  assert.equal(run.requirements[1].tests[0].reaches_cited_code, false, "FR-002's test never runs refund()");
+});
+
+test("tests: without the runner's coverage tool, --run says so and keeps static reach", async () => {
+  const { fileCoverage } = await import("../core/tests.mjs");
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "veridic-nocov-"));
+  fs.writeFileSync(path.join(repo, "package.json"), JSON.stringify({ name: "x", devDependencies: { vitest: "^3.0.0" } }));
+  fs.mkdirSync(path.join(repo, "test"));
+  fs.writeFileSync(path.join(repo, "test/a.test.ts"), 'import { test } from "vitest";\ntest("FR-001: x", () => {});\n');
+  const cov = fileCoverage(repo, "vitest", "test/a.test.ts");
+  fs.rmSync(repo, { recursive: true, force: true });
+  assert.deepEqual(cov, { unavailable: "@vitest/coverage-v8 not installed" });
+});
