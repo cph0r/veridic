@@ -1,6 +1,6 @@
 # Framework adapters, and Next.js
 
-Date: 2026-10-23. Status: approved, **deferred**. Veridic is built for cloudcrane, whose apps are Express (with React + Vite frontends), so Express stays the only framework for now. Pick this up when a Next.js (or other) app needs Veridic; the plan is `docs/plans/2026-10-23-adapters-nextjs.md`. Project 1 of 3 (2: the spec layer for any
+Date: 2026-10-23. Status: approved, in progress (resumed 2026-10-23: the adapters leave Express unchanged, so there is no cost to cloudcrane). Project 1 of 3 (2: the spec layer for any
 language; 3: Python/FastAPI).
 
 ## Goal

@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Status:** deferred (2026-10-23), not started. Express is enough for cloudcrane today. To resume: re-pin the sample repos in Task 4 to current commits, re-check the research in the spec (Noir, next-openapi-gen), and start at Task 1.
+**Status:** in progress (resumed 2026-10-23).
 
 **Goal:** Veridic reads Next.js apps (routes, guards, statuses, effects, tests) as it reads Express, with Express moved behind one adapter interface unchanged.
 
