@@ -40,7 +40,7 @@ veridic init              # builds the code index; checks your routes are found
 veridic init --enforce    # optional: Claude can't finish while Veridic says NOT DONE
 ```
 
-`init` also splits your app into its parts, found from the code: server modules (orders, menu, auth…) with their timers and WebSocket handlers, and your frontend's screens grouped by who uses them (guest, admin…). If they have no specs yet, it offers to start Claude Code on `/veridic:specs`, which writes specs until the whole app is covered, riskiest parts first, and asks before starting.
+`init` also splits your app into its parts, found from the code: server parts (orders, menu, auth…) with their timers and WebSocket handlers, and your frontend's screens grouped by who uses them (guest, admin…). If they have no specs yet, it offers to start Claude Code on `/veridic:specs`, which writes specs until the whole app is covered, riskiest parts first, and asks before starting.
 
 That's all. From now on Claude uses Veridic on its own when it changes, reviews or documents your code.
 
@@ -58,9 +58,9 @@ Claude claims the refund route, sees what that code reaches before touching it, 
 
 > Which of our tests don't actually test anything?
 
-> Write a spec for the checkout flow, with every requirement backed by the code.
+> Write a spec for the checkout flow, with every rule backed by the code.
 
-> Write specs for every module (or run `/veridic:specs`).
+> Write specs for every part (or run `/veridic:specs`).
 
 > How much of our app do the specs describe?
 
@@ -94,9 +94,9 @@ flowchart LR
 | About to edit | `veridic claim "POST /api/refund"` | Every route that code reaches and what each really does (money and deletes first), and the tests that cover it |
 | Finishing | `veridic done` | **DONE**, or exactly which change strayed outside the claim, which changed route has no real test, which new test asserts nothing |
 | Checking an API for agents | `veridic agent-ready` | What every route really does: reads, writes, deletes, moves money, and which act on ids the caller doesn't own |
-| Writing a spec | `/veridic:spec checkout` | Spec Kit–format requirements, each citing the lines that implement it and checked against them |
+| Writing a spec | `/veridic:spec checkout` | Spec Kit–format rules, each citing the lines that implement it and checked against them |
 | Writing specs for the whole app | `/veridic:specs` | Specs until the app is covered: parts with no spec first (riskiest first), then specs that miss their own files, then code in no part. Each agent works from `veridic prepare --module <id>`: what every route really does, its tables, screens, tests and open findings |
-| How much of the app the specs describe | `veridic coverage` | Every behaviour file and the spec that cites it, per module and screen group; what's in no part; every file left out (tests, generated code, types, config, seeds) with its reason |
+| How much of the app the specs describe | `veridic coverage` | Every behaviour file and the spec that cites it, per part (a server feature or a group of screens); what's in no part; every file left out (tests, generated code, types, config, seeds) with its reason |
 | Asked "why is it like this?" | `veridic why FR-002` | The commits that wrote that code |
 
 **No model decides any of it.** Every verdict is computed from your code, the git diff and your tests, with the line that proves it, so it can't be talked into passing.
@@ -156,7 +156,7 @@ No. Veridic runs locally and sends nothing anywhere: no telemetry, no network ca
 <details>
 <summary><strong>Do I need to write specs?</strong></summary>
 
-No. `claim → edit → done` works on any Express repo from the first minute. Specs are optional: when you have one, `veridic done --spec` also checks each requirement's verification criteria.
+No. `claim → edit → done` works on any Express repo from the first minute. Specs are optional: when you have one, `veridic done --spec` also checks each rule's verification criteria.
 </details>
 
 <details>

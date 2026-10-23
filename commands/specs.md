@@ -1,13 +1,13 @@
 ---
 description: Write specs until the whole app is covered: parts with no spec, specs that miss their files, then code in no part; one agent per part, riskiest first (asks before starting)
-argument-hint: "[module or screen group id …]"
+argument-hint: "[part id …]"
 allowed-tools: Bash(veridic:*), Agent, Read
 ---
 
 Write specs for this app until its behaviour is covered: $ARGUMENTS
 
-Veridic has already split the app into parts: server modules and, for a
-frontend, screen groups (`guest`, `admin`, …). Use its split, never your own.
+Veridic has already split the app into parts: server parts and, for a
+frontend, its screens grouped by who uses them (`guest-app`, `admin-app`, …). Use its split, never your own.
 `veridic coverage` measures how much of the app the specs describe.
 
 1. **Plan.** Run `veridic coverage` and `veridic modules`. The parts to do are
@@ -38,7 +38,7 @@ frontend, screen groups (`guest`, `admin`, …). Use its split, never your own.
    > skill's sequence for writing a spec. Gather once:
    > `veridic prepare --module <id> --out .veridic/context/<id>.md`, then read
    > that file in full (for a folder in no part, read its files instead). Write
-   > the spec at `<spec_path>`, each requirement a list item labelled
+   > the spec at `<spec_path>`, each rule a list item labelled
    > `**FR-001**:` (invariants `**INV-1**:`) ending in its
    > `[evidence: path:line-line]` citations. If a spec already covers this
    > part, extend it instead of writing a second one. For screens, describe
@@ -48,9 +48,9 @@ frontend, screen groups (`guest`, `admin`, …). Use its split, never your own.
    > `veridic coverage --module <id>`: cite each file it lists in a rule, or
    > say in Assumptions why it needs none. Write `traceability.md` with
    > `veridic tests --spec <spec_path> --table`. Open findings are risks or
-   > open questions, never MUST requirements; an invariant they break is
+   > open questions, never MUST rules; an invariant they break is
    > recorded with `holds: no`. Don't change any of the app's code. Reply with
-   > the spec's path, its number of requirements, its citations resolving out
+   > the spec's path, its number of rules, its citations resolving out
    > of total, the files you left uncited and why, and the risks you recorded.
 
 4. **Measure again.** Run `veridic coverage` and report coverage before and

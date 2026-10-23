@@ -17,9 +17,9 @@ With no arguments it measures every tracked `*spec.md` in the current repo. Exit
 After the table, add one line saying which item in "Needs attention" to fix first and why. What the columns mean, if the user asks:
 
 - **Cites OK %**: citations that resolve to real lines.
-- **Claims supported %**: facts a requirement states (identifiers, messages, numbers) that appear in the lines it cites.
+- **Claims supported %**: facts a rule states (identifiers, messages, numbers) that appear in the lines it cites.
 - **Anchored %**: citations tied to a symbol, so they can follow the code when it moves.
-- **Stale reqs**: requirements whose cited code changed since the spec was last committed (or since HEAD, for a spec outside the repo).
+- **Stale reqs**: rules whose cited code changed since the spec was last committed (or since HEAD, for a spec outside the repo).
 - **Cites to update**: citations whose code only moved; `veridic stale --fix` updates them.
 - **Deps cited %**: literal constants the cited code depends on that the spec also cites.
 - **Spec coverage**: API routes with at least one citation in their handler.

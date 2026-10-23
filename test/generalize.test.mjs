@@ -747,7 +747,7 @@ test("FR-014: unknown modules and modules without a spec of their own are explai
   const { workList } = await import("../core/worklist.mjs");
   const { repo, data } = await workRepo();
   const unknown = await workList(repo, "nope", { data });
-  assert.match(unknown.error, /no module "nope"/);
+  assert.match(unknown.error, /no part "nope"/);
   assert.deepEqual(unknown.modules, ["orders", "menu", "tables", "voice"]);
   const tables = await workList(repo, "tables", { data });
   assert.match(tables.error, /no spec of its own/);
@@ -1024,4 +1024,25 @@ test("one spec path per part: the same grouping as the dashboard", async () => {
   const row = moduleList(d).find((r) => r.id === "orders");
   assert.equal(m.partOf(row.spec_path), "orders");
   assert.deepEqual([...row.part_specs].sort(), [...m.P.get("orders").specs.map((s) => s.path)].sort());
+});
+
+// ---- three words: part, spec, rule ----
+const OLD_WORDS = /\b(requirements?|modules?|screen groups?)\b/i;
+const prose = (s) => String(s).replace(/`[^`]*`/g, "").replace(/<code>[\s\S]*?<\/code>/g, "");
+
+test("people read part, spec and rule", async () => {
+  const { partsTable, moduleList } = await import("../core/modulectx.mjs");
+  const { coverageMarkdown } = await import("../core/coverage.mjs");
+  const { workList, workListMarkdown } = await import("../core/worklist.mjs");
+  const vm = await import("node:vm");
+  const ctx = {};
+  vm.runInNewContext(fs.readFileSync(new URL("../core/report-page.js", import.meta.url), "utf8"), ctx);
+  const d = partData([specOf("specs/orders/spec.md", 2), specOf("specs/notes/spec.md", 1, "src/x.ts")]);
+  const m = ctx.veridicModel({ ...d, routes: [], findings: [], coverage: { behaviour: 4, covered: 2, pct: 50, parts: [{ id: "orders", name: "Orders", kind: "module", total: 2, covered: 1, uncovered: ["src/b.ts"] }], orphans: ["src/c.ts"] } });
+  const said = [m.verdict, ...m.fix.flatMap((c) => [c.html, c.w]), ...m.later.flatMap((c) => [c.html, c.w]), ...m.parts.map((p) => p.health)];
+  said.push(coverageMarkdown({ covered: 2, behaviour: 4, pct: 50, parts: [{ id: "orders", name: "Orders", kind: "module", total: 2, covered: 1, uncovered: ["src/b.ts"] }, { id: "guest-app", name: "Guest screens", kind: "screens", total: 1, covered: 1, uncovered: [] }], orphans: ["src/c.ts"], orphanFolders: [{ folder: "src", files: ["src/c.ts"] }], skipped: [{ file: "a.test.ts", reason: "test" }] }));
+  const row = { ...moduleList(d)[0], does: [], issues: { high: 0, medium: 0 } };
+  said.push(partsTable([row]));
+  said.push(workListMarkdown(await workList("/nowhere", "nope", { data: d })));
+  for (const s of said) assert.doesNotMatch(prose(s), OLD_WORDS, s.slice(0, 200));
 });

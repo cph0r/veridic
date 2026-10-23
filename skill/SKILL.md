@@ -1,6 +1,6 @@
 ---
 name: veridic
-description: Facts and checks for changing existing code safely. Use before changing a feature in an existing codebase (get every route, webhook, timer and table involved, with line numbers), after changing it (`veridic done`: did the change stay in scope, and does every requirement have a test that really asserts), when writing, updating or checking a spec ("spec this feature", "document how X works"), when code changes may have made a spec stale, and when asked whether an API is safe to expose to AI agents. Every fact cites file:line and is verified by scripts, not a model.
+description: Facts and checks for changing existing code safely. Use before changing a feature in an existing codebase (get every route, webhook, timer and table involved, with line numbers), after changing it (`veridic done`: did the change stay in scope, and does every rule have a test that really asserts), when writing, updating or checking a spec ("spec this feature", "document how X works"), when code changes may have made a spec stale, and when asked whether an API is safe to expose to AI agents. Every fact cites file:line and is verified by scripts, not a model.
 ---
 
 # veridic
@@ -41,17 +41,18 @@ Every tool call re-reads the whole conversation, so the cost of a run is mostly
 its number of turns. Follow this order and don't repeat steps.
 
 1. **Gather.** If the prompt already contains a "Feature context" document, use
-   it and skip to step 3. **For a module, or a spec per module:** Veridic has
+   it and skip to step 3. **For a part, or a spec per part:** Veridic has
    already split the app. `veridic modules` lists them (with each one's
    `spec_path`); `veridic prepare --module <id> --out .veridic/context/<id>.md`
    gathers one, with what each route really does, its tables, screens, tests,
    existing rules and open findings. A frontend's screens are groups in the same
-   list (`guest`, `admin`, …): `prepare --module <group>` gives their pages, files
+   list (`guest-app`, `admin-app`, …): `prepare --module <part>` gives their pages, files
    and the server rules their calls depend on; a screen rule links a server rule
    in one line (`Server rules: specs/orders FR-016`) instead of restating it.
-   Use that split, write to the module's
-   `spec_path` (extend a spec that already covers it), and put open findings
-   under risks or open questions, never as MUST requirements. Otherwise, once:
+   Use that split, write to the part's
+   `spec_path`: a part has one spec, so extend it when it exists and never
+   start a second spec file for that part. Put open findings
+   under risks or open questions, never as MUST rules. Otherwise, once:
    ```bash
    veridic routes order payment                      # pick the feature's entry routes
    veridic prepare --out .veridic/context/orders.md "POST /api/orders" "GET /api/orders/:id" …
@@ -69,15 +70,15 @@ its number of turns. Follow this order and don't repeat steps.
 4. **Verify once:** `veridic cite --spec spec.md` then
    `veridic claims --spec spec.md`. Both list only problems. A claims fact
    marked `elsewhere_in_file` (with `at`) means the citation is off or misses
-   the line holding that fact. To re-read a requirement's cited code:
+   the line holding that fact. To re-read a rule's cited code:
    `veridic cite --spec spec.md --fr FR-007,FR-012`.
 5. **Fix** all problems in as few edits as possible, then run step 4 once more.
    Stop when both exit 0.
-   For a module or screen group, then run `veridic coverage --module <id>`: cite
+   For a part, then run `veridic coverage --module <id>`: cite
    each file it lists in a rule, or say in Assumptions why it needs none.
 6. **Traceability:** `veridic tests --spec spec.md --table > traceability.md`.
    Read each `related` test it lists and change that row to `covered` only if
-   the test asserts that requirement's behavior.
+   the test asserts that rule's behavior.
 
 Don't run `metrics`, `anchor`, `mutate` or `stale` while writing a spec; they
 are for maintenance (`references/maintenance.md`).
@@ -85,7 +86,7 @@ are for maintenance (`references/maintenance.md`).
 ## Turning rules into tests
 
 A rule counts as tested only when a passing test named with its id reaches the
-code it cites. For a module, `veridic tests --module <id>` lists every rule's
+code it cites. For a part, `veridic tests --module <id>` lists every rule's
 status, the tests that may already check it, the test file to use, the cited
 code of rules still to do, and the repo's test recipe (framework, run command,
 helpers, an example test). Link the tests that really check a rule in one call:
@@ -94,19 +95,19 @@ the id in each title, nothing else. `/veridic:tests <id>` does the whole job wit
 `veridic-test-writer` agent. A rule the code breaks today gets an
 expected-failure test (`it.fails`, `test.failing`): it shows as broken, proven.
 
-## Implementing a requirement: is it done?
+## Implementing a rule: is it done?
 
-After changing code for requirements, run `veridic done --spec S FR-002 [FR-003 …] --card`
+After changing code for rules, run `veridic done --spec S FR-002 [FR-003 …] --card`
 (add `--run` to run their tests). It is done only when every changed file is in
-the seam of what you claimed (the files those requirements cite or declare with
+the seam of what you claimed (the files those rules cite or declare with
 `seam`, plus their named tests) and every verification criterion has an
-asserting test. A stray file means you changed something no claimed requirement
-covers: claim the requirement it belongs to, add it to a seam in spec.json, or
+asserting test. A stray file means you changed something no claimed rule
+covers: claim the rule it belongs to, add it to a seam in spec.json, or
 undo it. Don't say "done" until this prints `VERDICT ● DONE`.
 
 ## Why the code is the way it is
 
-`veridic why --spec S FR-002` lists the commits that wrote a requirement's cited
+`veridic why --spec S FR-002` lists the commits that wrote a rule's cited
 lines, with their messages. Record a real reason as a decision in spec.json
 (`references/spec-json.md`), citing the lines and the commit. Decisions are
 append-only: never edit one, add a new one that `supersedes` it.
@@ -120,7 +121,7 @@ Questions & Observed Risks.
 - Requirements describe behavior, not implementation: "MUST reject a quantity
   outside 1–20", not "checks `item.quantity < 1`".
 - **Every FR ends with `[evidence: path:line]` or `[evidence: path:start-end]`.**
-  Several citations are comma-separated. No citation, no requirement. Cite the
+  Several citations are comma-separated. No citation, no rule. Cite the
   narrowest range that shows the behavior, not the whole handler.
 - Acceptance scenarios come from real branches (each 4xx/409 is a candidate).
 - Mark what the code can't tell you with `[NEEDS CLARIFICATION: …]`: intent
@@ -156,4 +157,4 @@ Give each risk a severity (high/medium/low) and evidence.
 In the traceability table, `covered` only if a test **asserts** that FR's
 behavior; `related` if a test only imports or calls the code (a hash-function
 test does not cover the 409 duplicate path); `untested` otherwise. To write
-requirement tests: `references/tests.md`.
+rule tests: `references/tests.md`.

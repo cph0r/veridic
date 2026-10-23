@@ -101,12 +101,12 @@ run(async () => {
           rows[i] = ["specs", `${all} *spec.md, ${all - specs.length} not committed yet`, null];
         }
         result.modules_without_spec = modules.filter((m) => !m.specs.length).map((m) => m.id);
-        rows.push(["modules", `${modules.length} found${result.modules_without_spec.length ? `, ${result.modules_without_spec.length} with no spec` : ", every one has a spec"}`, result.modules_without_spec.length ? null : true]);
+        rows.push(["parts", `${modules.length} found${result.modules_without_spec.length ? `, ${result.modules_without_spec.length} with no spec` : ", every one has a spec"}`, result.modules_without_spec.length ? null : true]);
       } catch (e) {
-        rows.push(["modules", e.message, null]);
+        rows.push(["parts", e.message, null]);
       }
     }
-    if (result.modules_without_spec?.length) next.push(`Draft specs for ${result.modules_without_spec.length} modules, riskiest first: \`/veridic:specs\` in Claude Code, or \`veridic init --specs\``);
+    if (result.modules_without_spec?.length) next.push(`Draft specs for ${result.modules_without_spec.length} parts, riskiest first: \`/veridic:specs\` in Claude Code, or \`veridic init --specs\``);
     else next.push(result.specs ? "See every number: `veridic metrics --card`" : "Write your first spec: `/veridic:spec <feature>` in Claude Code, or `veridic routes <word>` to pick one");
     next.push("See the whole app: `veridic report`");
     next.push("Check an API before handing it to agents: `veridic agent-ready --md`");
@@ -118,7 +118,7 @@ run(async () => {
   const missing = result.modules_without_spec?.length ?? 0;
   const person = process.stdin.isTTY && process.stdout.isTTY && !process.env.CI && !process.env.CLAUDECODE;
   if (ok && missing && !a["no-specs"] && (a.specs || person) && hasClaude()) {
-    const go = a.specs || (await ask(`\n${missing} module${missing === 1 ? " has" : "s have"} no written rules. Start Claude Code to draft them, riskiest first? It asks before starting any agents. [y/N] `));
+    const go = a.specs || (await ask(`\n${missing} part${missing === 1 ? " has" : "s have"} no written rules. Start Claude Code to draft them, riskiest first? It asks before starting any agents. [y/N] `));
     if (go) process.exit(startSpecs(repo));
   }
   process.exit(ok ? 0 : 1);

@@ -10,12 +10,12 @@ Write a spec for: $ARGUMENTS
 Follow the veridic skill. This command uses its cheapest proven path: gather
 the feature's context once, before reading anything else.
 
-0. **A module, or every module?** Use Veridic's split, not your own:
-   `veridic modules --md` lists the modules and where each spec goes. For each
+0. **A part, or every part?** Use Veridic's split, not your own:
+   `veridic modules --md` lists the parts and where each spec goes. For each
    one, `veridic prepare --module <id> --out .veridic/context/<id>.md`, then step 2
-   onwards, writing to that module's `spec_path` (extend a spec that already
+   onwards, writing to that part's `spec_path` (extend a spec that already
    covers it). Its open findings are risks or open questions, never MUST
-   requirements. For several modules, start with those that move money or have
+   rules. For several parts, start with those that move money or have
    high issues.
 1. **Pick seeds.** `veridic routes <a word or two from the feature>` lists
    matching routes. Choose the feature's entry routes (several is normal: create,
@@ -32,8 +32,8 @@ the feature's context once, before reading anything else.
    numbers). Read other files only for what it doesn't show; if the feature can
    unlock or limit other parts of the app, check those parts yourself.
 3. Continue from step 3 of the skill's sequence: write `spec.md` once, verify
-   once with `veridic cite` and `veridic claims`, fix, verify again. For a module
-   or screen group, run `veridic coverage --module <id>` and cite each file it
+   once with `veridic cite` and `veridic claims`, fix, verify again. For a part,
+   run `veridic coverage --module <id>` and cite each file it
    lists, or say in Assumptions why it needs none. Then
    `veridic tests --spec <folder>/spec.md --table > <folder>/traceability.md`.
 4. Finish with `veridic metrics --md <folder>/spec.md` and show the table.

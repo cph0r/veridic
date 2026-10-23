@@ -148,3 +148,12 @@ export function screenMarkdown(data, s, { uncovered = [] } = {}) {
   }
   return L.join("\n") + "\n";
 }
+
+/** The parts as a Markdown table, for people (`veridic parts --md`), with the next step. */
+export function partsTable(list) {
+  const rows = list.map((m) => `| \`${m.id}\` | ${m.name} | ${m.kind === "screens" ? `${m.pages ?? 0} pages` : m.routes} | ${(m.does ?? []).slice(0, 3).join(", ")} | ${m.issues?.high ? `${m.issues.high} high` : m.issues?.medium ? `${m.issues.medium} medium` : "—"} | ${m.untested ?? 0}/${m.routes ?? 0} | ${(m.part_specs ?? []).length ? m.part_specs.map((s) => `\`${s}\``).join(", ") : `none yet (\`${m.spec_path}\`)`} |`);
+  // The next step: write specs where there are none, else turn the riskiest part's rules into tests.
+  const noSpec = list.filter((m) => !(m.part_specs ?? []).length);
+  const next = noSpec.length ? `\`/veridic:specs\` (${noSpec.length} part${noSpec.length === 1 ? "" : "s"} without a spec)` : list.length ? `\`veridic tests --module ${list[0].id}\`` : "`veridic init`";
+  return ["| id | part | routes | does | issues | untested | spec |", "|---|---|---|---|---|---|---|", ...rows, "", `Next: ${next}`].join("\n") + "\n";
+}

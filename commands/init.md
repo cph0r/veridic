@@ -12,6 +12,6 @@ veridic init $ARGUMENTS
 
 Show the card it prints exactly as printed. If codegraph is missing, offer `veridic init --install`. Veridic runs codegraph with its telemetry off.
 
-If the card says modules have no spec, offer to continue with `/veridic:specs`
-(it writes one spec per module, riskiest first, and asks before starting any
+If the card says parts have no spec, offer to continue with `/veridic:specs`
+(it writes one spec per part, riskiest first, and asks before starting any
 agents). Run it only after a clear yes.

@@ -43,11 +43,11 @@ export async function workList(repo, moduleId, opts = {}) {
   const data = opts.data ?? (await (await import("./modulectx.mjs")).loadModules(repo)).data;
   const modules = data.modules ?? [];
   const m = modules.find((x) => x.id.toLowerCase() === String(moduleId).toLowerCase() || x.name?.toLowerCase() === String(moduleId).toLowerCase());
-  if (!m) return { error: `no module "${moduleId}"; \`veridic modules\` lists them`, modules: modules.map((x) => x.id) };
+  if (!m) return { error: `no part "${moduleId}"; \`veridic parts\` lists them`, modules: modules.map((x) => x.id) };
   const own = (m.specs ?? []).filter((s) => ownerOf(modules, s) === m);
   if (!own.length) {
     const owners = [...new Set((m.specs ?? []).map((s) => ownerOf(modules, s)).filter((o) => o && o !== m).map((o) => o.name))];
-    return { error: `module ${m.name} has no spec of its own` + (owners.length ? `; its rules are in ${owners.join(", ")}'s spec` : `; \`/veridic:specs ${m.id}\` writes one`) };
+    return { error: `the ${m.name} part has no spec of its own` + (owners.length ? `; its rules are in ${owners.join(", ")}'s spec` : `; \`/veridic:specs ${m.id}\` writes one`) };
   }
   const files = execFileSync("git", ["ls-files", "--cached", "--others", "--exclude-standard"], { cwd: repo, encoding: "utf8", maxBuffer: 64 << 20 }).split("\n").filter(Boolean);
   const recipes = testRecipe(repo, files);
@@ -124,7 +124,7 @@ export async function workList(repo, moduleId, opts = {}) {
 
 /** The work list as compact Markdown, ending with the next commands. */
 export function workListMarkdown(wl) {
-  if (wl.error) return `${wl.error}${wl.modules ? `\nModules: ${wl.modules.join(", ")}` : ""}\n`;
+  if (wl.error) return `${wl.error}${wl.modules ? `\nParts: ${wl.modules.join(", ")}` : ""}\n`;
   const t = wl.totals;
   const L = [`# Rules to tests: ${wl.module.name}`, "", `Totals: ${t.rules} rules · ${t.tested} tested · ${t.broken} broken · ${t.failing} failing · ${t.weak} weak · ${t.untested} untested${t["not run"] ? ` · ${t["not run"]} not run` : ""}`, ""];
   for (const e of wl.errors ?? []) L.push(`Could not run: ${e.package ?? e.file ?? (e.files ?? []).join(", ")}: ${String(e.error).trim().split("\n").pop().slice(0, 160)}`);
