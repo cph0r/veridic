@@ -183,7 +183,10 @@ var veridicModel = (D) => {
     const items = size > 0 ? list.slice((at - 1) * size, at * size) : list;
     return { items, page: at, pages, total, from: total ? (size > 0 ? (at - 1) * size + 1 : 1) : 0, to: size > 0 ? Math.min(at * size, total) : total };
   };
-  return { rows, page, parts, partOf, specs, S, counts, fix, later, verdict, title: app.title || D.name, stateOf, statusOf, ruleText, RANK, plural, esc, cap, REQ };
+  const P = new Map(parts.map((p) => [p.id, p]));
+  // Where a rule lives: its part, and the spec file it is in (ids repeat across a part's files).
+  const ruleHome = (id, specPath) => ({ part: partOf(specPath), spec: specPath });
+  return { rows, page, parts, partOf, P, ruleHome, specs, S, counts, fix, later, verdict, title: app.title || D.name, stateOf, statusOf, ruleText, RANK, plural, esc, cap, REQ };
 };
 
 (() => {
@@ -209,9 +212,9 @@ var veridicModel = (D) => {
   <div class="top"><div class="brand"><span class="logo"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5 9-10"/></svg></span>Veridic</div>
     <div class="when"><span id="when"></span><button class="icon-btn" id="theme" aria-label="Switch theme"></button></div></div>
   <section class="hero"><div class="rv"><div class="eyebrow" id="appname"></div><h1 class="verdict" id="verdict"></h1><p class="about" id="stats"></p></div><div class="rings rv" id="rings" style="animation-delay:.12s"></div></section>
-  <section id="specs-sec"><h2 class="rv" style="animation-delay:.2s">Your specs <span class="hint">· click a row to read it, a heading to sort</span></h2>
-  <div class="tools rv" style="animation-delay:.22s"><input id="q" type="search" placeholder="Search specs" aria-label="Search specs"><div class="seg" id="filters" role="group" aria-label="Show"></div></div>
-  <div class="tablewrap rv" style="animation-delay:.25s"><table class="specs"><thead><tr id="thead"></tr></thead><tbody id="tbody"></tbody></table><div class="noresults" id="noresults" hidden>No spec matches.</div></div><div class="pager" id="pager"></div></section>
+  <section id="specs-sec"><h2 class="rv" style="animation-delay:.2s">Your app <span class="hint">· one row per part; click to read its spec, a heading to sort</span></h2>
+  <div class="tools rv" style="animation-delay:.22s"><input id="q" type="search" placeholder="Search parts and specs" aria-label="Search parts and specs"><div class="seg" id="filters" role="group" aria-label="Show"></div></div>
+  <div class="tablewrap rv" style="animation-delay:.25s"><table class="specs"><thead><tr id="thead"></tr></thead><tbody id="tbody"></tbody></table><div class="noresults" id="noresults" hidden>No part matches.</div></div><div class="pager" id="pager"></div></section>
   <section id="fix-sec"><h2 class="rv" style="animation-delay:.3s">Fix first</h2><div class="cards rv" style="animation-delay:.35s" id="fix"></div></section>
   <section id="later-sec"><h2 class="rv" style="animation-delay:.35s">When you have time</h2><div class="cards rv" style="animation-delay:.4s" id="later"></div></section>
   <footer class="foot" id="foot"></footer>
@@ -233,27 +236,30 @@ var veridicModel = (D) => {
     ring(pct(counts.proven, counts.rules), "Proven", counts.proven + " of " + plural(counts.rules, "rule") + (counts.broken ? " · " + counts.broken + " broken" : ""), counts.broken ? "var(--bad)" : null) +
     (counts.behaviour ? ring(pct(counts.covered, counts.behaviour), "Covered", counts.covered + " of " + counts.behaviour + " files described by a spec") : "");
 
-  // ---- every spec, as a row: filter by health or text, sort by any column ----
+  // ---- every part of the app, as a row: filter by health or text, sort by any column ----
   const COLS = [
-    ["name", "Spec", "text"], ["health", "Health", "text"], ["rules", "Rules", "num"], ["proven", "Proven", "num"],
-    ["broken", "Broken", "num"], ["outdated", "Out of date", "num"], ["untested", "Not tested", "num"], ["stories", "Stories", "num"], ["files", "Files", "num"],
+    ["name", "Part", "text"], ["health", "Health", "text"], ["rules", "Rules", "num"], ["proven", "Proven", "num"],
+    ["broken", "Broken", "num"], ["outdated", "Out of date", "num"], ["untested", "Not tested", "num"], ["stories", "Stories", "num"], ["covered", "Covered", "num"],
   ];
-  const FILTER = [["all", "All"], ["fix", "Needs fixing"], ["stale", "Out of date"], ["untested", "Not tested"], ["proven", "Proven"]];
+  const FILTER = [["all", "All"], ["fix", "Needs fixing"], ["stale", "Out of date"], ["untested", "Not tested"], ["proven", "Proven"], ["nospec", "No spec"]];
   let view = { q: "", filter: "all", sort: null, dir: "desc", page: 1, size: 10 };
   try { view = { ...view, ...JSON.parse(store.get("table:" + D.name) || "{}") }; } catch {}
   const num = (n, cls) => (n ? '<span class="' + (cls || "") + '">' + n + "</span>" : '<span class="zero">–</span>');
-  const rowHTML = (s) => {
-    const pct = s.rules.length ? Math.round((100 * s.proven.length) / s.rules.length) : 0;
-    return '<tr data-spec="' + esc(s.path) + '" tabindex="0"' + (open === s.path ? ' class="sel"' : "") + '><td class="c-name"><div class="snm"><i class="sh ' + s.tone + '">' + SH[s.tone] + "</i>" + esc(s.name) + '</div><div class="spath">' + esc(s.path) + "</div></td>" +
-      '<td><span class="hl ' + s.tone + '">' + esc(s.health) + "</span></td>" +
-      '<td class="num">' + s.rules.length + "</td>" +
-      '<td class="num"><div class="pv"><span>' + s.proven.length + (s.rules.length ? '<small> /' + s.rules.length + "</small>" : "") + '</span><i class="pbar"><b style="width:' + pct + '%"></b></i></div></td>' +
-      '<td class="num">' + num(s.broken.length, "c-bad") + '</td><td class="num">' + num(s.outdated, "c-warn") + '</td><td class="num">' + num(s.untested.length) + '</td><td class="num">' + num(s.stories.length) + '</td><td class="num">' + num(s.files) + "</td></tr>";
+  // Under a part's name: its spec file (or how many), and how many code files its spec cites.
+  const specLine = (p) => (!p.specs.length ? "no spec yet" : (p.specs.length === 1 ? p.specs[0].path : plural(p.specs.length, "spec file")) + (p.files ? " · cites " + plural(p.files, "file") : ""));
+  const rowHTML = (p) => {
+    const pct = p.rules.length ? Math.round((100 * p.proven.length) / p.rules.length) : 0;
+    const cov = p.covered && p.covered.total ? p.covered.covered + '<small> /' + p.covered.total + "</small>" : '<span class="zero">–</span>';
+    return '<tr data-part="' + esc(p.id) + '" tabindex="0"' + (open === p.id ? ' class="sel"' : "") + '><td class="c-name"><div class="snm"><i class="sh ' + (p.specs.length ? p.tone : "none") + '">' + SH[p.specs.length ? p.tone : "none"] + "</i>" + esc(p.name) + '</div><div class="spath">' + esc(specLine(p)) + "</div></td>" +
+      '<td><span class="hl ' + (p.specs.length ? p.tone : "nospec") + '">' + esc(p.health) + "</span></td>" +
+      '<td class="num">' + num(p.rules.length) + "</td>" +
+      '<td class="num">' + (p.rules.length ? '<div class="pv"><span>' + p.proven.length + '<small> /' + p.rules.length + '</small></span><i class="pbar"><b style="width:' + pct + '%"></b></i></div>' : '<span class="zero">–</span>') + "</td>" +
+      '<td class="num">' + num(p.broken.length, "c-bad") + '</td><td class="num">' + num(p.outdated, "c-warn") + '</td><td class="num">' + num(p.untested.length) + '</td><td class="num">' + num(p.stories.length) + '</td><td class="num">' + cov + "</td></tr>";
   };
   function drawTable() {
     store.set("table:" + D.name, JSON.stringify(view));
     $("#thead").innerHTML = COLS.map(([k, label, kind]) => '<th class="' + kind + '" aria-sort="' + (view.sort === k ? (view.dir === "asc" ? "ascending" : "descending") : "none") + '"><button data-sort="' + k + '">' + label + '<span class="arrow">' + (view.sort === k ? (view.dir === "asc" ? "↑" : "↓") : "") + "</span></button></th>").join("");
-    $("#filters").innerHTML = FILTER.map(([k, label]) => '<button data-filter="' + k + '" aria-pressed="' + (view.filter === k) + '">' + label + '<span class="n">' + M.rows({ filter: k }).length + "</span></button>").join("");
+    $("#filters").innerHTML = FILTER.map(([k, label]) => { const n = M.rows({ filter: k }).length; return k === "nospec" && !n ? "" : '<button data-filter="' + k + '" aria-pressed="' + (view.filter === k) + '">' + label + '<span class="n">' + n + "</span></button>"; }).join("");
     const pg = M.page(M.rows(view), view);
     view.page = pg.page;
     $("#tbody").innerHTML = pg.items.map(rowHTML).join("");
@@ -266,13 +272,13 @@ var veridicModel = (D) => {
       nums.map((n) => (n === "…" ? '<span class="pgap">…</span>' : '<button data-page="' + n + '"' + (n === pg.page ? ' aria-current="page"' : "") + ">" + n + "</button>")).join("") +
       '<button data-page="' + (pg.page + 1) + '" aria-label="Next page"' + (pg.page >= pg.pages ? " disabled" : "") + '>›</button></span><label class="psize">Rows <select id="psize">' + [10, 25, 50, 0].map((n) => '<option value="' + n + '"' + (n === view.size ? " selected" : "") + ">" + (n || "All") + "</option>").join("") + "</select></label>";
   }
-  if (specs.length) {
+  if (M.parts.length) {
     $("#q").value = view.q;
     $("#q").addEventListener("input", () => { view.q = $("#q").value; view.page = 1; drawTable(); });
     $("#pager").addEventListener("change", (ev) => { if (ev.target.id === "psize") { view.size = +ev.target.value; view.page = 1; drawTable(); } });
     drawTable();
   }
-  else { $("#specs-sec").remove(); $("#foot").insertAdjacentHTML("beforebegin", '<div class="allgood">This repo has no specs yet. Ask Claude to <b>write a spec</b> for a part of your app (<code>veridic modules</code> lists the parts), then run <code>veridic report</code> again.</div>'); }
+  else { $("#specs-sec").remove(); $("#foot").insertAdjacentHTML("beforebegin", '<div class="allgood">This repo has no specs yet. Ask Claude to <b>write a spec</b> for a part of your app (<code>veridic parts</code> lists them), then run <code>veridic report</code> again.</div>'); }
 
   // ---- a spec, in a sheet: what needs attention, its stories, its rules ----
   const fold = (g, items, render, n, label) => items.slice(0, n).map((x) => render(x)).join("") + items.slice(n).map((x) => render(x, g)).join("") + (items.length > n ? '<button class="showall" data-unfold="' + g + '">' + label(items.length - n) + " →</button>" : "");
@@ -288,38 +294,53 @@ var veridicModel = (D) => {
     const sc = (st.scenarios || []).map((x) => '<div class="scn"><div><b>Given</b> ' + esc(x.given) + "</div><div><b>When</b> " + esc(x.when) + "</div><div><b>Then</b> " + esc(x.then) + "</div>" + ((x.refs || []).length ? '<div class="refs">' + x.refs.map((id) => '<span class="chip link" data-ref="' + esc(id) + '">' + esc(id) + "</span>").join("") + "</div>" : "") + "</div>").join("");
     return '<button class="req story' + (g ? " x" : "") + '"' + hid(g) + '><span class="mark none">' + esc(st.priority || st.n || "") + '</span><span class="tx"><span>' + esc(st.title) + "</span>" + (st.why ? '<div class="why">' + esc(st.why) + "</div>" : "") + '<div class="more">' + (sc || "<p>No scenarios written.</p>") + "</div></span></button>";
   }
-  function specHTML(s) {
-    const key = s.path.replace(/\W/g, "");
-    const rules = [...s.rules].sort((a, b) => M.RANK[M.stateOf(a).key] - M.RANK[M.stateOf(b).key]);
+  // One spec file's rules: those needing attention first, then not proven yet, then proven (folded).
+  function rulesHTML(sp, inn) {
+    const key = sp.path.replace(/\W/g, "");
+    const rules = [...sp.rules].sort((a, b) => M.RANK[M.stateOf(a).key] - M.RANK[M.stateOf(b).key]);
     const attention = rules.filter((r) => ["broken", "lost", "stale"].includes(M.stateOf(r).key));
     const rest = rules.filter((r) => !attention.includes(r)), todo = rest.filter((r) => M.stateOf(r).key !== "proven"), done = rest.filter((r) => M.stateOf(r).key === "proven");
-    const summary = !s.rules.length ? "No rules written yet."
-      : [s.broken.length && plural(s.broken.length, "rule") + " broken", s.stale.length && s.stale.length + " out of date", s.lost.length && s.lost.length + " pointing at code that's gone", s.proven.length + " of " + s.rules.length + " proven"].filter(Boolean).join(" · ") + ".";
-    return '<div class="part-head"><div><h3' + (s.name.length > 40 ? ' class="long"' : "") + '><i class="sh ' + s.tone + '">' + SH[s.tone] + "</i>" + esc(s.name) + "</h3><p>" + summary + '</p><p class="path">' + esc(s.path) + (s.meta && s.meta.status ? " · " + esc(s.meta.status) : "") + '</p></div><button class="close" aria-label="Close">✕</button></div><div class="cols"><div>' +
-      (attention.length ? '<div class="sub-h">Needs attention</div>' + attention.map((r) => ruleHTML(r)).join("") + '<div class="gap"></div>' : "") +
-      (s.stories.length ? '<div class="sub-h">User stories</div>' + fold("s-" + key, s.stories, storyHTML, 4, (k) => "Show " + k + " more") + '<div class="gap"></div>' : "") +
-      '<div class="sub-h">Rules</div>' + (s.rules.length
-        ? fold("n-" + key, todo, ruleHTML, 6, (k) => "Show " + k + " more not proven yet") +
-          (done.length ? '<button class="req" data-unfold="d-' + key + '"><span class="mark good">✓</span><span class="tx"><span><b>' + (attention.length + todo.length ? plural(done.length, "more rule") : "All " + plural(done.length, "rule")) + '</b></span><div class="why">Proven by tests · tap to see them</div></span></button>' + done.map((r) => ruleHTML(r, "d-" + key)).join("") : "")
-        : '<div class="empty-req">This spec has no rules yet.</div>') +
-      "</div></div>";
+    const tag = (h) => h.replace(/data-rule="/g, 'data-in="' + esc(inn) + '" data-rule="');
+    if (!sp.rules.length) return { attention: "", rest: '<div class="empty-req">No rules written yet.</div>' };
+    return { attention: attention.length ? '<div class="sub-h">Needs attention</div>' + tag(attention.map((r) => ruleHTML(r)).join("")) + '<div class="gap"></div>' : "", rest: tag(fold("n-" + key, todo, ruleHTML, 6, (k) => "Show " + k + " more not proven yet") +
+      (done.length ? '<button class="req" data-unfold="d-' + key + '"><span class="mark good">✓</span><span class="tx"><span><b>' + (attention.length + todo.length ? plural(done.length, "more rule") : "All " + plural(done.length, "rule")) + '</b></span><div class="why">Proven by tests · tap to see them</div></span></button>' + done.map((r) => ruleHTML(r, "d-" + key)).join("") : "")) };
   }
-  function openSpec(path, rule) {
-    const s = S.get(path); if (!s) return;
+  // A part's spec: one sheet, its spec files as sections (stories, then rules).
+  function partHTML(p) {
+    const summary = !p.specs.length ? "No spec yet."
+      : !p.rules.length ? "No rules written yet."
+      : [p.broken.length && plural(p.broken.length, "rule") + " broken", p.stale.length && p.stale.length + " out of date", p.lost.length && p.lost.length + " pointing at code that's gone", p.proven.length + " of " + p.rules.length + " proven"].filter(Boolean).join(" · ") + ".";
+    const tone = p.specs.length ? p.tone : "none";
+    const head = '<div class="part-head"><div><h3' + (p.name.length > 40 ? ' class="long"' : "") + '><i class="sh ' + tone + '">' + SH[tone] + "</i>" + esc(p.name) + "</h3><p>" + summary + '</p><p class="path">' + esc(specLine(p)) + (p.covered && p.covered.total ? " · " + p.covered.covered + " of " + p.covered.total + " of its files described" : "") + '</p></div><button class="close" aria-label="Close">✕</button></div>';
+    if (!p.specs.length) return head + '<div class="cols"><div><div class="empty-req">Nothing describes ' + esc(p.name) + ' yet. Ask Claude to <b>write a spec for ' + esc(p.name) + "</b> (<code>/veridic:specs</code> does every part that has none).</div></div></div>";
+    const many = p.specs.length > 1;
+    const section = (sp) => {
+      const key = sp.path.replace(/\W/g, "");
+      const rh = rulesHTML(sp, sp.path);
+      return (many ? '<div class="spec-sec"><div class="spec-title">' + esc(sp.name) + '<span class="path">' + esc(sp.path) + "</span></div>" : "") + rh.attention +
+        (sp.stories.length ? '<div class="sub-h">User stories</div>' + fold("s-" + key, sp.stories, storyHTML, 4, (k) => "Show " + k + " more").replace(/data-ref="/g, 'data-in="' + esc(sp.path) + '" data-ref="') + '<div class="gap"></div>' : "") +
+        '<div class="sub-h">Rules</div>' + rh.rest + (many ? "</div>" : "");
+    };
+    return head + '<div class="cols"><div>' + p.specs.map(section).join('<div class="gap"></div>') + "</div></div>";
+  }
+  function openPart(id, rule, inSpec) {
+    const p = M.P.get(id); if (!p) return;
     const panel = $("#panel");
-    if (open === path && panel.classList.contains("open") && !rule) { closeSpec(); return; }
-    document.querySelectorAll("#tbody tr").forEach((c) => c.classList.toggle("sel", c.dataset.spec === path));
-    open = path;
-    $("#part").innerHTML = specHTML(s);
+    if (open === id && panel.classList.contains("open") && !rule) { closeSpec(); return; }
+    document.querySelectorAll("#tbody tr").forEach((c) => c.classList.toggle("sel", c.dataset.part === id));
+    open = id;
+    $("#part").innerHTML = partHTML(p);
     panel.scrollTop = 0;
     panel.classList.add("open");
     document.body.classList.add("sheet-open");
-    try { history.replaceState(null, "", "#" + encodeURIComponent(path)); } catch {}
-    if (rule) showRule(rule);
+    try { history.replaceState(null, "", "#" + encodeURIComponent(id)); } catch {}
+    if (rule) showRule(rule, inSpec);
   }
+  // A spec path (from a card or an old link) opens the part it belongs to.
+  const openSpec = (path, rule) => openPart(M.ruleHome(rule, path).part, rule, path);
   // open a rule in the sheet: unfold its group, open it, bring it into view
-  function showRule(id) {
-    const el = [...document.querySelectorAll("#part [data-rule]")].find((x) => x.dataset.rule === id); if (!el) return;
+  function showRule(id, inSpec) {
+    const el = [...document.querySelectorAll("#part [data-rule]")].find((x) => x.dataset.rule === id && (!inSpec || x.dataset.in === inSpec)); if (!el) return;
     if (el.dataset.g) document.querySelectorAll('[data-g="' + el.dataset.g + '"]').forEach((x) => x.classList.remove("x"));
     el.classList.add("open", "flash");
     el.scrollIntoView({ block: "center", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
@@ -335,7 +356,7 @@ var veridicModel = (D) => {
   document.addEventListener("keydown", (ev) => {
     if (ev.key === "Escape" && open) closeSpec();
     const tr = ev.target.closest && ev.target.closest("#tbody tr");
-    if (tr && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); openSpec(tr.dataset.spec); }
+    if (tr && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); openPart(tr.dataset.part); }
   });
   $("#scrim").addEventListener("click", closeSpec);
   document.addEventListener("click", (ev) => {
@@ -348,7 +369,9 @@ var veridicModel = (D) => {
     const fi = t.closest("[data-filter]");
     if (fi) { view.filter = fi.dataset.filter; view.page = 1; drawTable(); return; }
     const ref = t.closest("[data-ref]");
-    if (ref) { ev.stopPropagation(); showRule(ref.dataset.ref); return; }
+    if (ref) { ev.stopPropagation(); showRule(ref.dataset.ref, ref.dataset.in); return; }
+    const pr = t.closest("[data-part]");
+    if (pr) { openPart(pr.dataset.part); return; }
     const sp = t.closest("[data-spec]");
     if (sp) { openSpec(sp.dataset.spec, sp.dataset.rule); return; }
     if (t.closest(".close")) { closeSpec(); return; }
@@ -359,7 +382,7 @@ var veridicModel = (D) => {
   });
 
   // ---- fix first, then what can wait ----
-  const card = (l, s, i, g) => '<button class="card' + (i >= 6 ? " x" : "") + '"' + hid(i >= 6 ? g : "") +  (l.spec ? ' data-spec="' + esc(l.spec) + '"' : "") + (l.rule ? ' data-rule="' + esc(l.rule) + '"' : "") + '><i class="sh ' + (l.tone || s) + '">' + SH[l.tone || s] + '</i><span><div class="t">' + l.html + '</div><div class="w">' + l.w + '</div>' + (l.spec ? '<div class="p">' + esc(S.get(l.spec).name) + " →</div>" : "") + "</span></button>";
+  const card = (l, s, i, g) => '<button class="card' + (i >= 6 ? " x" : "") + '"' + hid(i >= 6 ? g : "") +  (l.spec ? ' data-spec="' + esc(l.spec) + '"' : "") + (l.rule ? ' data-rule="' + esc(l.rule) + '"' : "") + '><i class="sh ' + (l.tone || s) + '">' + SH[l.tone || s] + '</i><span><div class="t">' + l.html + '</div><div class="w">' + l.w + '</div>' + (l.spec ? '<div class="p">' + esc((M.P.get(M.partOf(l.spec)) || S.get(l.spec)).name) + " →</div>" : "") + "</span></button>";
   const deal = (sec, id, list, s) => {
     if (!list.length) { $(sec).remove(); return; }
     $("#" + id).innerHTML = list.map((l, i) => card(l, s, i, id)).join("");
@@ -396,5 +419,5 @@ var veridicModel = (D) => {
     c.innerHTML = [...Array(60)].map(() => '<i style="left:' + Math.random() * 100 + "vw;background:" + cl[(Math.random() * cl.length) | 0] + ";animation-delay:" + Math.random() * 0.8 + "s;transform:rotate(" + Math.random() * 360 + 'deg)"></i>').join("");
     setTimeout(() => (c.innerHTML = ""), 4000);
   }
-  if (location.hash.length > 1) openSpec(decodeURIComponent(location.hash.slice(1)));
+  if (location.hash.length > 1) { const h = decodeURIComponent(location.hash.slice(1)); if (M.P.has(h)) openPart(h); else openSpec(h); }
 })();

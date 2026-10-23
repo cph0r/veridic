@@ -230,3 +230,10 @@ table.specs { width: 100%; border-collapse: collapse; font-size: 14px; }
 .pnav button[disabled] { opacity: .35; cursor: default; }
 .pgap { padding: 0 4px; color: var(--ink3); }
 .psize select { font: inherit; color: var(--ink); background: var(--card); border: 1px solid var(--line2); border-radius: 8px; padding: 4px 6px; margin-left: 6px; }
+
+/* a part's spec files, as sections of one spec */
+.spec-sec { border-top: 1px solid var(--line); padding-top: 18px; }
+.spec-sec:first-child { border-top: 0; padding-top: 0; }
+.spec-title { font-weight: 600; font-size: 15px; margin-bottom: 12px; display: flex; flex-direction: column; gap: 2px; }
+.spec-title .path { font: 11.5px var(--mono); color: var(--ink3); font-weight: 400; }
+.hl.nospec { background: transparent; box-shadow: inset 0 0 0 1px var(--line2); color: var(--ink3); }

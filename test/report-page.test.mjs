@@ -203,3 +203,10 @@ test("parts: headline totals are the same as before grouping", () => {
   const m = load()(data());
   assert.deepEqual({ rules: m.counts.rules, proven: m.counts.proven, broken: m.counts.broken, stale: m.counts.stale, lost: m.counts.lost, specs: m.counts.specs }, { rules: 6, proven: 2, broken: 1, stale: 1, lost: 1, specs: 2 });
 });
+
+test("parts: opening a rule finds it in any file of the part", () => {
+  const m = load()(partsData());
+  assert.deepEqual({ ...m.ruleHome("FR-001", "specs/orders-payment/spec.md") }, { part: "orders", spec: "specs/orders-payment/spec.md" });
+  assert.deepEqual({ ...m.ruleHome("FR-001", "specs/notes/spec.md") }, { part: "specs/notes/spec.md", spec: "specs/notes/spec.md" });
+  assert.equal(m.P.get("orders").name, "Orders");
+});
