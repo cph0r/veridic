@@ -274,37 +274,42 @@ table.specs { width: 100%; border-collapse: collapse; font-size: 14px; }
 .crit { padding: 6px 2px; color: var(--ink2); font-size: 13px; line-height: 1.45; border-bottom: 1px solid var(--line); }
 .crit b { font-family: var(--mono); color: var(--ink); margin-right: 6px; }
 
-/* The product spec, above the parts: journeys as a row of step dots, promises needing a look first. */
+/* The product spec, above the parts: two tables in the parts table's style (journeys with
+   their step dots; promises needing a look first); a row opens its steps or rules under it. */
 .product { margin: 18px 0 40px; }
 .product .psum { color: var(--ink2); margin: 0 0 22px; max-width: 70ch; line-height: 1.5; }
-.product .sub-h { margin-top: 26px; }
-.product .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; flex: none; border: 1.5px solid currentColor; }
-.product .dot.good { color: var(--good); background: var(--good); }
-.product .dot.bad { color: var(--bad); background: var(--bad); }
-.product .dot.warn { color: var(--warn); background: var(--warn); }
-.product .dot.none { color: var(--ink2); background: transparent; }
-.product .pj, .product .pg { border-bottom: 1px solid var(--line); }
-.product summary { display: grid; grid-template-columns: minmax(0, 1fr) auto 13em auto; gap: 14px; align-items: center; padding: 9px 2px; cursor: pointer; list-style: none; }
-.product summary::-webkit-details-marker { display: none; }
-.product .ptl { color: var(--ink); }
-.product .pmu { color: var(--ink2); margin-left: 8px; font-size: 13px; }
-.product .dots { display: inline-flex; gap: 5px; }
-.product .pst { font-size: 12.5px; white-space: nowrap; }
-.product .pst.good { color: var(--good); } .product .pst.bad { color: var(--bad); } .product .pst.warn { color: var(--warn); } .product .pst.none { color: var(--ink2); }
-.product .pid { font-family: var(--mono); font-size: 11px; color: var(--ink2); opacity: .75; white-space: nowrap; }
-.product ol { margin: 2px 0 12px 6px; padding: 0; list-style: none; }
-.product li, .product .pg { display: flex; gap: 10px; align-items: flex-start; padding: 6px 2px; }
-.product li .dot, .product .pg > .dot { margin-top: 6px; }
-.product .pg { display: grid; grid-template-columns: auto minmax(0, 1fr) auto auto; align-items: baseline; }
-.product .stx { display: flex; flex-direction: column; gap: 3px; min-width: 0; color: var(--ink); font-size: 13.5px; }
-.product .why { color: var(--warn); font-size: 12.5px; }
-.product .rl summary { display: inline; padding: 0; font-size: 12px; color: var(--ink2); }
-.product .rl summary::after { content: " ›"; }
-.product .rl[open] summary::after { content: " ⌄"; }
-.product .rr { display: flex; gap: 8px; align-items: baseline; padding: 3px 0 3px 4px; font-size: 12.5px; }
-.product .rr .dot { width: 7px; height: 7px; }
-.product .rid { font-family: var(--mono); font-size: 11.5px; white-space: nowrap; color: var(--ink); background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline dotted; }
-.product .rtx { color: var(--ink2); }
-.product .rst { color: var(--ink2); font-size: 11.5px; white-space: nowrap; }
-.product .pgrp { font-size: 11.5px; letter-spacing: .14em; text-transform: uppercase; color: var(--ink2); margin: 14px 0 4px; }
+.product .ptw { margin-bottom: 22px; }
+.ptab th { padding: 14px 10px 12px; } /* the parts table pads its sort buttons; these headers have none */
+.ptab .prow { cursor: pointer; }
+.ptab .prow > td { vertical-align: middle; }
+.ptab .c-dots { width: 1%; white-space: nowrap; }
+.ptab .c-id { width: 1%; text-align: right; }
+.ptab .ptl { color: var(--ink); }
+.ptab .pmu { display: block; color: var(--ink2); font-size: 12.5px; margin-top: 2px; }
+.ptab .why { display: block; color: var(--warn); font-size: 12.5px; margin-top: 3px; }
+.ptab .dots { display: inline-flex; gap: 5px; }
+.ptab .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; flex: none; border: 1.5px solid currentColor; }
+.ptab .dot.good { color: var(--good); background: var(--good); }
+.ptab .dot.bad { color: var(--bad); background: var(--bad); }
+.ptab .dot.warn { color: var(--warn); background: var(--warn); }
+.ptab .dot.none { color: var(--ink2); background: transparent; }
+.ptab .pst { font-size: 12.5px; white-space: nowrap; }
+.ptab .pst.good { color: var(--good); } .ptab .pst.bad { color: var(--bad); } .ptab .pst.warn { color: var(--warn); } .ptab .pst.none { color: var(--ink2); }
+.ptab .pid { font-family: var(--mono); font-size: 11px; color: var(--ink2); white-space: nowrap; }
+.ptab .pgrp td { font-size: 11.5px; letter-spacing: .14em; text-transform: uppercase; color: var(--ink2); padding-top: 14px; padding-bottom: 6px; }
+.ptab .pdetail td { padding: 4px 16px 14px 34px; }
+.ptab ol { margin: 0; padding: 0; list-style: none; }
+.ptab li { display: flex; gap: 10px; align-items: flex-start; padding: 5px 0; }
+.ptab li .dot, .ptab .rr .dot { margin-top: 5px; }
+.ptab .stx { display: flex; flex-direction: column; gap: 3px; min-width: 0; color: var(--ink); font-size: 13.5px; }
+.ptab .rl summary { display: inline; font-size: 12px; color: var(--ink2); cursor: pointer; list-style: none; }
+.ptab .rl summary::-webkit-details-marker { display: none; }
+.ptab .rl summary::after { content: " ›"; }
+.ptab .rl[open] summary::after { content: " ⌄"; }
+.ptab .rr { display: flex; gap: 8px; align-items: baseline; padding: 3px 0; font-size: 12.5px; }
+.ptab .rr .dot { width: 7px; height: 7px; }
+.ptab .rid { font-family: var(--mono); font-size: 11.5px; white-space: nowrap; color: var(--ink); background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline dotted; }
+.ptab .rtx { color: var(--ink2); }
+.ptab .rst { color: var(--ink2); font-size: 11.5px; white-space: nowrap; }
+@media (max-width: 600px) { .ptab .c-dots { display: none; } }
 .ring .arc { transition: none; }

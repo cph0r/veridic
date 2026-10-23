@@ -258,17 +258,25 @@ var veridicModel = (D) => {
   function productHTML() {
     const pr = D.product;
     if (!pr || (!pr.journeys.length && !pr.guarantees.length)) return "";
+    // Two tables in the parts table's style; a row opens a detail row under it.
+    const table = (head, body) => '<div class="tablewrap ptw"><table class="specs ptab"><thead><tr>' + head + "</tr></thead><tbody>" + body + "</tbody></table></div>";
+    const row = (id, cells, detail) => '<tr class="prow" data-pt="' + esc(id) + '" tabindex="0" aria-expanded="false">' + cells + '</tr><tr class="pdetail" hidden><td colspan="4">' + detail + "</td></tr>";
+    const ruleList = (refs) => rulesHTML(refs).replace(/^<details class="rl"><summary>Rules \(\d+\)<\/summary>/, '<div class="rlist">').replace(/<\/details>$/, "</div>");
     const journeys = pr.journeys.map((j) => {
       const [tone, word] = journeyWord(j);
-      return '<details class="pj"><summary><span class="ptl">' + esc(j.title) + '</span><span class="dots">' + j.steps.map((st) => dot(st.state)).join("") + '</span><span class="pst ' + tone + '">' + esc(word) + '</span><span class="pid">' + esc(j.id) + "</span></summary><ol>" +
-        j.steps.map((st) => { const w = st.state === "proven" ? "" : why(st.refs); return "<li>" + dot(st.state) + '<div class="stx"><span>' + esc(st.text) + "</span>" + (w ? '<span class="why">' + esc(w) + "</span>" : "") + rulesHTML(st.refs) + "</div></li>"; }).join("") + "</ol></details>";
+      const steps = "<ol>" + j.steps.map((st) => { const w = st.state === "proven" ? "" : why(st.refs); return "<li>" + dot(st.state) + '<div class="stx"><span>' + esc(st.text) + "</span>" + (w ? '<span class="why">' + esc(w) + "</span>" : "") + rulesHTML(st.refs) + "</div></li>"; }).join("") + "</ol>";
+      return row(j.id, '<td><span class="ptl">' + esc(j.title) + '</span></td><td class="c-dots"><span class="dots">' + j.steps.map((st) => dot(st.state)).join("") + '</span></td><td><span class="pst ' + tone + '">' + esc(word) + '</span></td><td class="c-id"><span class="pid">' + esc(j.id) + "</span></td>", steps);
     }).join("");
-    const row = (g) => { const [tone, word] = promiseWord(g), [t, rest] = titled(g.text), w = g.state === "proven" ? "" : why(g.refs);
-      return '<div class="pg">' + dot(g.state) + '<div class="stx"><div><span class="ptl">' + esc(t) + "</span>" + (rest ? '<span class="pmu">' + esc(rest) + "</span>" : "") + "</div>" + (w ? '<span class="why">' + esc(w) + "</span>" : "") + rulesHTML(g.refs) + '</div><span class="pst ' + tone + '">' + esc(word) + '</span><span class="pid">' + esc(g.id) + "</span></div>"; };
+    const promise = (g) => {
+      const [tone, word] = promiseWord(g), [t, rest] = titled(g.text), w = g.state === "proven" ? "" : why(g.refs);
+      return row(g.id, '<td><span class="ptl">' + esc(t) + "</span>" + (rest ? '<span class="pmu">' + esc(rest) + "</span>" : "") + (w ? '<span class="why">' + esc(w) + "</span>" : "") + '</td><td><span class="pst ' + tone + '">' + esc(word) + '</span></td><td class="num">' + g.refs.length + ' ›</td><td class="c-id"><span class="pid">' + esc(g.id) + "</span></td>", ruleList(g.refs));
+    };
     const look = pr.guarantees.filter((g) => g.state !== "proven"), hold = pr.guarantees.filter((g) => g.state === "proven");
-    const promises = (look.length ? '<div class="pgrp">Needs a look</div>' + look.map(row).join("") : "") + (hold.length ? '<div class="pgrp">Holds</div>' + hold.map(row).join("") : "");
+    const grp = (label) => '<tr class="pgrp"><td colspan="4">' + label + "</td></tr>";
+    const promises = (look.length ? grp("Needs a look") + look.map(promise).join("") : "") + (hold.length ? grp("Holds") + hold.map(promise).join("") : "");
     return (pr.summary ? '<p class="psum">' + esc(pr.summary) + "</p>" : "") +
-      (journeys ? '<div class="sub-h">Journeys</div>' + journeys : "") + (promises ? '<div class="sub-h">Promises</div>' + promises : "");
+      (journeys ? table('<th class="text">Journeys</th><th class="text c-dots">Steps</th><th class="text">Status</th><th class="c-id"></th>', journeys) : "") +
+      (promises ? table('<th class="text">Promises</th><th class="text">Status</th><th class="num">Rules</th><th class="c-id"></th>', promises) : "");
   }
 
   return { productHTML, storiesOf, rulesInNoStory, partRules, ruleCounts, rows, page, parts, partOf, P, ruleHome, cleanView, specs, S, counts, fix, later, verdict, title: app.title || D.name, stateOf, statusOf, ruleText, RANK, plural, esc, cap, REQ };
@@ -487,6 +495,8 @@ var veridicModel = (D) => {
     if (ev.key === "Escape" && open) closeSpec();
     const tr = ev.target.closest && ev.target.closest("#tbody tr");
     if (tr && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); openPart(tr.dataset.part); }
+    const pt = ev.target.closest && ev.target.closest("[data-pt]");
+    if (pt && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); pt.click(); }
   });
   $("#scrim").addEventListener("click", closeSpec);
   document.addEventListener("change", (ev) => { const id = ev.target.id; if (id !== "rstate" && id !== "rby") return; sheet[id === "rstate" ? "rstate" : "by"] = ev.target.value; const p = M.P.get(open); if (p) $("#rlist").innerHTML = rulesList(p); });
@@ -502,6 +512,8 @@ var veridicModel = (D) => {
     if (fi) { view.filter = fi.dataset.filter; view.page = 1; drawTable(); return; }
     const tb = t.closest("[data-tab]");
     if (tb) { setTab(tb.dataset.tab, tb.dataset.rstate); return; }
+    const pt = t.closest("[data-pt]");
+    if (pt && !t.closest("button")) { const open = pt.getAttribute("aria-expanded") !== "true"; pt.setAttribute("aria-expanded", String(open)); pt.nextElementSibling.hidden = !open; return; }
     const ref = t.closest("[data-ref]");
     if (ref) { ev.stopPropagation(); showRule(ref.dataset.ref, ref.dataset.in); return; }
     const pr = t.closest("[data-part]");

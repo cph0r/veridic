@@ -324,18 +324,20 @@ test("report page: the product spec, above the parts table: journeys as step dot
     ],
   };
   const html = load()(d).productHTML();
-  // a journey: title first, its steps as dots, a status word, the id last
-  assert.match(html, /Order dinner<\/span><span class="dots"><i class="dot good"><\/i><i class="dot good"><\/i><\/span><span class="pst good">Works<\/span><span class="pid">J-001<\/span>/);
+  // two tables in the parts table's style, each row opening a detail row under it
+  assert.match(html, /<table class="specs ptab"><thead><tr><th class="text">Journeys<\/th><th class="text c-dots">Steps<\/th><th class="text">Status<\/th><th class="c-id"><\/th><\/tr><\/thead>/);
+  assert.match(html, /<tr class="prow" data-pt="J-001" tabindex="0" aria-expanded="false"><td><span class="ptl">Order dinner<\/span><\/td><td class="c-dots"><span class="dots"><i class="dot good"><\/i><i class="dot good"><\/i><\/span><\/td><td><span class="pst good">Works<\/span><\/td><td class="c-id"><span class="pid">J-001<\/span><\/td><\/tr><tr class="pdetail" hidden>/);
   assert.match(html, /Change an order.*<span class="pst none">1 step not proven<\/span>/);
-  // why a step isn't proven, in one line
+  // why a step isn't proven, in one line, in the journey's detail row
   assert.match(html, /Every earlier version is kept[\s\S]*?class="why">FR-009 \(orders\): Its test misses the code/);
-  // rule ids only behind "Rules (n)", each opening its rule
-  assert.doesNotMatch(html.replace(/<details class="rl">[\s\S]*?<\/details>/g, ""), /orders:FR-0|FR-001/);
-  assert.match(html, /<details class="rl"><summary>Rules \(2\)<\/summary>/);
+  // rule ids only in the rule lists, each opening its rule
+  assert.doesNotMatch(html.replace(/<details class="rl">[\s\S]*?<\/details>/g, "").replace(/<div class="rr">[\s\S]*?<\/div>/g, ""), /orders:FR-0|FR-001/);
   assert.match(html, /data-spec="specs\/orders\/spec.md" data-rule="FR-009"/);
-  // promises: needing a look first, a short title with the sentence muted
+  // promises: a table, needing a look first, a short title with the rest muted, the why line visible
+  assert.match(html, /<th class="text">Promises<\/th><th class="text">Status<\/th><th class="num">Rules<\/th>/);
   assert.ok(html.indexOf("Needs a look") < html.indexOf("Holds") && html.indexOf("Versions never change") < html.indexOf("Apps are kept apart"));
-  assert.match(html, /<span class="ptl">Versions never change<\/span><span class="pmu">every version is kept and never rewritten<\/span>/);
+  assert.match(html, /<span class="ptl">Versions never change<\/span><span class="pmu">every version is kept and never rewritten<\/span><span class="why">FR-009 \(orders\): Its test misses the code<\/span>/);
+  assert.match(html, /<td class="num">2 ›<\/td>/);
   assert.doesNotMatch(html, /class="mark/, "no checkbox-like marks");
   assert.equal(load()(data()).productHTML(), "", "no section without a product spec");
   assert.ok(src.indexOf('id="product"') > 0 && src.indexOf('id="product"') < src.indexOf('id="specs-sec"'));
