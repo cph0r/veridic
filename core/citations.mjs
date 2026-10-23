@@ -3,6 +3,7 @@
 // code. Ported from recover/check-citations.mjs.
 
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { lineMentions } from "./anchors.mjs";
@@ -39,7 +40,8 @@ export function parseSpec(spec) {
         const cite = raw.trim();
         if (!cite) continue;
         // path:start(-end), optionally anchored to a symbol: path:start-end#name@line
-        const m = cite.match(/^`?([^`\s:]+):(\d+)(?:\s*[-–]\s*(\d+))?(?:#([^@`\]]+)@(\d+))?`?$/);
+        // …and stamped with a hash of the cited text: path:start-end#name@line~3f9a1c
+        const m = cite.match(/^`?([^`\s:]+):(\d+)(?:\s*[-–]\s*(\d+))?(?:#([^@`\]~]+)@(\d+))?(?:~([0-9a-f]{6,}))?`?$/);
         const fr = label ?? section ?? `${heading ?? "spec"} (line ${i + 1})`;
         if (!m) citations.push({ fr, spec_line: i + 1, cite, bad: "unparseable" });
         else
@@ -51,6 +53,7 @@ export function parseSpec(spec) {
             start: Number(m[2]),
             end: Number(m[3] ?? m[2]),
             ...(m[4] ? { anchor: { name: m[4].trim(), line: Number(m[5]) } } : {}),
+            ...(m[6] ? { hash: m[6] } : {}),
           });
       }
     }
@@ -144,4 +147,57 @@ export function rangeWarnings(lines) {
   else if (/^import\s/.test(first) && lines.length === 1) out.push("cites an import line");
   if (lines.length > 150) out.push(`range is ${lines.length} lines; cite the specific lines`);
   return out;
+}
+
+/**
+ * A citation's text, hashed: the first 6 hex of SHA-256 over the cited lines, each trimmed,
+ * joined with newlines. Written after the range (`a.ts:2-3~3f9a1c`), it records what the
+ * citation pointed at, so it can be checked against the code without asking git.
+ */
+export function citeHash(lines) {
+  return createHash("sha256").update(lines.map((l) => l.trim()).join("\n")).digest("hex").slice(0, 6);
+}
+
+/** Where a file was renamed to since the last commit (git's rename detection), or null. */
+function renamedTo(repo, file) {
+  try {
+    const out = execFileSync("git", ["diff", "-M", "--name-status", "HEAD"], { cwd: repo, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+    for (const l of out.split("\n")) {
+      const [st, from, to] = l.split("\t");
+      if (/^R/.test(st ?? "") && from === file) return to;
+    }
+  } catch {}
+  return null;
+}
+
+/**
+ * A hashed citation against the working tree: "fresh" while the cited lines hash the same,
+ * "moved" (with the new lines, and the new file when renamed) when the same text is elsewhere
+ * in the file (the copy nearest the old place), "stale" when it's nowhere, "unhashed" without
+ * a hash (checked the old way).
+ */
+export function textCheck(repo, c, resolve) {
+  if (!c.hash || c.bad) return { state: "unhashed" };
+  let file = resolve(c.file).file ?? null;
+  let renamed = null;
+  const read = (f) => {
+    try {
+      return fs.readFileSync(path.join(repo, f), "utf8").split("\n");
+    } catch {
+      return null;
+    }
+  };
+  let src = file ? read(file) : null;
+  if (!src) {
+    renamed = renamedTo(repo, file ?? c.file);
+    src = renamed ? read(renamed) : null;
+    if (!src) return { state: "stale" };
+  }
+  const len = c.end - c.start + 1;
+  if (!renamed && citeHash(src.slice(c.start - 1, c.end)) === c.hash && c.end <= src.length) return { state: "fresh" };
+  let best = null;
+  for (let s = 1; s + len - 1 <= src.length; s++)
+    if (citeHash(src.slice(s - 1, s - 1 + len)) === c.hash && (!best || Math.abs(s - c.start) < Math.abs(best - c.start))) best = s;
+  if (best == null) return { state: "stale" };
+  return { state: "moved", ...(renamed ? { file: renamed } : {}), start: best, end: best + len - 1 };
 }

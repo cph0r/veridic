@@ -143,3 +143,32 @@ test("staleness flags edited, deleted and renamed citations in a real git range"
   // The insertion above line 1 is a change in a cited file that no citation covers.
   assert.deepEqual(r.uncovered_hunks, [{ file: "a.ts", hunks: ["@@ -0,0 +1 @@"] }]);
 });
+
+test("citations: checked by their text", async () => {
+  const { citeHash, textCheck, parseSpec, makeResolver } = await import("../core/citations.mjs");
+  const { formatCite } = await import("../core/anchors.mjs");
+  const fsm = await import("node:fs"), osm = await import("node:os"), pm = await import("node:path");
+  const repo = fsm.mkdtempSync(pm.join(osm.tmpdir(), "veridic-hash-"));
+  const write = (t) => fsm.writeFileSync(pm.join(repo, "a.ts"), t);
+  const body = ["export function pay(order) {", "  if (order.paid) throw new Error('paid');", "  order.paid = true;", "}"];
+  write(body.join("\n") + "\n");
+  const hash = citeHash(body.slice(1, 3));
+  assert.match(hash, /^[0-9a-f]{6}$/);
+  assert.equal(citeHash(["  " + body[1].trim() + "   ", body[2]]), hash, "whitespace around a line doesn't matter");
+  const parsed = parseSpec(`- **FR-001**: pays once [evidence: a.ts:2-3#pay@1~${hash}]\n- **FR-002**: old [evidence: a.ts:2-3]\n`);
+  assert.deepEqual(parsed.citations[0], { fr: "FR-001", spec_line: 1, cite: `a.ts:2-3#pay@1~${hash}`, file: "a.ts", start: 2, end: 3, anchor: { name: "pay", line: 1 }, hash });
+  assert.equal(formatCite("a.ts", 2, 3, { name: "pay", line: 1 }, hash), `a.ts:2-3#pay@1~${hash}`);
+  const resolve = makeResolver(repo, { files: ["a.ts"] });
+  const check = () => textCheck(repo, parsed.citations[0], resolve);
+  assert.deepEqual(check(), { state: "fresh" });
+  assert.deepEqual(textCheck(repo, parsed.citations[1], resolve), { state: "unhashed" });
+  write(["// header", "// more", ...body].join("\n") + "\n");
+  assert.deepEqual(check(), { state: "moved", start: 4, end: 5 });
+  write([body[0], "  if (order.paid) return;", body[2], body[3]].join("\n") + "\n");
+  assert.deepEqual(check(), { state: "stale" });
+  // The same lines twice: the copy nearest the old place wins.
+  const filler = Array.from({ length: 14 }, (_, i) => `// ${i}`);
+  write([...Array(6).fill("//"), body[1], body[2], ...filler, body[1], body[2]].join("\n") + "\n");
+  assert.deepEqual(check(), { state: "moved", start: 7, end: 8 });
+  fsm.rmSync(repo, { recursive: true, force: true });
+});

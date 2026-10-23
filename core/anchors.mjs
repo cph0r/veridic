@@ -83,8 +83,8 @@ export function locateAnchor(symbols, repo, file, c) {
 }
 
 /** Rebuild a citation string, keeping the spec's own file reference (alias or path) unless the file moved. */
-export function formatCite(ref, start, end, anchor) {
-  return `${ref}:${start}${end !== start ? `-${end}` : ""}${anchor ? `#${anchor.name}@${anchor.line}` : ""}`;
+export function formatCite(ref, start, end, anchor, hash) {
+  return `${ref}:${start}${end !== start ? `-${end}` : ""}${anchor ? `#${anchor.name}@${anchor.line}` : ""}${hash ? `~${hash}` : ""}`;
 }
 
 /**
