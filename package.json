@@ -1,6 +1,6 @@
 {
   "name": "veridic",
-  "version": "0.10.0",
+  "version": "0.10.1",
   "description": "Know what your code really does, with proof, before you change it. Evidence-backed specs, honest test coverage and an agent-readiness report for existing codebases.",
   "type": "module",
   "bin": {
