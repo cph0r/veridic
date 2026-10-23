@@ -308,22 +308,46 @@ test("report page: a part's success criteria are listed apart, never as rules", 
   assert.ok(!p.rules.some((r) => r.id === "SC-001"));
 });
 
-test("report page: the product spec, above the parts table, each journey and guarantee in its state", () => {
-  const product = {
+test("report page: the product spec, above the parts table: journeys as step dots, promises needing a look first", () => {
+  const d = data();
+  // orders FR-001 is covered (proven); FR-004 has no test; a tagged-only rule says why
+  d.specs[0].requirements.push(rule("FR-009", "tagged_only"));
+  d.product = {
     path: "specs/product/spec.md", title: "Shop", summary: "People order food.",
-    journeys: [{ id: "J-001", title: "Order dinner", state: "stale", steps: [{ text: "Pick a dish", refs: ["orders:FR-001"], state: "proven" }, { text: "Pay", refs: ["orders:FR-003"], state: "stale" }] }],
-    guarantees: [{ id: "G-001", text: "A paid order is never charged twice", refs: ["orders:FR-002"], state: "broken" }],
+    journeys: [
+      { id: "J-001", title: "Order dinner", state: "proven", steps: [{ text: "Pick a dish", refs: ["orders:FR-001"], state: "proven" }, { text: "Pay", refs: ["orders:FR-001"], state: "proven" }] },
+      { id: "J-002", title: "Change an order", state: "untested", steps: [{ text: "Open it", refs: ["orders:FR-001"], state: "proven" }, { text: "Every earlier version is kept", refs: ["orders:FR-009"], state: "untested" }] },
+    ],
+    guarantees: [
+      { id: "G-001", text: "Apps are kept apart: every app runs at its own address", refs: ["orders:FR-001"], state: "proven" },
+      { id: "G-002", text: "Versions never change: every version is kept and never rewritten", refs: ["orders:FR-009", "orders:FR-001"], state: "untested" },
+    ],
   };
-  const m = load()(data({ product }));
-  const html = m.productHTML();
-  assert.match(html, /Order dinner/);
-  assert.match(html, /class="mark warn"[^>]*>[^<]*<\/span><span class="tx">J-001/);
-  assert.match(html, /A paid order is never charged twice/);
-  assert.match(html, /class="mark bad"/);
-  assert.match(html, /orders:FR-003/);
+  const html = load()(d).productHTML();
+  // a journey: title first, its steps as dots, a status word, the id last
+  assert.match(html, /Order dinner<\/span><span class="dots"><i class="dot good"><\/i><i class="dot good"><\/i><\/span><span class="pst good">Works<\/span><span class="pid">J-001<\/span>/);
+  assert.match(html, /Change an order.*<span class="pst none">1 step not proven<\/span>/);
+  // why a step isn't proven, in one line
+  assert.match(html, /Every earlier version is kept[\s\S]*?class="why">FR-009 \(orders\): Its test misses the code/);
+  // rule ids only behind "Rules (n)", each opening its rule
+  assert.doesNotMatch(html.replace(/<details class="rl">[\s\S]*?<\/details>/g, ""), /orders:FR-0|FR-001/);
+  assert.match(html, /<details class="rl"><summary>Rules \(2\)<\/summary>/);
+  assert.match(html, /data-spec="specs\/orders\/spec.md" data-rule="FR-009"/);
+  // promises: needing a look first, a short title with the sentence muted
+  assert.ok(html.indexOf("Needs a look") < html.indexOf("Holds") && html.indexOf("Versions never change") < html.indexOf("Apps are kept apart"));
+  assert.match(html, /<span class="ptl">Versions never change<\/span><span class="pmu">every version is kept and never rewritten<\/span>/);
+  assert.doesNotMatch(html, /class="mark/, "no checkbox-like marks");
   assert.equal(load()(data()).productHTML(), "", "no section without a product spec");
-  // In the shell, the product section comes before the parts table.
   assert.ok(src.indexOf('id="product"') > 0 && src.indexOf('id="product"') < src.indexOf('id="specs-sec"'));
+});
+
+test("report page: gauges show their real values at once, and a part with weak tests says how many", () => {
+  assert.doesNotMatch(src, /">0%<\/div>/, "no count-up from 0%");
+  const d = data();
+  d.specs.push(spec("specs/menu2/spec.md", [rule("FR-001", "covered"), rule("FR-002", "unasserted"), rule("FR-003", "covered")]));
+  const m = load()(d);
+  const p = m.parts.find((x) => x.specs.some((s) => s.path === "specs/menu2/spec.md"));
+  assert.equal(p.health, "Mostly proven (1 weak)");
 });
 
 test("report page: a rule whose test needs an env flag says which", () => {

@@ -42,6 +42,8 @@ var veridicModel = (D) => {
     return { ...st, label: st.label || s.label };
   };
   const RANK = { broken: 0, lost: 1, stale: 2, weak: 3, untested: 4, proven: 5 };
+  // "Mostly proven (5 weak)" says more, and alarms less, than "Weak tests" when most rules are proven.
+  const weakLabel = (x) => { const w = (x.weak || []).length, pv = (x.proven || []).length; return pv >= w ? "Mostly proven (" + w + " weak)" : "Weak tests (" + w + ")"; };
 
   // ---- a rule in plain words: its first clause, the rest on tap ----
   const fmt = (s) => esc(s).replace(/`([^`]+)`/g, "<code>$1</code>");
@@ -65,7 +67,7 @@ var veridicModel = (D) => {
       untested: rules.filter((r) => statusOf(r).tone === "none") };
     sp.tone = !rules.length ? "none" : sp.broken.length ? "bad" : sp.lost.length || sp.stale.length || sp.weak.length ? "warn" : sp.untested.length ? "todo" : "good";
     sp.outdated = sp.stale.length + sp.lost.length;
-    sp.health = { bad: "Broken", warn: sp.outdated ? "Out of date" : "Weak tests", todo: sp.proven.length ? "Partly proven" : "Not tested", good: "Proven", none: "No rules" }[sp.tone];
+    sp.health = { bad: "Broken", warn: sp.outdated ? "Out of date" : weakLabel(sp), todo: sp.proven.length ? "Partly proven" : "Not tested", good: "Proven", none: "No rules" }[sp.tone];
     sp.files = new Set(rules.flatMap((r) => (r.cites || []).map((c) => c.file).filter(Boolean))).size;
     return sp;
   });
@@ -101,7 +103,7 @@ var veridicModel = (D) => {
     p.outdated = p.stale.length + p.lost.length;
     p.files = new Set(p.rules.flatMap((r) => (r.cites || []).map((c) => c.file).filter(Boolean))).size;
     p.tone = !p.rules.length ? "none" : p.broken.length ? "bad" : p.outdated || p.weak.length ? "warn" : p.untested.length ? "todo" : "good";
-    p.health = !ss.length ? "No spec" : { bad: "Broken", warn: p.outdated ? "Out of date" : "Weak tests", todo: p.proven.length ? "Partly proven" : "Not tested", good: "Proven", none: "No rules" }[p.tone];
+    p.health = !ss.length ? "No spec" : { bad: "Broken", warn: p.outdated ? "Out of date" : weakLabel(p), todo: p.proven.length ? "Partly proven" : "Not tested", good: "Proven", none: "No rules" }[p.tone];
     const c = coverOf.get(id);
     p.covered = c ? { total: c.total, covered: c.covered } : null;
     return p;
@@ -218,17 +220,55 @@ var veridicModel = (D) => {
   };
   const ruleCounts = (p) => Object.fromEntries(Object.keys(RULE_STATES).map((k) => [k, partRules(p, { state: k }).length]));
   // ---- the product spec: what the app does end to end, in the state of the part rules it names ----
-  const MARK = { proven: ["good", "✓", "Proven: every rule it names is proven"], broken: ["bad", "✕", "Broken: a rule it names is broken"], stale: ["warn", "Δ", "Out of date: a rule it names is out of date"], untested: ["none", "–", "Not proven yet: some rules it names have no test"] };
-  const mark = (st) => { const [cls, ch, tip] = MARK[st] || ["none", "?", "A rule it names isn't in any spec"]; return '<span class="mark ' + cls + '" title="' + tip + '">' + ch + "</span>"; };
+  // A dot per state (colour and a word, never a checkbox), the id last and muted, the rule ids
+  // behind "Rules (n)", and why a step isn't proven in one line.
+  const DOT = { proven: "good", broken: "bad", stale: "warn", untested: "none" };
+  const dot = (st) => '<i class="dot ' + (DOT[st] || "none") + '"></i>';
+  const specOfFolder = (folder) => specs.find((sp) => String(sp.path).split("/").slice(-2)[0] === folder);
+  const ruleOf = (ref) => { const [folder, id] = String(ref).split(":"); const sp = specOfFolder(folder); return { folder, id, sp, r: sp ? sp.rules.find((x) => x.id === id) : null }; };
+  const rulesHTML = (refs) => '<details class="rl"><summary>Rules (' + refs.length + ")</summary>" + refs.map((ref) => {
+    const { folder, id, sp, r } = ruleOf(ref);
+    const st = r ? stateOf(r) : null;
+    return '<div class="rr">' + dot(r ? ({ proven: "proven", broken: "broken", lost: "broken", stale: "stale" }[st.key] || "untested") : null) +
+      (sp && r ? '<button class="rid" data-spec="' + esc(sp.path) + '" data-rule="' + esc(id) + '">' + esc(id) + " (" + esc(folder) + ")</button>" : '<span class="rid">' + esc(id) + " (" + esc(folder) + ")</span>") +
+      '<span class="rtx">' + (r ? ruleText(r).head : "Not in any spec") + "</span>" + (st ? '<span class="rst">' + esc(st.label) + "</span>" : "") + "</div>";
+  }).join("") + "</details>";
+  // The first rule a step or promise names that isn't proven, and why.
+  const why = (refs) => {
+    for (const ref of refs) {
+      const { folder, id, r } = ruleOf(ref);
+      if (!r) return id + " (" + folder + "): not in any spec";
+      const st = stateOf(r);
+      if (st.key !== "proven") return id + " (" + folder + "): " + st.label;
+    }
+    return "";
+  };
+  const WORD = { broken: "broken", stale: "out of date", untested: "not proven" };
+  const journeyWord = (j) => {
+    if (j.state === "proven") return ["good", "Works"];
+    const bad = j.steps.filter((st) => st.state !== "proven");
+    const worst = bad.some((st) => st.state === "broken") ? "broken" : bad.some((st) => st.state === "stale") ? "stale" : bad.some((st) => st.state == null) ? null : "untested";
+    if (worst == null) return ["none", "A rule it names is missing"];
+    const n = bad.filter((st) => st.state === worst).length;
+    return [DOT[worst], n + (n === 1 ? " step " : " steps ") + WORD[worst]];
+  };
+  const promiseWord = (g) => (g.state === "proven" ? ["good", "Holds"] : g.state == null ? ["none", "A rule it names is missing"] : [DOT[g.state], cap(WORD[g.state])]);
+  // "Versions never change: every version is kept…": a short title, the rest muted.
+  const titled = (text) => { const m = String(text).match(/^(.{2,60}?)(?::\s+|\s+[—–]\s+)(.+)$/); return m && m[1].split(/\s+/).length <= 7 ? [m[1], m[2]] : [String(text), ""]; };
   function productHTML() {
     const pr = D.product;
     if (!pr || (!pr.journeys.length && !pr.guarantees.length)) return "";
-    const refs = (rs) => rs.map((r) => "<code>" + esc(r) + "</code>").join(" ");
-    const journeys = pr.journeys.map((j) => '<details class="pj"><summary>' + mark(j.state) + '<span class="tx">' + esc(j.id) + " " + esc(j.title) + "</span></summary><ol>" +
-      j.steps.map((st) => "<li>" + mark(st.state) + "<span>" + esc(st.text) + " " + refs(st.refs) + "</span></li>").join("") + "</ol></details>").join("");
-    const guarantees = pr.guarantees.map((g) => '<div class="pg">' + mark(g.state) + '<span class="tx">' + esc(g.id) + " " + esc(g.text) + " " + refs(g.refs) + "</span></div>").join("");
+    const journeys = pr.journeys.map((j) => {
+      const [tone, word] = journeyWord(j);
+      return '<details class="pj"><summary><span class="ptl">' + esc(j.title) + '</span><span class="dots">' + j.steps.map((st) => dot(st.state)).join("") + '</span><span class="pst ' + tone + '">' + esc(word) + '</span><span class="pid">' + esc(j.id) + "</span></summary><ol>" +
+        j.steps.map((st) => { const w = st.state === "proven" ? "" : why(st.refs); return "<li>" + dot(st.state) + '<div class="stx"><span>' + esc(st.text) + "</span>" + (w ? '<span class="why">' + esc(w) + "</span>" : "") + rulesHTML(st.refs) + "</div></li>"; }).join("") + "</ol></details>";
+    }).join("");
+    const row = (g) => { const [tone, word] = promiseWord(g), [t, rest] = titled(g.text), w = g.state === "proven" ? "" : why(g.refs);
+      return '<div class="pg">' + dot(g.state) + '<div class="stx"><div><span class="ptl">' + esc(t) + "</span>" + (rest ? '<span class="pmu">' + esc(rest) + "</span>" : "") + "</div>" + (w ? '<span class="why">' + esc(w) + "</span>" : "") + rulesHTML(g.refs) + '</div><span class="pst ' + tone + '">' + esc(word) + '</span><span class="pid">' + esc(g.id) + "</span></div>"; };
+    const look = pr.guarantees.filter((g) => g.state !== "proven"), hold = pr.guarantees.filter((g) => g.state === "proven");
+    const promises = (look.length ? '<div class="pgrp">Needs a look</div>' + look.map(row).join("") : "") + (hold.length ? '<div class="pgrp">Holds</div>' + hold.map(row).join("") : "");
     return (pr.summary ? '<p class="psum">' + esc(pr.summary) + "</p>" : "") +
-      (journeys ? '<div class="sub-h">Journeys</div>' + journeys : "") + (guarantees ? '<div class="sub-h">Guarantees</div>' + guarantees : "");
+      (journeys ? '<div class="sub-h">Journeys</div>' + journeys : "") + (promises ? '<div class="sub-h">Promises</div>' + promises : "");
   }
 
   return { productHTML, storiesOf, rulesInNoStory, partRules, ruleCounts, rows, page, parts, partOf, P, ruleHome, cleanView, specs, S, counts, fix, later, verdict, title: app.title || D.name, stateOf, statusOf, ruleText, RANK, plural, esc, cap, REQ };
@@ -270,7 +310,7 @@ var veridicModel = (D) => {
   // ---- hero: the app's name and the gauges ----
   $("#appname").textContent = M.title;
   const colorFor = (p) => (p >= 90 ? "var(--good)" : p >= 60 ? "var(--warn)" : "var(--bad)");
-  const ring = (p, lbl, sub, color) => { const C = 2 * Math.PI * 33; return '<div class="ring" tabindex="0"><svg viewBox="0 0 78 78"><circle class="track" cx="39" cy="39" r="33" fill="none" stroke-width="7"/><circle class="arc" cx="39" cy="39" r="33" fill="none" stroke-width="7" stroke="' + (color || colorFor(p)) + '" stroke-dasharray="' + C + '" stroke-dashoffset="' + C + '" data-to="' + C * (1 - p / 100) + '"/></svg><div class="num" data-n="' + p + '">0%</div><div class="lbl">' + lbl + '</div><div class="sub">' + sub + "</div></div>"; };
+  const ring = (p, lbl, sub, color) => { const C = 2 * Math.PI * 33; return '<div class="ring" tabindex="0"><svg viewBox="0 0 78 78"><circle class="track" cx="39" cy="39" r="33" fill="none" stroke-width="7"/><circle class="arc" cx="39" cy="39" r="33" fill="none" stroke-width="7" stroke="' + (color || colorFor(p)) + '" stroke-dasharray="' + C + '" stroke-dashoffset="' + C * (1 - p / 100) + '"/></svg><div class="num">' + p + '%</div><div class="lbl">' + lbl + '</div><div class="sub">' + sub + "</div></div>"; };
   const pct = (a, b) => (b ? Math.round((100 * a) / b) : 0);
   if (counts.rules) $("#rings").innerHTML =
     ring(pct(counts.true, counts.rules), "Up to date", "Rules that still match the code they point to (" + counts.true + " of " + counts.rules + ").") +
@@ -280,7 +320,7 @@ var veridicModel = (D) => {
   // ---- every part of the app, as a row: filter by health or text, sort by any column ----
   const COLS = [
     ["name", "Part", "text"], ["health", "Health", "text"], ["rules", "Rules", "num"], ["proven", "Proven", "bar", "Each part's rules: proven, needing attention, weak test, not tested (hatched)"],
-    ["stories", "Stories", "num"], ["covered", "Covered", "num", "The part's code files a spec describes"],
+    ["stories", "Stories", "num"], ["covered", "Code described", "num", "The part's code files a spec describes"],
   ];
   const FILTER = [["all", "All"], ["fix", "Needs fixing"], ["stale", "Out of date"], ["untested", "Not tested"], ["proven", "Proven"], ["nospec", "No spec"]];
   let view = { q: "", filter: "all", sort: null, dir: "desc", page: 1, size: 10 };
@@ -481,18 +521,8 @@ var veridicModel = (D) => {
   $("#foot").innerHTML = "<span>" + esc(M.title) + (counts.specs ? " · " + plural(counts.specs, "spec") + " · " + plural(counts.rules, "rule") : "") + "</span><span>Veridic · " + ago(D.generated).toLowerCase() + "</span>" +
     (errs.length ? '<details class="errs"><summary>' + plural(errs.length, "thing") + " Veridic couldn't check</summary>" + errs.map((e) => "<div>" + esc(e) + "</div>").join("") + "</details>" : "");
 
-  // ---- motion: rings fill, numbers count; confetti when every rule is true and proven ----
+  // ---- confetti when every rule is true and proven (the gauges are drawn at their values) ----
   const calm = matchMedia("(prefers-reduced-motion: reduce)").matches;
-  const fill = () => {
-    document.querySelectorAll(".arc").forEach((a) => (a.style.strokeDashoffset = a.dataset.to));
-    document.querySelectorAll(".num[data-n]").forEach((n) => {
-      const to = +n.dataset.n;
-      if (calm) { n.textContent = to + "%"; return; }
-      const t1 = performance.now(), step = (t) => { const k = Math.min(1, (t - t1) / 1300); n.textContent = Math.round(to * (1 - Math.pow(1 - k, 3))) + "%"; if (k < 1) requestAnimationFrame(step); };
-      requestAnimationFrame(step);
-    });
-  };
-  if (calm) fill(); else requestAnimationFrame(() => setTimeout(fill, 250));
   if (specs.length && !M.fix.length && !M.later.length && !calm) {
     const c = $("#confetti"), cl = ["#4cc38a", "#e3a73c", "#d97757", "#7aa7e8", "#c68be0"];
     c.innerHTML = [...Array(60)].map(() => '<i style="left:' + Math.random() * 100 + "vw;background:" + cl[(Math.random() * cl.length) | 0] + ";animation-delay:" + Math.random() * 0.8 + "s;transform:rotate(" + Math.random() * 360 + 'deg)"></i>').join("");

@@ -34,7 +34,7 @@ frontend, its screens grouped by who uses them (`guest-app`, `admin-app`, …). 
    one sentence on what the app does (from the README), then `## Journeys`: the
    main things a person does across parts (`### J-001: Ask for an app`, then
    numbered steps in plain words), and `## Guarantees`: promises that span parts
-   (`- **G-001**: A person's app data never reaches the server`). Read the
+   (`- **G-001**: Data stays on the phone: what a person saves never reaches the server`: a short title, a colon, then the promise). Read the
    README, `veridic routes` and `veridic modules` for this; no code citations.
    Leave the steps' and guarantees' rule references for step 5.
 4. **Write, one agent per part,** at most four at a time. Never give two agents
