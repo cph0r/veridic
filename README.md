@@ -15,7 +15,7 @@ Veridic turns your app into specs, checks every rule against the code, and prove
 
 ## Get started
 
-Needs Node 22.5+, Claude Code and an Express app.
+Needs Node 22.5+, Claude Code and an Express or Next.js app.
 
 ```text
 /plugin marketplace add cph0r/veridic

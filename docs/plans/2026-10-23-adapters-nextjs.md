@@ -208,3 +208,24 @@ Disagreements left, by design or for later: "moves money" on any Stripe call, re
 without an explicit check); inbox-zero's 405-only `POST/PATCH /api/v1/rules/:id` flagged.
 True findings kept: GET crons and Stripe success pages that write (inbox-zero, saas-starter,
 taxonomy). Express: snapshots and metrics identical to main on RealWorld, Gobbles and launchpad.
+
+**Phase 4 (2026-10-24).** The five samples pinned in veridic-bench (`set: nextjs`), with an
+independent Next.js route scan (route.ts verbs, pages/api methods, "use server" exports) and a
+hand verdict on every high and medium issue.
+
+| App | Routes (independent) | Issues: high + medium | Confirmed |
+|---|---:|---:|---:|
+| saas-starter | 14 (14) | 1 | 1 |
+| nextjs-subscription-payments | 14 (14) | 0 | — |
+| taxonomy | 9 (9) | 1 | 1 |
+| papermark | 383 (384) | 10 | 5 |
+| inbox-zero | 605 (605) | 42 | 36 |
+
+43 of 54 confirmed (80%). The bench found, each fixed with a test first: methods handled
+before an early 405; handlers that serve every method after their checks (ALL); sign-in and
+membership through the app's own helpers (`getAuthenticatedAdmin(teamId)`); pages handlers that
+hand the request on (a 405 then `postHandler`, per-method functions after the dispatcher's own
+checks, an imported function); `response.data.destroy()` and multi-line `$(…).remove()` read as
+deletes. Left as known misses: Stripe reads counted as moving money; public-by-design token
+routes flagged; papermark's tus route (scan 2, Veridic ALL). RESULTS.md is regenerated with the
+release, so its Express rows are re-measured with the same version.
