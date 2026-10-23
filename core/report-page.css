@@ -239,7 +239,13 @@ table.specs { width: 100%; border-collapse: collapse; font-size: 14px; }
 .rl { display: flex; gap: 8px; align-items: flex-start; padding: 6px 0; color: var(--ink); cursor: pointer; }
 .rl:hover { color: var(--ink2); }
 .rl .mark { width: 18px; height: 18px; font-size: 10px; }
-.rtools { display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px; }
+/* The Rules tab's tools, on one line: search takes the room left, the two dropdowns their own width. */
+.rtools { display: flex; align-items: center; gap: 8px; margin-bottom: 20px; }
+.rtools input[type=search] { flex: 1 1 120px; min-width: 0; }
+.rtools .picks { flex: none; flex-wrap: nowrap; gap: 8px; }
+.rtools .pick > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.rtools input[type=search], .rtools .pick select { font-size: 12px !important; padding: 6px 9px; }
+.rtools .pick select { padding-right: 24px; background-position: right 7px center; }
 .rtools input[type=search] { font: inherit; font-size: 14px; color: var(--ink); background: var(--card); border: 1px solid var(--line2); border-radius: 12px; padding: 8px 12px; outline: none; }
 .rtools input[type=search]:focus { border-color: var(--ink3); box-shadow: 0 0 0 3px var(--line); }
 .picks { display: flex; flex-wrap: wrap; gap: 8px 16px; }

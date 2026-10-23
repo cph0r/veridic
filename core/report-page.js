@@ -321,7 +321,7 @@ var veridicModel = (D) => {
   }
   // ---- a part's sheet, in three tabs: Overview, Stories, Rules ----
   const TABS = [["overview", "Overview"], ["stories", "Stories"], ["rules", "Rules"]];
-  const RSTATES = [["all", "All"], ["attention", "Needs attention"], ["weak", "Weak test"], ["untested", "Not tested"], ["proven", "Proven"]];
+  const RSTATES = [["all", "All"], ["attention", "Attention"], ["weak", "Weak test"], ["untested", "Not tested"], ["proven", "Proven"]];
   const tabOf = (k) => (TABS.some(([t]) => t === k) ? k : "overview");
   let sheet = { tab: tabOf(store.get("sheet-tab")), rstate: "all", q: "", by: "state" };
   const tag = (h, inn) => h.replace(/data-rule="/g, 'data-in="' + esc(inn) + '" data-rule="');
@@ -368,7 +368,7 @@ var veridicModel = (D) => {
     const pick = (id, label, opts, cur) => '<label class="pick"><span>' + label + '</span><select id="' + id + '" aria-label="' + label + '">' + opts.map(([k, l]) => '<option value="' + k + '"' + (cur === k ? " selected" : "") + ">" + l + "</option>").join("") + "</select></label>";
     return '<div class="rtools"><input id="rq" type="search" placeholder="Search rules" aria-label="Search rules" value="' + esc(sheet.q) + '"><div class="picks">' +
       pick("rstate", "Show", RSTATES.map(([k, l]) => [k, (k === "all" ? "All rules" : l) + " (" + rc[k] + ")"]), sheet.rstate) +
-      pick("rby", "Group by", [["state", "State"], ["file", "Spec file"]], sheet.by) + '</div></div><div id="rlist">' + rulesList(p) + "</div>";
+      pick("rby", "Group by", [["state", "By state"], ["file", "By spec file"]], sheet.by) + '</div></div><div id="rlist">' + rulesList(p) + "</div>";
   }
   // A part's sheet: its head, the tabs, then only the open tab.
   function partHTML(p) {
