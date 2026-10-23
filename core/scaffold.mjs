@@ -3,6 +3,7 @@
 // citations and the spec's acceptance scenarios as comments. The agent replaces
 // each placeholder with a real test. Deterministic; writes nothing itself.
 
+import { parseStoryHeading } from "./report.mjs";
 import fs from "node:fs";
 import path from "node:path";
 import { parseSpec, makeResolver } from "./citations.mjs";
@@ -97,8 +98,9 @@ export function scaffold(repo, spec, opts = {}) {
   const stories = [];
   let story = null;
   for (const l of lines) {
-    const h = l.match(/^###\s+(User Story.*)$/);
-    if (h) stories.push((story = { title: h[1].replace(/\s*\(Priority.*\)\s*$/, ""), scenarios: [] }));
+    const h = l.match(/^###\s+(.*)$/);
+    const st = h && parseStoryHeading(h[1]);
+    if (st) stories.push((story = { title: `User Story ${st.n} - ${st.title}`, scenarios: [] }));
     else if (/^#{1,3}\s/.test(l)) story = null;
     else if (story && /^\s*\d+\.\s+\*\*Given\*\*/.test(l)) story.scenarios.push(l.replace(/\*\*/g, "").trim());
   }

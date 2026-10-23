@@ -50,6 +50,25 @@ const readLines = (repo, file) => {
 // stories with their scenarios, each requirement's section and verification
 // checks, and its tables (decision tables, state machine, risks).
 const REQ_ID = "(?:FR|SC|NFR|R|AC|INV|D)-?\\d+[a-z]?";
+/**
+ * A story heading in the forms spec agents write: "User Story 2 - Pay (Priority: P1)",
+ * "Story 2: Pay (P1)", "Story 2 - Pay", "US-2: Pay [P2]". -> { n, title, priority } or null.
+ */
+export function parseStoryHeading(h) {
+  const m = String(h).trim().match(/^(?:user\s+story|story|us)\s*-?\s*(\d+)\s*[-–—:.]\s*(.*?)\s*(?:[([]\s*(?:priority\s*:\s*)?(P\d)\s*[)\]])?\s*$/i);
+  return m && m[2] ? { n: Number(m[1]), title: m[2], priority: m[3]?.toUpperCase() ?? null } : null;
+}
+
+/** `###` headings that look like stories but don't parse: [{ line, heading }]. */
+export function storyHeadingProblems(text) {
+  const out = [];
+  String(text).split("\n").forEach((l, i) => {
+    const m = l.match(/^###\s+(.*)$/);
+    if (m && /^(?:user\s+story|story|us)\b[\s-]/i.test(m[1].trim()) && !parseStoryHeading(m[1])) out.push({ line: i + 1, heading: m[1].trim() });
+  });
+  return out;
+}
+
 export function specDoc(text) {
   const lines = text.split("\n");
   const doc = { title: null, meta: {}, stories: [], tables: [], notes: [], reqs: {} };
@@ -63,8 +82,8 @@ export function specDoc(text) {
     if ((m = l.match(/^###\s+(.*)/))) {
       h3 = m[1].trim();
       cur = null;
-      const st = h3.match(/^user story\s*(\d+)\s*[-–:]\s*(.*?)\s*(?:\(priority:\s*(P\d)\))?\s*$/i);
-      story = st ? { n: Number(st[1]), title: st[2], priority: st[3] ?? null, why: "", scenarios: [] } : null;
+      const st = parseStoryHeading(h3);
+      story = st ? { ...st, why: "", scenarios: [] } : null;
       if (story) doc.stories.push(story);
       continue;
     }
