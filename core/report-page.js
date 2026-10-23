@@ -64,7 +64,7 @@ var veridicModel = (D) => {
       untested: rules.filter((r) => statusOf(r).tone === "none") };
     sp.tone = !rules.length ? "none" : sp.broken.length ? "bad" : sp.lost.length || sp.stale.length || sp.weak.length ? "warn" : sp.untested.length ? "todo" : "good";
     sp.outdated = sp.stale.length + sp.lost.length;
-    sp.health = { bad: "Broken", warn: sp.outdated ? "Out of date" : "Weak tests", todo: "Not tested", good: "Proven", none: "No rules" }[sp.tone];
+    sp.health = { bad: "Broken", warn: sp.outdated ? "Out of date" : "Weak tests", todo: sp.proven.length ? "Partly proven" : "Not tested", good: "Proven", none: "No rules" }[sp.tone];
     sp.files = new Set(rules.flatMap((r) => (r.cites || []).map((c) => c.file).filter(Boolean))).size;
     return sp;
   });
@@ -100,7 +100,7 @@ var veridicModel = (D) => {
     p.outdated = p.stale.length + p.lost.length;
     p.files = new Set(p.rules.flatMap((r) => (r.cites || []).map((c) => c.file).filter(Boolean))).size;
     p.tone = !p.rules.length ? "none" : p.broken.length ? "bad" : p.outdated || p.weak.length ? "warn" : p.untested.length ? "todo" : "good";
-    p.health = !ss.length ? "No spec" : { bad: "Broken", warn: p.outdated ? "Out of date" : "Weak tests", todo: "Not tested", good: "Proven", none: "No rules" }[p.tone];
+    p.health = !ss.length ? "No spec" : { bad: "Broken", warn: p.outdated ? "Out of date" : "Weak tests", todo: p.proven.length ? "Partly proven" : "Not tested", good: "Proven", none: "No rules" }[p.tone];
     const c = coverOf.get(id);
     p.covered = c ? { total: c.total, covered: c.covered } : null;
     return p;
@@ -187,7 +187,7 @@ var veridicModel = (D) => {
   };
   const P = new Map(parts.map((p) => [p.id, p]));
   // A view saved by an earlier version: a sort with no column, or a filter with no rows, resets.
-  const VISIBLE_SORTS = ["name", "health", "rules", "proven", "broken", "outdated", "untested", "stories", "covered"];
+  const VISIBLE_SORTS = ["name", "health", "rules", "proven", "stories", "covered"];
   const cleanView = (v) => ({ ...v, sort: VISIBLE_SORTS.includes(v.sort) ? v.sort : null, filter: v.filter && FILTERS[v.filter] && (v.filter === "all" || rows({ filter: v.filter }).length) ? v.filter : "all" });
   // Where a rule lives: its part, and the spec file it is in (ids repeat across a part's files).
   const ruleHome = (id, specPath) => ({ part: partOf(specPath), spec: specPath });
@@ -231,57 +231,56 @@ var veridicModel = (D) => {
     set: (k, v) => { try { localStorage.setItem("veridic-" + k, v); } catch {} },
   };
   const ago = (d) => { const s = (Date.now() - new Date(d)) / 1000; return s < 90 ? "Checked just now" : s < 5400 ? "Checked " + Math.round(s / 60) + " min ago" : "Checked " + new Date(d).toLocaleString(); };
-  const SH = { good: "✓", warn: "~", bad: "!", todo: "–", none: "·" };
-  const SUN = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>';
-  const MOON = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>';
   const hid = (g) => (g ? ' data-g="' + g + '"' : "");
   let open = null; // the spec open in the sheet
 
   // ---- the shell ----
   $("#app").innerHTML = `<div class="wrap">
-  <div class="top"><div class="brand"><span class="logo"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5 9-10"/></svg></span>Veridic</div>
-    <div class="when"><span id="when"></span><button class="icon-btn" id="theme" aria-label="Switch theme"></button></div></div>
-  <section class="hero"><div class="rv"><h1 class="verdict" id="appname"></h1><p class="about" id="stats"></p></div><div class="rings rv" id="rings" style="animation-delay:.12s"></div></section>
+  <section class="hero"><div class="rv"><h1 class="verdict" id="appname"></h1></div><div class="rings rv" id="rings" style="animation-delay:.12s"></div></section>
   <section id="specs-sec"><h2 class="sr">Your app</h2>
   <div class="tools rv" style="animation-delay:.22s"><input id="q" type="search" placeholder="Search parts and specs" aria-label="Search parts and specs"><label class="pick"><span>Show</span><select id="filters" aria-label="Show"></select></label></div>
   <div class="tablewrap rv" style="animation-delay:.25s"><table class="specs"><thead><tr id="thead"></tr></thead><tbody id="tbody"></tbody></table><div class="noresults" id="noresults" hidden>No part matches.</div></div><div class="pager" id="pager"></div></section>
+  <div class="key rv" aria-label="Key"><span class="key-h">Key</span><span><i class="sw good"></i>Proven by a test</span><span><i class="sw bad"></i>Broken</span><span><i class="sw warn"></i>Out of date</span><span><i class="sw weak"></i>Weak test</span><span><i class="sw none"></i>Not tested</span><span><b class="rev">Δ</b>Changed in the code since written</span></div>
   <footer class="foot" id="foot"></footer>
 </div>
 <div class="scrim" id="scrim"></div>
 <aside class="sheet" id="panel" aria-label="Spec"><div class="grab"></div><div class="part" id="part"></div></aside>
 <div class="confetti" id="confetti"></div>`;
 
-  // ---- hero: the app's name, the gauges, the counts ----
+  // ---- hero: the app's name and the gauges ----
   $("#appname").textContent = M.title;
-  $("#when").textContent = ago(D.generated);
-  $("#stats").textContent = counts.specs ? [plural(counts.specs, "spec"), plural(counts.rules, "rule"), counts.stories ? plural(counts.stories, "user story", "user stories") : ""].filter(Boolean).join(" · ") : "";
   const colorFor = (p) => (p >= 90 ? "var(--good)" : p >= 60 ? "var(--warn)" : "var(--bad)");
   const ring = (p, lbl, sub, color) => { const C = 2 * Math.PI * 33; return '<div class="ring" tabindex="0"><svg viewBox="0 0 78 78"><circle class="track" cx="39" cy="39" r="33" fill="none" stroke-width="7"/><circle class="arc" cx="39" cy="39" r="33" fill="none" stroke-width="7" stroke="' + (color || colorFor(p)) + '" stroke-dasharray="' + C + '" stroke-dashoffset="' + C + '" data-to="' + C * (1 - p / 100) + '"/></svg><div class="num" data-n="' + p + '">0%</div><div class="lbl">' + lbl + '</div><div class="sub">' + sub + "</div></div>"; };
   const pct = (a, b) => (b ? Math.round((100 * a) / b) : 0);
   if (counts.rules) $("#rings").innerHTML =
     ring(pct(counts.true, counts.rules), "Up to date", "Rules that still match the code they point to (" + counts.true + " of " + counts.rules + ").") +
-    ring(pct(counts.proven, counts.rules), "Proven", "Rules a test proves (" + counts.proven + " of " + counts.rules + ")." + (counts.broken ? " " + plural(counts.broken, "rule") + " broken." : ""), counts.broken ? "var(--bad)" : null) +
+    ring(pct(counts.proven, counts.rules), "Proven", "Rules a test proves (" + counts.proven + " of " + counts.rules + ")." + (counts.broken ? " " + plural(counts.broken, "rule") + " broken." : ""), counts.broken ? "var(--bad)" : pct(counts.proven, counts.rules) >= 90 ? "var(--good)" : "var(--warn)") +
     (counts.behaviour ? ring(pct(counts.covered, counts.behaviour), "Covered", "Code files a spec describes (" + counts.covered + " of " + counts.behaviour + "). Tests, config and generated files don't count.") : "");
 
   // ---- every part of the app, as a row: filter by health or text, sort by any column ----
   const COLS = [
-    ["name", "Part", "text"], ["health", "Health", "text"], ["rules", "Rules", "num"], ["proven", "Proven", "num"],
-    ["broken", "Broken", "num"], ["outdated", "Outdated", "num", "Rules the code changed after they were written"], ["untested", "Untested", "num", "Rules no test proves yet"], ["stories", "Stories", "num"], ["covered", "Covered", "num"],
+    ["name", "Part", "text"], ["health", "Health", "text"], ["rules", "Rules", "num"], ["proven", "Proven", "bar", "Each part's rules: proven, needing attention, weak test, not tested (hatched)"],
+    ["stories", "Stories", "num"], ["covered", "Covered", "num", "The part's code files a spec describes"],
   ];
   const FILTER = [["all", "All"], ["fix", "Needs fixing"], ["stale", "Out of date"], ["untested", "Not tested"], ["proven", "Proven"], ["nospec", "No spec"]];
   let view = { q: "", filter: "all", sort: null, dir: "desc", page: 1, size: 10 };
   try { view = M.cleanView({ ...view, ...JSON.parse(store.get("table:" + D.name) || "{}") }); } catch {}
   const num = (n, cls) => (n ? '<span class="' + (cls || "") + '">' + n + "</span>" : '<span class="zero">–</span>');
-  // Under a part's name: its spec file (or how many), and how many code files its spec cites.
-  const specLine = (p) => (!p.specs.length ? "no spec yet" : (p.specs.length === 1 ? p.specs[0].path : plural(p.specs.length, "spec file")) + (p.files ? " · cites " + plural(p.files, "file") : ""));
+  // A part's rules as one bar, one segment per state (each rule in exactly one), not tested hatched.
+  const SEGS = [["proven", "good", "proven"], ["attention", "warn", "need attention"], ["weak", "weak", "weak test"], ["untested", "none", "not tested"]];
+  const ruleBar = (p) => {
+    const c = M.ruleCounts(p), n = c.all;
+    const tip = SEGS.filter(([k]) => c[k]).map(([k, , w]) => c[k] + " " + w).join(" · ");
+    return '<div class="pv" title="' + esc(tip) + '"><span>' + c.proven + "<small> /" + n + '</small></span><i class="rbar">' + SEGS.filter(([k]) => c[k]).map(([k, tone]) => '<b class="' + (k === "attention" && p.broken.length ? "bad" : tone) + '" style="width:' + (100 * c[k]) / n + '%"></b>').join("") + "</i></div>";
+  };
   const rowHTML = (p) => {
-    const pct = p.rules.length ? Math.round((100 * p.proven.length) / p.rules.length) : 0;
     const cov = p.covered && p.covered.total ? p.covered.covered + '<small> /' + p.covered.total + "</small>" : '<span class="zero">–</span>';
-    return '<tr data-part="' + esc(p.id) + '" tabindex="0"' + (open === p.id ? ' class="sel"' : "") + '><td class="c-name"><div class="snm"><i class="sh ' + (p.specs.length ? p.tone : "none") + '">' + SH[p.specs.length ? p.tone : "none"] + "</i>" + esc(p.name) + '</div><div class="spath">' + esc(specLine(p)) + "</div></td>" +
+    const delta = p.outdated ? ' <span class="rev" title="' + esc(plural(p.outdated, "rule") + " changed in the code since written") + '">Δ' + p.outdated + "</span>" : "";
+    return '<tr data-part="' + esc(p.id) + '" tabindex="0"' + (open === p.id ? ' class="sel"' : "") + '><td class="c-name"><div class="snm">' + esc(p.name) + delta + "</div></td>" +
       '<td><span class="hl ' + (p.specs.length ? p.tone : "nospec") + '">' + esc(p.health) + "</span></td>" +
       '<td class="num">' + num(p.rules.length) + "</td>" +
-      '<td class="num">' + (p.rules.length ? '<div class="pv"><span>' + p.proven.length + '<small> /' + p.rules.length + '</small></span><i class="pbar"><b style="width:' + pct + '%"></b></i></div>' : '<span class="zero">–</span>') + "</td>" +
-      '<td class="num">' + num(p.broken.length, "c-bad") + '</td><td class="num">' + num(p.outdated, "c-warn") + '</td><td class="num">' + num(p.untested.length) + '</td><td class="num">' + num(p.stories.length) + '</td><td class="num">' + cov + "</td></tr>";
+      '<td class="bar">' + (p.rules.length ? ruleBar(p) : '<span class="zero">–</span>') + "</td>" +
+      '<td class="num">' + num(p.stories.length) + '</td><td class="num">' + cov + "</td></tr>";
   };
   function drawTable() {
     store.set("table:" + D.name, JSON.stringify(view));
@@ -315,7 +314,9 @@ var veridicModel = (D) => {
     const where = (r.cites || []).map((c) => '<span class="loc' + (c.resolves === false ? " gone" : "") + '">' + esc(c.cite) + "</span>").join("");
     const tests = (r.tests || []).map((x) => '<span class="loc">' + esc(x) + "</span>").join("");
     const checks = (r.checks || []).map((c) => "<li>" + esc(c.text || "") + "</li>").join("");
-    return '<button class="req' + (g ? " x" : "") + '"' + hid(g) + ' data-rule="' + esc(r.id) + '"><span class="mark ' + st.tone + '">' + st.mark + '</span><span class="tx"><span><span class="rid">' + esc(r.id) + "</span> " + t.head + '</span><div class="why">' + esc(st.label) + "</div>" +
+    // A rule the code changed under (or whose code is gone) gets a revision cloud and a Δ, as on a drawing.
+    const rev = st.key === "stale" || st.key === "lost";
+    return '<button class="req' + (rev ? " rev-cloud" : "") + (g ? " x" : "") + '"' + hid(g) + ' data-rule="' + esc(r.id) + '"><span class="mark ' + st.tone + '">' + (rev ? "Δ" : st.mark) + '</span><span class="tx"><span><span class="rid">' + esc(r.id) + "</span> " + t.head + '</span><div class="why">' + esc(st.label) + "</div>" +
       '<div class="more">' + (t.rest ? "<p>" + t.rest + "</p>" : "") + (checks ? '<div class="mh">Checks</div><ul>' + checks + "</ul>" : "") + (where ? '<div class="mh">In the code</div>' + where : "") + (tests ? '<div class="mh">Proven by</div>' + tests : "") + "</div></span></button>";
   }
   // ---- a part's sheet, in three tabs: Overview, Stories, Rules ----
@@ -371,8 +372,7 @@ var veridicModel = (D) => {
   }
   // A part's sheet: its head, the tabs, then only the open tab.
   function partHTML(p) {
-    const tone = p.specs.length ? p.tone : "none";
-    const head = '<div class="part-head"><div><h3' + (p.name.length > 40 ? ' class="long"' : "") + '><i class="sh ' + tone + '">' + SH[tone] + "</i>" + esc(p.name) + '</h3></div><button class="close" aria-label="Close">✕</button></div>';
+    const head = '<div class="part-head"><div><h3' + (p.name.length > 40 ? ' class="long"' : "") + ">" + esc(p.name) + '</h3></div><button class="close" aria-label="Close">✕</button></div>';
     if (!p.specs.length) return head + '<div class="cols"><div><div class="empty-req">Nothing describes ' + esc(p.name) + ' yet. Ask Claude to <b>write a spec for ' + esc(p.name) + "</b> (<code>/veridic:specs</code> does every part that has none).</div></div></div>";
     const rc = M.ruleCounts(p), n = { overview: null, stories: p.stories.length, rules: rc.all };
     const tabs = '<div class="tabs" role="tablist">' + TABS.map(([k, label]) => '<button role="tab" data-tab="' + k + '" aria-selected="' + (sheet.tab === k) + '">' + label + (n[k] != null ? '<span class="n">' + n[k] + "</span>" : "") + "</button>").join("") + "</div>";
@@ -455,13 +455,6 @@ var veridicModel = (D) => {
   const errs = D.errors || [];
   $("#foot").innerHTML = "<span>" + esc(M.title) + (counts.specs ? " · " + plural(counts.specs, "spec") + " · " + plural(counts.rules, "rule") : "") + "</span><span>Veridic · " + ago(D.generated).toLowerCase() + "</span>" +
     (errs.length ? '<details class="errs"><summary>' + plural(errs.length, "thing") + " Veridic couldn't check</summary>" + errs.map((e) => "<div>" + esc(e) + "</div>").join("") + "</details>" : "");
-
-  // ---- theme: the system's by default; the toggle pins light or dark ----
-  const dark = () => (document.documentElement.dataset.theme || (matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light")) === "dark";
-  const t0 = store.get("theme"); if (t0 === "light" || t0 === "dark") document.documentElement.dataset.theme = t0;
-  const paint = () => { $("#theme").innerHTML = dark() ? SUN : MOON; $("#theme").title = dark() ? "Light mode" : "Dark mode"; };
-  $("#theme").onclick = () => { const t = dark() ? "light" : "dark"; document.documentElement.dataset.theme = t; store.set("theme", t); paint(); };
-  paint();
 
   // ---- motion: rings fill, numbers count; confetti when every rule is true and proven ----
   const calm = matchMedia("(prefers-reduced-motion: reduce)").matches;

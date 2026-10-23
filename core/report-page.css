@@ -44,12 +44,6 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 a { color: inherit; }
 
 /* top bar */
-.top { display: flex; align-items: center; justify-content: space-between; padding: 22px 0; }
-.brand { display: flex; align-items: center; gap: 10px; font-weight: 600; letter-spacing: -.01em; }
-.logo { width: 26px; height: 26px; border-radius: 8px; background: linear-gradient(135deg, #e48a67, #c4603f); display: grid; place-items: center; color: #fff; box-shadow: 0 4px 12px rgba(217,119,87,.35); }
-.when { color: var(--ink3); font-size: 13px; display: flex; align-items: center; gap: 14px; }
-.icon-btn { width: 32px; height: 32px; border-radius: 10px; display: grid; place-items: center; color: var(--ink2); transition: background .2s; }
-.icon-btn:hover { background: var(--line); }
 
 /* hero */
 .hero { padding: 40px 0 12px; display: grid; grid-template-columns: 1fr auto; gap: 40px; align-items: center; }
@@ -60,8 +54,6 @@ a { color: inherit; }
 .verdict { font-family: var(--serif); font-weight: 400; font-size: clamp(34px, 5vw, 52px); line-height: 1.08; letter-spacing: -.01em; margin: 0; }
 .verdict em { font-style: italic; }
 .verdict .c-good { color: var(--good); } .verdict .c-warn { color: var(--warn); } .verdict .c-bad { color: var(--bad); }
-.about { color: var(--ink2); margin: 16px 0 0; max-width: 560px; }
-.about a { color: var(--ink); text-decoration-color: var(--line2); text-underline-offset: 3px; }
 .rings { display: flex; gap: 14px; }
 .ring { background: var(--card); border-radius: 20px; padding: 18px 14px 16px; width: 158px; box-shadow: var(--shadow); text-align: center; }
 .ring svg { width: 78px; height: 78px; display: block; margin: 0 auto 10px; transform: rotate(-90deg); }

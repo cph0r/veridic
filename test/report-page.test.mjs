@@ -280,3 +280,21 @@ test("tabs: each rule is in exactly one state, so the sheet's chart adds up", ()
   assert.deepEqual({ ...c }, { all: 4, attention: 1, weak: 1, untested: 1, proven: 1 });
   assert.equal(c.attention + c.weak + c.untested + c.proven, c.all);
 });
+
+test("blueprint: a part with some rules proven and the rest untested is 'Partly proven', not 'Not tested'", () => {
+  const m = load()(data({
+    modules: [{ id: "voice", name: "Voice", files: ["src/v.ts"], code: [] }, { id: "menu", name: "Menu", files: ["src/m.ts"], code: [] }],
+    specs: [
+      spec("specs/voice/spec.md", [rule("FR-001", "covered", { cites: [cite("src/v.ts")] }), rule("FR-002", "none", { cites: [cite("src/v.ts")] })]),
+      spec("specs/menu/spec.md", [rule("FR-001", "none", { cites: [cite("src/m.ts")] })]),
+    ],
+  }));
+  assert.equal(m.P.get("voice").health, "Partly proven");
+  assert.equal(m.P.get("menu").health, "Not tested");
+});
+
+test("blueprint: a saved view sorted by a column the table no longer has falls back to the default sort", () => {
+  const m = load()(partsData());
+  for (const k of ["broken", "outdated", "untested"]) assert.equal(m.cleanView({ sort: k, filter: "all" }).sort, null, k);
+  for (const k of ["name", "health", "rules", "proven", "stories", "covered"]) assert.equal(m.cleanView({ sort: k, filter: "all" }).sort, k, k);
+});

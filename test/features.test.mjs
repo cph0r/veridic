@@ -229,6 +229,7 @@ test("report: collects routes, each finding in plain words; the page escapes wha
   d.findings.push({ area: "API", severity: "high", kind: "x", where: "</script><script>alert(1)</script>", text: "", evidence: [] });
   const html = renderReport(d);
   assert.doesNotMatch(html, /<\/script><script>alert/);
+  assert.ok(html.indexOf("drawn as a blueprint") > html.indexOf("Veridic report. One calm page"), "the blueprint look is layered after the base styles");
   assert.equal(JSON.parse(html.match(/<script type="application\/json" id="data">([\s\S]*?)<\/script>/)[1]).routes.length, d.routes.length);
   r.done();
 });

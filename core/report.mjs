@@ -392,7 +392,7 @@ export async function collectReport(repo, { specs: specFiles } = {}) {
   return out;
 }
 
-/** The page: data embedded as JSON, rendered by report-page.js, styled by report-page.css. */
+/** The page: data embedded as JSON, rendered by report-page.js, styled by report-page.css with report-blueprint.css over it. */
 const asset = (name) => fs.readFileSync(new URL(`./${name}`, import.meta.url), "utf8");
 export function renderReport(data) {
   const json = JSON.stringify(data).replace(/</g, "\\u003c");
@@ -405,6 +405,7 @@ export function renderReport(data) {
 <meta name="color-scheme" content="light dark">
 <title>${title}</title>
 <style>${asset("report-page.css")}</style>
+<style>${asset("report-blueprint.css")}</style>
 </head>
 <body>
 <div id="app"></div>
