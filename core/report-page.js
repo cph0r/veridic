@@ -368,7 +368,7 @@ var veridicModel = (D) => {
       : !p.rules.length ? "No rules written yet."
       : [p.broken.length && plural(p.broken.length, "rule") + " broken", p.stale.length && p.stale.length + " out of date", p.lost.length && p.lost.length + " pointing at code that's gone", p.proven.length + " of " + p.rules.length + " proven"].filter(Boolean).join(" · ") + ".";
     const tone = p.specs.length ? p.tone : "none";
-    const head = '<div class="part-head"><div><h3' + (p.name.length > 40 ? ' class="long"' : "") + '><i class="sh ' + tone + '">' + SH[tone] + "</i>" + esc(p.name) + "</h3><p>" + summary + '</p><p class="path">' + esc(specLine(p)) + (p.covered && p.covered.total ? " · " + p.covered.covered + " of " + p.covered.total + " of its files described" : "") + '</p></div><button class="close" aria-label="Close">✕</button></div>';
+    const head = '<div class="part-head"><div><h3' + (p.name.length > 40 ? ' class="long"' : "") + '><i class="sh ' + tone + '">' + SH[tone] + "</i>" + esc(p.name) + "</h3><p>" + summary + '</p></div><button class="close" aria-label="Close">✕</button></div>';
     if (!p.specs.length) return head + '<div class="cols"><div><div class="empty-req">Nothing describes ' + esc(p.name) + ' yet. Ask Claude to <b>write a spec for ' + esc(p.name) + "</b> (<code>/veridic:specs</code> does every part that has none).</div></div></div>";
     const rc = M.ruleCounts(p), n = { overview: null, stories: p.stories.length, rules: rc.all };
     const tabs = '<div class="tabs" role="tablist">' + TABS.map(([k, label]) => '<button role="tab" data-tab="' + k + '" aria-selected="' + (sheet.tab === k) + '">' + label + (n[k] != null ? '<span class="n">' + n[k] + "</span>" : "") + "</button>").join("") + "</div>";
