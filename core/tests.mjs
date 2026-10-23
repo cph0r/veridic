@@ -539,11 +539,10 @@ export function testCoverage(repo, spec, opts = {}) {
     return [...targets].some((t) => reachCache.get(testFile).has(t));
   };
   // Specs often reuse ids (every spec has an FR-001). A plain tag for an id another spec also
-  // has, on a test that runs none of this spec's code, is that spec's rule: it doesn't count
-  // here, not even as tagged_only.
-  const specCode = new Set([...cited.values()].flatMap((c) => [...c]));
+  // has, on a test that doesn't run this rule's code, is the other spec's rule: it doesn't
+  // count here, not even as tagged_only (the same test --link uses to qualify a title).
   const shared = new Set(files.filter((f) => /(^|\/)spec\.md$/.test(f) && f !== specRel).flatMap((f) => [...safeRead(repo, f).matchAll(/\*\*((?:FR|SC|NFR|AC|INV)-\d+[a-z]?)\*\*/g)].map((m) => m[1])));
-  const tagged = findTaggedTests(repo, files).filter((t) => cited.has(t.id) && (t.todo || t.qual || t.spec || !shared.has(t.id) || reaches(t.file, specCode)) && (!t.qual || !forModule || t.qual === forModule) && (!t.spec || !specRel || t.spec === specRel || path.resolve(repo, t.spec) === path.resolve(opts.specPath)));
+  const tagged = findTaggedTests(repo, files).filter((t) => cited.has(t.id) && (t.todo || t.qual || t.spec || !shared.has(t.id) || reaches(t.file, cited.get(t.id))) && (!t.qual || !forModule || t.qual === forModule) && (!t.spec || !specRel || t.spec === specRel || path.resolve(repo, t.spec) === path.resolve(opts.specPath)));
 
   const named = [...new Set(tagged.filter((t) => !t.todo).map((t) => t.file))];
   const run = opts.run ? (opts.runner ? opts.runner(repo, named) : runByFramework(repo, named, files)) : null;

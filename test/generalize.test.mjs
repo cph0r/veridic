@@ -1183,3 +1183,17 @@ test("FR-017: an id two of the part's spec files have is always written with its
   assert.equal(line, 'it("FR-001 (voice): adds one", () => { expect(a(1)).toBe(2); });');
   assert.ok(wl.rules.every((x) => x.ambiguous), "both files' FR-001 are flagged");
 });
+
+test("FR-003: a plain tag for an id another spec has counts only if the test runs that rule's own code", async () => {
+  const { testCoverage } = await import("../core/tests.mjs");
+  const { repo } = await sharedIdsRepo();
+  fs.writeFileSync(path.join(repo, "src/picks.js"), "export const picks = () => [];\n");
+  fs.mkdirSync(path.join(repo, "specs/restaurant"));
+  // restaurant's FR-001 is about picks.js; its FR-002 cites v.js, which the voice test does run
+  fs.writeFileSync(path.join(repo, "specs/restaurant/spec.md"), "- **FR-001**: Picks are private. [evidence: src/picks.js:1]\n- **FR-002**: Orders exist. [evidence: src/v.js:1-3]\n");
+  fs.writeFileSync(path.join(repo, "src/v.test.js"), 'import { order } from "./v";\nit("FR-001: places an order", () => { expect(order(1).placed).toBe(true); });\n');
+  const spec = path.join(repo, "specs/restaurant/spec.md");
+  const r = testCoverage(repo, fs.readFileSync(spec, "utf8"), { specPath: spec });
+  fs.rmSync(repo, { recursive: true, force: true });
+  assert.equal(r.requirements.find((q) => q.id === "FR-001").status, "none");
+});
