@@ -1,4 +1,4 @@
-// Next.js routes, read from files (no build): app router route handlers. Each package whose
+// Next.js routes, read from files (no build): app router route handlers and pages/api. Each package whose
 // package.json depends on `next` is an app. A file path becomes a URL as in nextjs-routes
 // (github.com/tatethurston/nextjs-routes, MIT): (group) folders drop, [id] is :id, [...slug]
 // and [[...slug]] are *, @slot and _private folders aren't routes.
@@ -6,7 +6,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { codeOnly } from "../graph.mjs";
-import { functionExtent } from "./paths.mjs";
+import { functionExtent, jsonc } from "./paths.mjs";
 
 const HTTP = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"];
 const SRC = /\.(?:[cm]?[jt]sx?)$/;
@@ -96,6 +96,76 @@ function handlers(src) {
   return out.sort((a, b) => a.start - b.start || a.method.localeCompare(b.method));
 }
 
+/**
+ * A pages/api file's handler: the default export's function (named, anonymous, or the
+ * function a wrapper is given: `export default withAuth(handler)`), its lines and its text.
+ */
+function pagesHandler(src) {
+  const code = codeOnly(src);
+  // An anonymous default function or arrow gets a placeholder name; lines don't move.
+  const named = src
+    .replace(/\bexport\s+default\s+(async\s+)?function\s*\(/, (m, a) => `export default ${a ?? ""}function __default(`)
+    .replace(/\bexport\s+default\s+(async\s+)?(?=\([^)]*\)\s*(?::[^=]+)?=>|[\w$]+\s*=>)/, (m, a) => `const __default = ${a ?? ""}`);
+  let name = code.match(/\bexport\s+default\s+(?:async\s+)?function\s+([\w$]+)/)?.[1];
+  if (!name && named !== src) name = "__default";
+  if (!name) {
+    const e = code.match(/\bexport\s+default\s+([\w$.]+)\s*(?:\(\s*([\w$]+)\s*[,)])?/);
+    if (!e) return null;
+    name = e[2] ?? e[1]; // withAuth(handler) -> handler
+  }
+  let ext = functionExtent(named, name);
+  if (!ext) {
+    // Handed to a library (`export default NextAuth(authOptions)`): the route is that line.
+    const at = code.search(/\bexport\s+default\b/);
+    if (at < 0) return null;
+    const line = src.slice(0, at).split("\n").length;
+    return { start: line, end: line, body: "" };
+  }
+  const lines = src.split("\n").slice(ext[0] - 1, ext[1]).join("\n");
+  return { start: ext[0], end: ext[1], body: lines };
+}
+
+/**
+ * The methods a pages/api handler answers: those an early exit lets through
+ * (`if (req.method !== "POST") return …`), else those it compares (`req.method === "GET"`,
+ * `case "POST":` in a switch on the method), else every method (ALL).
+ */
+function pagesMethods(body) {
+  const code = codeOnly(body.replace(/["']([A-Z]+)["']/g, (m, x) => `__${x}__`)); // keep the method names through blanking
+  const alias = code.match(/\{\s*method\s*\}\s*=\s*req\b/) ? "(?:req\\.method|\\bmethod)" : "req\\.method";
+  const M = "(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)";
+  const neg = code.match(new RegExp(`if\\s*\\(\\s*${alias}\\s*!==?\\s*__${M}__((?:\\s*&&\\s*${alias}\\s*!==?\\s*__${M}__)*)\\s*\\)`));
+  if (neg) return [...neg[0].matchAll(new RegExp(`__${M}__`, "g"))].map((m) => m[1]);
+  const pos = new Set([...code.matchAll(new RegExp(`${alias}\\s*===?\\s*__${M}__`, "g"))].map((m) => m[1]));
+  if (new RegExp(`switch\\s*\\(\\s*${alias}\\s*\\)`).test(code)) for (const m of code.matchAll(new RegExp(`case\\s+__${M}__\\s*:`, "g"))) pos.add(m[1]);
+  return pos.size ? [...pos] : ["ALL"];
+}
+
+/** The file a module specifier names, from `from` in app `dir`: relative, or a tsconfig/jsconfig path alias (`@/x`). */
+function resolveSpec(g, dir, from, spec) {
+  const bases = [];
+  if (spec.startsWith(".")) bases.push(path.posix.join(path.posix.dirname(from), spec));
+  else
+    for (const n of ["tsconfig.json", "jsconfig.json"]) {
+      let cfg = null;
+      try {
+        cfg = JSON.parse(jsonc(textOf(g, dir ? `${dir}/${n}` : n) ?? "null"));
+      } catch {}
+      const o = cfg?.compilerOptions ?? {};
+      for (const [k, targets] of Object.entries(o.paths ?? {})) {
+        const pre = k.replace(/\*$/, "");
+        if (!spec.startsWith(pre)) continue;
+        for (const t of targets) bases.push(path.posix.join(dir, o.baseUrl ?? ".", t.replace(/\*$/, "") + spec.slice(pre.length)));
+      }
+    }
+  for (const b of bases)
+    for (const e of ["", ".ts", ".tsx", ".js", ".jsx", ".mjs", "/index.ts", "/index.tsx", "/index.js"]) {
+      const f = path.posix.normalize(b + e);
+      if (/\.[cm]?[jt]sx?$/.test(f) && textOf(g, f) != null) return f;
+    }
+  return null;
+}
+
 function nextRoutes(g) {
   const routes = [];
   for (const dir of appDirs(g)) {
@@ -104,6 +174,21 @@ function nextRoutes(g) {
     for (const f of g.files ?? []) {
       if (!f.startsWith(prefix) || ignored(f) || !SRC.test(f)) continue;
       const rel = f.slice(prefix.length);
+      const api = rel.match(/^(?:src\/)?pages\/(api(?:\/.*)?)\.[cm]?[jt]sx?$/);
+      if (api) {
+        const segs = api[1].split("/");
+        if (segs.at(-1) === "index") segs.pop();
+        if (segs.some((s) => s.startsWith("_"))) continue;
+        const url = (base + appPath(segs)).replace(/(.)\/$/, "$1") || "/";
+        // `export { default } from "@/ee/…"`: the handler is in the file it re-exports.
+        let file = f;
+        const re = (textOf(g, f) ?? "").match(/\bexport\s*\{\s*default\s*\}\s*from\s*["']([^"']+)["']/);
+        if (re) file = resolveSpec(g, dir, f, re[1]) ?? f;
+        let h = pagesHandler(textOf(g, file) ?? "");
+        if (!h && re) { const line = (textOf(g, f) ?? "").slice(0, re.index).split("\n").length; h = { start: line, end: line, body: "" }; } // re-exports a file that isn't there
+        if (h) for (const method of pagesMethods(h.body)) routes.push({ id: `${method} ${url}`, method, path: url, file, start: h.start, end: h.end, guards: [] });
+        continue;
+      }
       const m = rel.match(/^(?:src\/)?app\/(?:(.*)\/)?route\.[cm]?[jt]sx?$/);
       if (!m) continue;
       const p = appPath(m[1] ? m[1].split("/") : []);

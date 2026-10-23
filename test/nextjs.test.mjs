@@ -66,3 +66,44 @@ test("next: an app is found from package.json on disk, which the code index does
   done();
   assert.deepEqual(got, ["GET /api/x", "POST /api/y"]);
 });
+
+test("next: pages/api routes and their methods", () => {
+  const { g, done } = fakeRepo({
+    ...PKG,
+    "pages/api/users/[id].ts": 'export default async function handler(req, res) {\n  if (req.method === "GET") return res.json({});\n  if (req.method === "DELETE") return res.status(204).end();\n  res.status(405).end();\n}\n',
+    "pages/api/ping.ts": "export default function handler(req, res) {\n  res.json({ ok: true });\n}\n",
+    "pages/api/orders/index.ts": 'export default async function (req, res) {\n  switch (req.method) {\n    case "POST":\n      return res.status(201).json({});\n  }\n}\n',
+    "pages/api/login.ts": 'export default async function handler(req, res) {\n  if (req.method !== "POST" && req.method !== "PUT") return res.status(405).end();\n  res.json({});\n}\n',
+    "pages/api/alias.ts": 'export default function handler(req, res) {\n  const { method } = req;\n  if (method === "GET") return res.json([]);\n  if (method === "PUT") return res.json({});\n}\n',
+    "pages/api/wrapped.ts": 'async function handler(req, res) {\n  res.json({});\n}\n\nexport default withAuth(handler);\n',
+    "pages/api/_middleware.ts": "export default function m() {}\n",
+    "pages/about.tsx": "export default function About() { return null; }\n",
+  });
+  const rs = routeInventory(g).routes.filter((r) => r.framework === "nextjs");
+  done();
+  assert.deepEqual(rs.map((r) => r.id).sort(), ["ALL /api/ping", "ALL /api/wrapped", "DELETE /api/users/:id", "GET /api/alias", "GET /api/users/:id", "POST /api/login", "POST /api/orders", "PUT /api/alias", "PUT /api/login"]);
+  const w = rs.find((r) => r.id === "ALL /api/wrapped");
+  assert.deepEqual([w.start, w.end], [1, 3], "a wrapped default export spans its handler");
+  const u = rs.find((r) => r.id === "GET /api/users/:id");
+  assert.deepEqual([u.start, u.end], [1, 5]);
+});
+
+test("next: pages/api handlers given to a library, written as an arrow, or re-exported from another file", () => {
+  const { g, done } = fakeRepo({
+    ...PKG,
+    "tsconfig.json": JSON.stringify({ compilerOptions: { paths: { "@/*": ["./*"] } } }),
+    "pages/api/auth/[...nextauth].ts": 'import NextAuth from "next-auth";\nimport { authOptions } from "@/lib/auth";\n\nexport default NextAuth(authOptions);\n',
+    "pages/api/pages.ts": 'export default async (req, res) => {\n  if (req.method !== "POST") return res.status(405).end();\n  res.json({});\n};\n',
+    "pages/api/jobs/notify.ts": 'export { default } from "@/ee/jobs/notify";\n',
+    "ee/jobs/notify.ts": 'export default async function handler(req, res) {\n  if (req.method === "POST") return res.json({});\n}\n',
+    "pages/api/jobs/gone.ts": '// moved\nexport { default } from "@/ee/jobs/gone";\n',
+  });
+  const rs = routeInventory(g).routes.filter((r) => r.framework === "nextjs");
+  done();
+  const by = Object.fromEntries(rs.map((r) => [r.id, [r.file, r.start, r.end]]));
+  assert.deepEqual(by["ALL /api/auth/*"], ["pages/api/auth/[...nextauth].ts", 4, 4]);
+  assert.deepEqual(by["POST /api/pages"], ["pages/api/pages.ts", 1, 4]);
+  assert.deepEqual(by["POST /api/jobs/notify"], ["ee/jobs/notify.ts", 1, 3], "the route's handler is in the file it re-exports");
+  assert.deepEqual(by["ALL /api/jobs/gone"], ["pages/api/jobs/gone.ts", 2, 2], "a re-export of a missing file is still a route, on its line");
+  assert.equal(rs.length, 4);
+});
