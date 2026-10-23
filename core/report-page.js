@@ -73,19 +73,59 @@ var veridicModel = (D) => {
   specs.sort((a, b) => TONE[a.tone] - TONE[b.tone] || trouble(b) - trouble(a) || b.rules.length - a.rules.length);
   const S = new Map(specs.map((s) => [s.path, s]));
 
-  // The specs table: filter by health and text, sort by any column (default: worst first).
+  // ---- the parts of the app, each with its one spec ----
+  // A spec file belongs to the part whose code its rules cite most (ties: the first);
+  // with no citations, to the part its folder is named after (orders, orders-…); else
+  // it stands alone as a part of its own ("other"). A part may have no spec yet.
+  const partDefs = [
+    ...(D.modules || []).map((m) => ({ id: m.id, name: m.name, kind: "module", files: new Set([...(m.files || []), ...(m.code || [])]) })),
+    ...(D.screens || []).map((g) => ({ id: g.id, name: g.name, kind: "screens", files: new Set(g.files || []) })),
+  ];
+  const home = new Map(); // spec path -> part id
+  for (const sp of specs) {
+    const cited = sp.rules.flatMap((r) => (r.cites || []).map((c) => c.file).filter(Boolean));
+    let best = null;
+    for (const d of partDefs) { const n = cited.filter((f) => d.files.has(f)).length; if (n && (!best || n > best[1])) best = [d.id, n]; }
+    const dir = String(sp.path).split("/").slice(-2)[0];
+    const named = partDefs.find((d) => dir === d.id || dir.startsWith(d.id + "-"));
+    home.set(sp.path, best ? best[0] : named ? named.id : sp.path);
+  }
+  const partOf = (specPath) => home.get(specPath) || specPath;
+  const coverOf = new Map(((D.coverage || {}).parts || []).map((c) => [c.id, c]));
+  const makePart = (id, name, kind, ss) => {
+    const all = (k) => ss.flatMap((x) => x[k]);
+    const p = { id, name, kind, specs: ss, path: ss.length ? ss[0].path : null, rules: all("rules"), stories: all("stories"), broken: all("broken"), stale: all("stale"), lost: all("lost"), proven: all("proven"), weak: all("weak"), untested: all("untested") };
+    p.outdated = p.stale.length + p.lost.length;
+    p.files = new Set(p.rules.flatMap((r) => (r.cites || []).map((c) => c.file).filter(Boolean))).size;
+    p.tone = !p.rules.length ? "none" : p.broken.length ? "bad" : p.outdated || p.weak.length ? "warn" : p.untested.length ? "todo" : "good";
+    p.health = !ss.length ? "No spec" : { bad: "Broken", warn: p.outdated ? "Out of date" : "Weak tests", todo: "Not tested", good: "Proven", none: "No rules" }[p.tone];
+    const c = coverOf.get(id);
+    p.covered = c ? { total: c.total, covered: c.covered } : null;
+    return p;
+  };
+  const parts = [
+    ...partDefs.map((d) => makePart(d.id, d.name, d.kind, specs.filter((x) => home.get(x.path) === d.id))),
+    ...specs.filter((x) => !partDefs.some((d) => d.id === home.get(x.path))).map((x) => makePart(x.path, x.name, "other", [x])),
+  ];
+  const PTONE = (p) => (p.specs.length ? TONE[p.tone] : 9); // parts with no spec last
+  const ptrouble = (p) => p.broken.length + p.outdated;
+  parts.sort((a, b) => PTONE(a) - PTONE(b) || ptrouble(b) - ptrouble(a) || b.rules.length - a.rules.length);
+
+  // The table: one row per part; filter by health and text, sort by any column (default: worst first).
   const FILTERS = {
     all: () => true, fix: (s) => s.broken.length || s.outdated, broken: (s) => s.broken.length,
-    stale: (s) => s.outdated, untested: (s) => s.untested.length, proven: (s) => s.tone === "good",
+    stale: (s) => s.outdated, untested: (s) => s.untested.length, proven: (s) => s.tone === "good" && s.specs.length > 0,
+    nospec: (s) => !s.specs.length,
   };
   const SORTS = {
     name: (s) => s.name.toLowerCase(), health: (s) => TONE[s.tone], rules: (s) => s.rules.length,
     proven: (s) => (s.rules.length ? s.proven.length / s.rules.length : -1), broken: (s) => s.broken.length,
     outdated: (s) => s.outdated, untested: (s) => s.untested.length, stories: (s) => s.stories.length, files: (s) => s.files,
+    covered: (s) => (s.covered && s.covered.total ? s.covered.covered / s.covered.total : -1),
   };
   const rows = ({ q = "", filter = "all", sort = null, dir = "desc" } = {}) => {
     const needle = String(q).trim().toLowerCase();
-    const out = specs.filter((s) => (FILTERS[filter] || FILTERS.all)(s) && (!needle || (s.name + " " + s.path).toLowerCase().includes(needle)));
+    const out = parts.filter((s) => (FILTERS[filter] || FILTERS.all)(s) && (!needle || (s.name + " " + s.id + " " + s.specs.map((x) => x.path).join(" ")).toLowerCase().includes(needle)));
     if (!sort || !SORTS[sort]) return out; // already worst first
     const k = SORTS[sort], sign = dir === "asc" ? 1 : -1;
     return out.map((s, i) => [s, i]).sort(([a, i], [b, j]) => { const x = k(a), y = k(b); return x < y ? -sign : x > y ? sign : i - j; }).map(([s]) => s);
@@ -143,7 +183,7 @@ var veridicModel = (D) => {
     const items = size > 0 ? list.slice((at - 1) * size, at * size) : list;
     return { items, page: at, pages, total, from: total ? (size > 0 ? (at - 1) * size + 1 : 1) : 0, to: size > 0 ? Math.min(at * size, total) : total };
   };
-  return { rows, page, specs, S, counts, fix, later, verdict, title: app.title || D.name, stateOf, statusOf, ruleText, RANK, plural, esc, cap, REQ };
+  return { rows, page, parts, partOf, specs, S, counts, fix, later, verdict, title: app.title || D.name, stateOf, statusOf, ruleText, RANK, plural, esc, cap, REQ };
 };
 
 (() => {

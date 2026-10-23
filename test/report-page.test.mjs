@@ -123,7 +123,7 @@ test("report page: no coverage data, no gauge", () => {
 test("report page: the specs table filters by health and text, and sorts by any column", () => {
   const m = load()(data());
   // orders: 1 proven, 1 broken, 1 stale, 1 untested; menu: 1 proven, 1 pointing at code that's gone
-  const rows = (o) => [...m.rows(o).map((r) => r.path)];
+  const rows = (o) => [...m.rows(o).map((r) => (r.specs[0] ? r.specs[0].path : r.id))]; // a part, by its spec
   assert.deepEqual(rows({}), ["specs/orders/spec.md", "specs/menu/spec.md"], "worst first by default");
   assert.deepEqual(rows({ filter: "broken" }), ["specs/orders/spec.md"]);
   assert.deepEqual(rows({ filter: "stale" }), ["specs/orders/spec.md", "specs/menu/spec.md"], "out of date includes code gone");
@@ -131,7 +131,7 @@ test("report page: the specs table filters by health and text, and sorts by any 
   assert.deepEqual(rows({ q: "MENU" }), ["specs/menu/spec.md"]);
   assert.deepEqual(rows({ sort: "rules", dir: "asc" }), ["specs/menu/spec.md", "specs/orders/spec.md"]);
   assert.deepEqual(rows({ sort: "name", dir: "asc" }), ["specs/menu/spec.md", "specs/orders/spec.md"]);
-  const orders = m.rows({}).find((r) => r.path === "specs/orders/spec.md");
+  const orders = m.rows({}).find((r) => r.specs.some((x) => x.path === "specs/orders/spec.md"));
   assert.deepEqual({ rules: orders.rules.length, proven: orders.proven.length, broken: orders.broken.length, outdated: orders.outdated, untested: orders.untested.length, files: orders.files, health: orders.health }, { rules: 4, proven: 1, broken: 1, outdated: 1, untested: 2, files: 1, health: "Broken" });
 });
 
@@ -144,4 +144,62 @@ test("report page: the specs table pages its rows", () => {
   assert.equal(m.page(list, { page: 0, size: 10 }).page, 1);
   assert.equal(m.page(list, { page: 2, size: 0 }).items.length, 23, "size 0 shows all");
   assert.deepEqual({ ...m.page([], { page: 1, size: 10 }) }.pages, 1);
+});
+
+// ---- parts: one row per part of the app, its spec files grouped ----
+const partsData = (over = {}) => data({
+  modules: [
+    { id: "orders", name: "Orders", files: ["src/orders.ts"], code: [], routes: [], specs: [], uses: [], tests: { untested: [] }, data: { owns: [] } },
+    { id: "menu", name: "Menu", files: ["src/menu.ts"], code: [], routes: [], specs: [], uses: [], tests: { untested: [] }, data: { owns: [] } },
+    { id: "tag", name: "Tag", files: ["src/tag.ts"], code: [], routes: [], specs: [], uses: [], tests: { untested: [] }, data: { owns: [] } },
+  ],
+  specs: [
+    spec("specs/orders/spec.md", [rule("FR-001", "covered", { cites: [cite("src/orders.ts")] }), rule("FR-002", "none", { cites: [cite("src/orders.ts")] })]),
+    spec("specs/orders-payment/spec.md", [rule("FR-001", "broken", { cites: [cite("src/orders.ts")] })]),
+    spec("specs/menu-live/spec.md", [rule("FR-001", "none", { cites: [cite("src/menu.ts")] })]),
+    spec("specs/notes/spec.md", [rule("FR-001", "none", { cites: [] })]),
+  ],
+  ...over,
+});
+
+test("parts: spec files group into their part by what they cite", () => {
+  const m = load()(partsData());
+  const orders = m.rows().find((p) => p.id === "orders");
+  assert.deepEqual([...orders.specs.map((s) => s.path)].sort(), ["specs/orders-payment/spec.md", "specs/orders/spec.md"]);
+  assert.equal(orders.rules.length, 3);
+  assert.equal(orders.health, "Broken");
+  assert.equal(m.partOf("specs/menu-live/spec.md"), "menu");
+});
+
+test("parts: a spec citing two parts equally goes to the first", () => {
+  const m = load()(partsData({ specs: [spec("specs/both/spec.md", [rule("FR-001", "none", { cites: [cite("src/menu.ts"), cite("src/orders.ts")] })])] }));
+  assert.equal(m.partOf("specs/both/spec.md"), "orders");
+});
+
+test("parts: a spec with no part is in Other specs and in the totals", () => {
+  const m = load()(partsData());
+  const other = m.rows().find((p) => p.specs.some((s) => s.path === "specs/notes/spec.md"));
+  assert.equal(other.kind, "other");
+  assert.equal(m.counts.rules, 5);
+});
+
+test("parts: a part with no spec is a row and adds no rules", () => {
+  const m = load()(partsData());
+  const tag = m.rows().find((p) => p.id === "tag");
+  assert.equal(tag.health, "No spec");
+  assert.equal(tag.rules.length, 0);
+  assert.deepEqual([...m.rows({ filter: "nospec" }).map((p) => p.id)], ["tag"]);
+  assert.equal(m.counts.rules, 5, "headline totals count spec files, not parts");
+  assert.equal(m.counts.specs, 4);
+});
+
+test("parts: without parts, each spec is its own row", () => {
+  const m = load()(data({ modules: [] }));
+  assert.equal(m.rows().length, 2);
+  assert.ok(m.rows().every((p) => p.kind === "other" && p.specs.length === 1));
+});
+
+test("parts: headline totals are the same as before grouping", () => {
+  const m = load()(data());
+  assert.deepEqual({ rules: m.counts.rules, proven: m.counts.proven, broken: m.counts.broken, stale: m.counts.stale, lost: m.counts.lost, specs: m.counts.specs }, { rules: 6, proven: 2, broken: 1, stale: 1, lost: 1, specs: 2 });
 });
