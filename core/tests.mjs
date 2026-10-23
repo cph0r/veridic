@@ -18,6 +18,9 @@ import path from "node:path";
 import { parseSpec, makeResolver } from "./citations.mjs";
 import { basisOf, basisComment } from "./basis.mjs";
 
+/** The name a qualified title uses for a spec file: its folder (specs/voice-conversation/spec.md -> voice-conversation). */
+export const specQual = (specPath) => String(specPath ?? "").match(/(?:^|\/)([^/]+)\/[^/]*spec\.md$/)?.[1] ?? null;
+
 const TEST_FILE = /(^|\/)(__tests__|tests?)\/.*\.[cm]?[jt]sx?$|\.(test|spec)\.[cm]?[jt]sx?$/;
 // Modifiers: skipped (todo, skip), focused, and expected to fail (vitest it.fails, jest test.failing).
 const TITLE = /(?<![\w$.])(x?)(?:it|test|describe)(?:\.(todo|skip|only|concurrent|fails|failing))?\s*\(\s*(["'`])((?:(?!\3).)*)\3/g;
@@ -526,16 +529,21 @@ export function testCoverage(repo, spec, opts = {}) {
   const testFiles = files.filter((f) => TEST_FILE.test(f) && !f.includes("node_modules/") && /\b(?:it|test)(?:\.\w+)?\s*\(/.test(safeRead(repo, f)));
 
   const specRel = opts.specPath ? path.relative(repo, path.resolve(opts.specPath)) : null;
-  // A qualified title ("FR-001 (orders): …") counts only for that module: the one asked for,
-  // else the one the spec is filed under (specs/<module>/spec.md).
-  const forModule = opts.module ?? specRel?.match(/(?:^|\/)([^/]+)\/[^/]*spec\.md$/)?.[1] ?? null;
-  const tagged = findTaggedTests(repo, files).filter((t) => cited.has(t.id) && (!t.qual || !forModule || t.qual === forModule) && (!t.spec || !specRel || t.spec === specRel || path.resolve(repo, t.spec) === path.resolve(opts.specPath)));
+  // A qualified title ("FR-001 (orders): …") counts only for that spec: the folder it is filed
+  // under (specs/<folder>/spec.md), else the part asked for. A part's spec files can share ids.
+  const forModule = specQual(specRel) ?? opts.module ?? null;
   const checks = (t) => t.strength === "weak" || t.strength === "strong";
   const reachCache = new Map();
   const reaches = (testFile, targets) => {
     if (!reachCache.has(testFile)) reachCache.set(testFile, reach(repo, testFile, fileSet));
     return [...targets].some((t) => reachCache.get(testFile).has(t));
   };
+  // Specs often reuse ids (every spec has an FR-001). A plain tag for an id another spec also
+  // has, on a test that runs none of this spec's code, is that spec's rule: it doesn't count
+  // here, not even as tagged_only.
+  const specCode = new Set([...cited.values()].flatMap((c) => [...c]));
+  const shared = new Set(files.filter((f) => /(^|\/)spec\.md$/.test(f) && f !== specRel).flatMap((f) => [...safeRead(repo, f).matchAll(/\*\*((?:FR|SC|NFR|AC|INV)-\d+[a-z]?)\*\*/g)].map((m) => m[1])));
+  const tagged = findTaggedTests(repo, files).filter((t) => cited.has(t.id) && (t.todo || t.qual || t.spec || !shared.has(t.id) || reaches(t.file, specCode)) && (!t.qual || !forModule || t.qual === forModule) && (!t.spec || !specRel || t.spec === specRel || path.resolve(repo, t.spec) === path.resolve(opts.specPath)));
 
   const named = [...new Set(tagged.filter((t) => !t.todo).map((t) => t.file))];
   const run = opts.run ? (opts.runner ? opts.runner(repo, named) : runByFramework(repo, named, files)) : null;

@@ -8,7 +8,7 @@ import { execFileSync } from "node:child_process";
 import { specHomes } from "./parts.mjs";
 import fs from "node:fs";
 import path from "node:path";
-import { testCoverage, testsIn } from "./tests.mjs";
+import { testCoverage, testsIn, specQual } from "./tests.mjs";
 import { testRecipe, exampleTest } from "./recipe.mjs";
 
 // Coverage statuses, in the work list's words.
@@ -64,8 +64,8 @@ export async function workList(repo, moduleId, opts = {}) {
   // Handlers of routes that move money or delete: rules citing them come first.
   const risky = (data.routes ?? []).filter((r) => r.module === m.id && (r.moves_money || r.effect === "destructive")).map((r) => r.handler.match(/^(.*):(\d+)-(\d+)$/)).filter(Boolean);
   const touchesRisky = (cites) => cites.some((c) => { const [, f, a, b] = c.match(/^(.*):(\d+)(?:-(\d+))?$/) ?? []; return risky.some(([, hf, s, e]) => hf === f && Number(a) <= Number(e) && Number(b ?? a) >= Number(s)); });
-  // Other specs' coverage, for ids that repeat across specs.
-  const others = files.filter((f) => /(^|\/)spec\.md$/.test(f) && !own.includes(f)).map((f) => ({ f, text: read(repo, f) })).filter((x) => x.text);
+  // Every other spec's coverage, for ids that repeat across specs: another part's, or this part's other files.
+  const others = files.filter((f) => /(^|\/)spec\.md$/.test(f)).map((f) => ({ f, text: read(repo, f) })).filter((x) => x.text);
   const reachedBy = (cov, id) => { const r = cov.requirements.find((x) => x.id === id); return new Set([...(r?.tests ?? []).map((t) => t.at.split(":")[0]), ...(r?.related_tests ?? [])]); };
   const otherCov = new Map();
   const covOf = (o) => otherCov.get(o.f) ?? otherCov.set(o.f, testCoverage(repo, o.text, { specPath: path.join(repo, o.f) })).get(o.f);
@@ -81,14 +81,14 @@ export async function workList(repo, moduleId, opts = {}) {
     for (const id of ids) {
       const r = byId.get(id);
       if (!r || !(r.cites ?? []).length) {
-        rules.push({ id, spec, status: "untested", text: text.split("\n").find((l) => RULE.test(l) && l.includes(id))?.replace(/^\s*-?\s*\*\*[\w-]+\*\*:?\s*|^#+\s*[\w-]+:?\s*/, "").trim() ?? "", checks: [], cites: [], candidates: [], target: null, risk: id.startsWith("INV") ? 1 : 2, ambiguous: false, reason: "no cited code" });
+        rules.push({ id, spec, status: "untested", text: text.split("\n").find((l) => RULE.test(l) && l.includes(id))?.replace(/^\s*-?\s*\*\*[\w-]+\*\*:?\s*|^#+\s*[\w-]+:?\s*/, "").trim() ?? "", checks: [], cites: [], candidates: [], target: null, risk: id.startsWith("INV") ? 1 : 2, ambiguous: false, qual: specQual(spec) ?? m.id, reason: "no cited code" });
         continue;
       }
       const cited = [...new Set(r.cites.map((c) => c.split(":")[0]))];
       const rec = recipeOf(cited[0]);
       const candidates = (r.related_tests ?? []).flatMap((f) => testsIn(repo, f).filter((t) => (t.strength === "strong" || t.strength === "weak") && !t.title.includes(id)).map((t) => ({ at: `${f}:${t.line}`, title: t.title, strength: t.strength })));
       const mine = reachedBy(cov, id);
-      const ambiguous = others.some((o) => covOf(o).requirements.some((x) => x.id === id) && [...reachedBy(covOf(o), id)].some((f) => mine.has(f)));
+      const ambiguous = others.some((o) => o.f !== spec && covOf(o).requirements.some((x) => x.id === id) && [...reachedBy(covOf(o), id)].some((f) => mine.has(f)));
       rules.push({
         id,
         spec,
@@ -104,6 +104,7 @@ export async function workList(repo, moduleId, opts = {}) {
         target: (rec && exampleTest(repo, rec, cited[0])) ?? targetFor(rec, cited[0]),
         risk: touchesRisky(r.cites) ? 0 : id.startsWith("INV") ? 1 : 2,
         ambiguous,
+        qual: specQual(spec) ?? m.id,
       });
     }
   }
@@ -144,7 +145,7 @@ export function workListMarkdown(wl) {
     for (const h of r.helpers) L.push(`- helper: \`${h.file}\`${h.note ? `: ${h.note.split("\n")[0]}` : ""}`);
   }
   L.push("", "| rule | status | needs | link candidates | test file |", "|---|---|---|---|---|");
-  for (const r of wl.rules) L.push(`| ${r.id}${r.ambiguous ? ` (title: \`${r.id} (${wl.module.id}): …\`)` : ""} | ${r.status}${r.proven === false ? " (not proven)" : ""}${r.reason ? `: ${r.reason}` : ""} | ${r.text.replace(/\s*\n\s*/g, " ").replace(/\|/g, "\\|")}${r.checks.length ? ` (${r.checks.join(", ")})` : ""}${r.cites.length ? `<br>${r.cites.map((c) => `\`${c}\``).join(" ")}` : ""} | ${r.candidates.slice(0, 6).map((c) => `\`${c.at}\` ${c.title.slice(0, 80).replace(/\|/g, "\\|")}`).join("<br>") || "—"} | ${r.target ? `\`${r.target}\`` : "—"} |`);
+  for (const r of wl.rules) L.push(`| ${r.id}${r.ambiguous ? ` (title: \`${r.id} (${r.qual}): …\`, link: \`${r.id}@${r.qual}=…\`)` : ""} | ${r.status}${r.proven === false ? " (not proven)" : ""}${r.reason ? `: ${r.reason}` : ""} | ${r.text.replace(/\s*\n\s*/g, " ").replace(/\|/g, "\\|")}${r.checks.length ? ` (${r.checks.join(", ")})` : ""}${r.cites.length ? `<br>${r.cites.map((c) => `\`${c}\``).join(" ")}` : ""} | ${r.candidates.slice(0, 6).map((c) => `\`${c.at}\` ${c.title.slice(0, 80).replace(/\|/g, "\\|")}`).join("<br>") || "—"} | ${r.target ? `\`${r.target}\`` : "—"} |`);
   if (wl.code?.length) L.push("", "## Cited code", "", ...wl.code.flatMap((c) => [`\`${c.cite}\``, "```", ...c.lines, "```"]));
   L.push("", ...wl.next.map((n) => `Next: ${n}`));
   return L.join("\n") + "\n";

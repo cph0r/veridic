@@ -1095,3 +1095,73 @@ test("final: tests --module works on a screen part too, with its own spec", asyn
   assert.equal(wl.module.name, "Guest screens");
   fs.rmSync(repo, { recursive: true, force: true });
 });
+
+// One part, two spec files that reuse the same ids (specs/voice and specs/voice-conversation).
+async function sharedIdsRepo() {
+  const { execFileSync } = await import("node:child_process");
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "veridic-shared-"));
+  const files = {
+    "package.json": JSON.stringify({ devDependencies: { vitest: "1" } }),
+    "src/v.js": "export function order(x) {\n  return { placed: x > 0 };\n}\nexport function greet() {\n  return 'hi';\n}\n",
+    "specs/voice/spec.md": "- **FR-001**: An order is placed for a positive amount. [evidence: src/v.js:1-3]\n",
+    "specs/voice-conversation/spec.md": "- **FR-001**: The waiter greets the guest. [evidence: src/v.js:4-6]\n",
+    "src/v.test.js": 'import { order, greet } from "./v";\nit("places an order", () => { expect(order(1).placed).toBe(true); });\nit("greets", () => { expect(greet()).toBe("hi"); });\n',
+  };
+  for (const [f, t] of Object.entries(files)) fs.mkdirSync(path.join(repo, path.dirname(f)), { recursive: true }), fs.writeFileSync(path.join(repo, f), t);
+  execFileSync("git", ["init", "-q"], { cwd: repo });
+  const data = { modules: [{ id: "voice", name: "Voice", specs: [], routes: [] }], routes: [], specs: [{ path: "specs/voice/spec.md", requirements: [] }, { path: "specs/voice-conversation/spec.md", requirements: [] }] };
+  return { repo, data };
+}
+
+test("FR-010: ids two spec files of the same part share are ambiguous, and their titles name the spec file", async () => {
+  const { workList, workListMarkdown } = await import("../core/worklist.mjs");
+  const { repo, data } = await sharedIdsRepo();
+  const wl = await workList(repo, "voice", { data });
+  fs.rmSync(repo, { recursive: true, force: true });
+  assert.deepEqual(wl.specs.sort(), ["specs/voice-conversation/spec.md", "specs/voice/spec.md"]);
+  assert.deepEqual(wl.rules.map((r) => [r.spec, r.id, r.ambiguous]).sort(), [["specs/voice-conversation/spec.md", "FR-001", true], ["specs/voice/spec.md", "FR-001", true]]);
+  const md = workListMarkdown(wl);
+  assert.match(md, /`FR-001 \(voice-conversation\): …`/);
+  assert.match(md, /`FR-001 \(voice\): …`/);
+});
+
+test("FR-017: a link for an id the part's spec files share names the spec file, and counts only for that file", async () => {
+  const { linkForModule } = await import("../core/link.mjs");
+  const { workList } = await import("../core/worklist.mjs");
+  const { repo, data } = await sharedIdsRepo();
+  const r = await linkForModule(repo, "voice", ["FR-001=src/v.test.js:2", "FR-001@voice-conversation=src/v.test.js:3", "FR-001@voice=src/v.test.js:2"], { data });
+  const lines = fs.readFileSync(path.join(repo, "src/v.test.js"), "utf8").split("\n");
+  const wl = await workList(repo, "voice", { data });
+  fs.rmSync(repo, { recursive: true, force: true });
+  assert.deepEqual(r.skipped.map((x) => [x.id, x.reason]), [["FR-001", "FR-001 is in 2 of this part's spec files: write FR-001@voice or FR-001@voice-conversation"]]);
+  assert.equal(lines[1], 'it("FR-001 (voice): places an order", () => { expect(order(1).placed).toBe(true); });');
+  assert.equal(lines[2], 'it("FR-001 (voice-conversation): greets", () => { expect(greet()).toBe("hi"); });');
+  const st = Object.fromEntries(wl.rules.map((x) => [x.spec, [x.status, x.tests]]));
+  assert.deepEqual(st["specs/voice/spec.md"], ["tested", ["src/v.test.js"]]);
+  assert.deepEqual(st["specs/voice-conversation/spec.md"], ["tested", ["src/v.test.js"]]);
+});
+
+test("FR-003: a title qualified with one spec file of a part never counts for the part's other spec file", async () => {
+  const { workList } = await import("../core/worklist.mjs");
+  const { repo, data } = await sharedIdsRepo();
+  fs.writeFileSync(path.join(repo, "src/v.test.js"), 'import { order, greet } from "./v";\nit("FR-001 (voice): places an order", () => { expect(order(1).placed).toBe(true); });\nit("greets", () => { expect(greet()).toBe("hi"); });\n');
+  const wl = await workList(repo, "voice", { data });
+  fs.rmSync(repo, { recursive: true, force: true });
+  const st = Object.fromEntries(wl.rules.map((x) => [x.spec, x.status]));
+  assert.equal(st["specs/voice/spec.md"], "tested");
+  assert.equal(st["specs/voice-conversation/spec.md"], "untested");
+});
+
+test("FR-003: a plain tag on a test that runs none of a spec's code is another spec's, not a weak test of this one", async () => {
+  const { testCoverage } = await import("../core/tests.mjs");
+  const { repo } = await sharedIdsRepo();
+  fs.writeFileSync(path.join(repo, "src/other.js"), "export const x = 1;\n");
+  fs.mkdirSync(path.join(repo, "specs/menu"));
+  fs.writeFileSync(path.join(repo, "specs/menu/spec.md"), "- **FR-001**: Menu has x. [evidence: src/other.js:1]\n");
+  fs.writeFileSync(path.join(repo, "src/v.test.js"), 'import { order } from "./v";\nit("FR-001: places an order", () => { expect(order(1).placed).toBe(true); });\n');
+  const spec = path.join(repo, "specs/menu/spec.md");
+  const r = testCoverage(repo, fs.readFileSync(spec, "utf8"), { specPath: spec });
+  fs.rmSync(repo, { recursive: true, force: true });
+  assert.equal(r.requirements[0].status, "none");
+  assert.deepEqual(r.requirements[0].tests, []);
+});
