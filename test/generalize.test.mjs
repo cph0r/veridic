@@ -1354,3 +1354,35 @@ test("FR-003: a plain shared id belongs to the spec whose code sits next to the 
   assert.equal(oauth, "covered", "the test sits next to oauth's code");
   assert.equal(apps, "none", "apps' INV-2 is only reached through a shared library");
 });
+
+test("contract: statuses from a helper given res, an error class thrown two calls down, and the route's guard count as returned", async () => {
+  const { contractFromDoc, drift } = await import("../core/contract.mjs");
+  const { g, done } = fakeRepo({
+    "src/main.ts": 'import express from "express";\nimport routes from "./routes";\nconst app = express();\napp.use("/api", routes);\n',
+    "src/routes.ts": 'import { Router } from "express";\nimport { requireWorkspace } from "./require-workspace";\nimport apps from "./apps";\nconst router = Router();\nconst workspace = Router({ mergeParams: true });\nworkspace.use(requireWorkspace);\nworkspace.use(apps);\nrouter.use("/workspaces/:workspaceId", workspace);\nexport default router;\n',
+    "src/require-workspace.ts": 'export const requireWorkspace = async (req, res, next) => {\n  if (!req.user) { res.status(401).json({}); return; }\n  if (req.method !== "GET" && req.role === "reviewer") { res.status(403).json({}); return; }\n  next();\n};\n',
+    "src/errors.ts": 'export class AppError extends Error {\n  constructor(status, message) { super(message); this.status = status; }\n}\nexport class NotFoundError extends AppError {\n  constructor(message) { super(404, message); }\n}\n',
+    "src/http.ts": 'export function parseOr400(schema, value, res) {\n  const parsed = schema.safeParse(value);\n  if (parsed.success) return parsed.data;\n  res.status(400).json({ error: "Invalid request" });\n  return null;\n}\n',
+    "src/apps.service.ts": 'import { NotFoundError } from "./errors";\nasync function findApp(ref) {\n  const app = await db.get(ref);\n  if (!app) throw new NotFoundError("no app");\n  return app;\n}\nexport async function deleteApp(ws: string, user: { id: string; email: string }): Promise<{ deleted: string }> {\n  const app = await findApp(ref);\n  return { deleted: app.name };\n}\n',
+    "src/apps.ts": 'import { Router } from "express";\nimport { parseOr400 } from "./http";\nimport { deleteApp } from "./apps.service";\nconst router = Router();\nrouter.delete("/apps/:appRef", async (req, res) => {\n  const body = parseOr400(Schema, req.body, res);\n  if (!body) return;\n  res.json(await deleteApp(req.params.workspaceId, req.params.appRef));\n});\nexport default router;\n',
+  });
+  const contract = contractFromDoc({ servers: [{ url: "/api" }], paths: { "/workspaces/{workspaceId}/apps/{appRef}": { delete: { responses: { 200: {}, 400: {}, 401: {}, 403: {}, 404: {} } } } } });
+  const d = drift(g, contract, routeInventory(g).routes);
+  done();
+  assert.equal(d.summary.documented_ops, 1);
+  const op = d.operations.find((o) => o.id.startsWith("DELETE"));
+  assert.deepEqual(op?.unreturned_statuses ?? [], [], "no documented status is reported as never returned");
+});
+
+test("contract: a handler that parses the request with zod returns what the app's error handler makes of a ZodError", async () => {
+  const { contractFromDoc, drift } = await import("../core/contract.mjs");
+  const { g, done } = fakeRepo({
+    "src/main.ts": 'import express from "express";\nimport routes from "./routes";\nconst app = express();\napp.use("/api", routes);\n',
+    "src/errors.ts": 'import { ZodError } from "zod";\nexport class AppError extends Error {\n  constructor(status, message) { super(message); this.status = status; }\n}\nexport class BadRequestError extends AppError {\n  constructor(message) { super(400, message); }\n}\nexport function toAppError(err) {\n  if (err instanceof ZodError) {\n    return new BadRequestError("Invalid request");\n  }\n  return err;\n}\n',
+    "src/routes.ts": 'import { Router } from "express";\nconst router = Router();\nrouter.patch("/me", async (req, res) => {\n  const body = UpdateMeBody.parse(req.body);\n  res.json(await save(body));\n});\nexport default router;\n',
+  });
+  const contract = contractFromDoc({ servers: [{ url: "/api" }], paths: { "/me": { patch: { responses: { 200: {}, 400: {} } } } } });
+  const d = drift(g, contract, routeInventory(g).routes);
+  done();
+  assert.deepEqual(d.operations.find((o) => o.id === "PATCH /api/me")?.unreturned_statuses ?? [], []);
+});

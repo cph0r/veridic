@@ -128,6 +128,10 @@ export function drift(g, contract, routes, opts = {}) {
     const facts = handlerFacts(g, r);
     const returned = new Map();
     for (const s of facts.statuses) if (!returned.has(s.status)) returned.set(s.status, s);
+    // Statuses sent or thrown by what the handler calls, and by its guards: they explain a
+    // documented status, but a status the contract leaves out is only reported from the
+    // handler's own lines (a guard's 401 applies to every route behind it).
+    const reached = new Set(calledStatuses(g, r).map((s) => s.status));
     const documented = new Set(op.responses);
 
     // A documented 2xx satisfies an implicit res.json(); report implicit 200 only
@@ -138,7 +142,7 @@ export function drift(g, contract, routes, opts = {}) {
       .map(({ status, line, implicit }) => ({ status, at: `${r.file}:${line}`, ...(implicit ? { implicit: true } : {}) }));
     const guards = r.guards?.length ? r.guards.map((x) => x.name ?? x) : [];
     const unreturned = op.responses
-      .filter((c) => !returned.has(c) && !(c >= 200 && c < 300 && [...returned.values()].some((s) => s.implicit)))
+      .filter((c) => !returned.has(c) && !reached.has(c) && !(c >= 200 && c < 300 && [...returned.values()].some((s) => s.implicit)))
       .map((c) => {
         // A documented code the handler never returns may come from a guard
         // mounted above it, but only from a guard of the matching kind.
@@ -200,3 +204,147 @@ function codeOnlyLines(g, file) {
 
 const dedupeBy = (xs, key) => [...new Map(xs.map((x) => [key(x), x])).values()];
 const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+// ---- statuses beyond the handler's own lines ----
+// Handlers often answer through what they call: a helper handed `res` (`parseOr400(schema,
+// body, res)`), a service that throws an error class carrying a status (`throw new
+// NotFoundError()` -> 404), or a guard mounted above the route (a membership check's 404).
+const SRC = /\.(?:[cm]?[jt]sx?)$/;
+const KEYWORDS = new Set(["if", "for", "while", "switch", "catch", "return", "function", "typeof", "await", "new", "super", "import", "require"]);
+const statusesIn = (text) => [
+  ...[...text.matchAll(/\.(?:status|sendStatus)\(\s*(\d{3})\s*\)/g)].map((m) => Number(m[1])),
+  ...[...text.matchAll(/\b(?:createError|createHttpError|httpError|HttpError)\(\s*(\d{3})\b/g)].map((m) => Number(m[1])),
+];
+// The body of the function `name` declared in `src`, or null.
+function bodyOf(src, name) {
+  const code = codeOnly(src);
+  const m = new RegExp(`(?:function\\s*\\*?\\s*${name}\\s*\\(|\\b(?:const|let|var)\\s+${name}\\s*(?::[^=]+)?=\\s*(?:async\\s*)?(?:function\\b[^(]*)?\\(?)`).exec(code);
+  if (!m) return null;
+  // Past the parameter list (whose types may hold braces: `user: { id: string }`) and any return
+  // type (`Promise<{ deleted: string }>`): the body is the first brace outside them.
+  let at = m.index + m[0].length;
+  const paren = code.indexOf("(", m.index + m[0].length - 1);
+  if (paren >= 0 && paren - at < 40) {
+    let d = 0;
+    for (let i = paren; i < code.length; i++) {
+      if (code[i] === "(") d++;
+      else if (code[i] === ")" && --d === 0) { at = i + 1; break; }
+    }
+  }
+  let open = -1;
+  for (let i = at, ang = 0; i < code.length; i++) {
+    const c = code[i];
+    if (c === "=" && code[i + 1] === ">") {
+      const rest = code.slice(i + 2), lead = rest.search(/\S/);
+      if (rest[lead] !== "{") { const end = rest.slice(lead).search(/;|\n\s*\n|\n(?=\S)/); return src.slice(i + 2 + lead, end < 0 ? undefined : i + 2 + lead + end); }
+      i++;
+    } else if (c === "<") ang++;
+    else if (c === ">") ang = Math.max(0, ang - 1);
+    else if (c === "{" && ang === 0) { open = i; break; }
+    else if (c === ";" && ang === 0) return null;
+  }
+  if (open < 0) return null;
+  let depth = 0;
+  for (let i = open; i < code.length; i++) {
+    if (code[i] === "{") depth++;
+    else if (code[i] === "}" && --depth === 0) return src.slice(open, i + 1);
+  }
+  return null;
+}
+// What `file` imports: local name -> the file it comes from (relative imports only).
+function importsIn(g, file) {
+  const src = g.text(file) ?? "";
+  const out = new Map();
+  const resolve = (spec) => {
+    if (!spec.startsWith(".")) return null;
+    const base = path.posix.normalize(path.posix.join(path.posix.dirname(file), spec)).replace(/\.(?:[cm]?js)$/, "");
+    return [base, ...[".ts", ".tsx", ".js", ".mjs", ".cjs", ".jsx", "/index.ts", "/index.js"].map((e) => base + e)].find((f) => g.text(f) != null) ?? null;
+  };
+  for (const m of src.matchAll(/import\s+(?:type\s+)?(?:(\w+)\s*,?\s*)?(?:\{([^}]*)\})?\s*from\s*["']([^"']+)["']/g)) {
+    const f = resolve(m[3]);
+    if (!f) continue;
+    if (m[1]) out.set(m[1], f);
+    for (const part of (m[2] ?? "").split(",")) {
+      const name = part.trim().replace(/^type\s+/, "").split(/\s+as\s+/).pop()?.trim();
+      if (name) out.set(name, f);
+    }
+  }
+  return out;
+}
+// Error classes and the status each carries: super(404, …), this.status = 404, or its parent's;
+// else what its name says (NotFound -> 404).
+const errorClasses = (g) => {
+  if (g.__errorClasses) return g.__errorClasses;
+  const raw = new Map();
+  for (const f of (g.files ?? []).filter((f) => SRC.test(f) && !/(?:^|\/)(?:node_modules|dist|build)\//.test(f))) {
+    const src = g.text(f) ?? "";
+    if (!/\bclass\s+\w+\s+extends\b/.test(src)) continue;
+    for (const m of src.matchAll(/\bclass\s+(\w+)\s+extends\s+(\w+)/g)) {
+      const body = bodyOf(src.slice(m.index).replace(/^class\s+\w+\s+extends\s+\w+/, "function __c()"), "__c") ?? "";
+      const own = body.match(/\bsuper\(\s*(\d{3})\b|\bsuper\([^)]*?,\s*(\d{3})\s*[,)]|\bstatus(?:Code)?\s*[=:]\s*(\d{3})\b/);
+      raw.set(m[1], { parent: m[2], status: own ? Number(own[1] ?? own[2] ?? own[3]) : null });
+    }
+  }
+  const BY_NAME = [[/NotFound/, 404], [/Forbidden/, 403], [/Unauthori[sz]ed/, 401], [/BadRequest|Validation/, 400], [/Conflict/, 409], [/TooMany|RateLimit/, 429], [/Unprocessable/, 422]];
+  const statusOf = (name, seen = 0) => {
+    const c = raw.get(name);
+    if (c?.status) return c.status;
+    if (c && seen < 6) { const p = statusOf(c.parent, seen + 1); if (p) return p; }
+    return BY_NAME.find(([re]) => re.test(name))?.[1] ?? null;
+  };
+  g.__errorClasses = statusOf;
+  return statusOf;
+};
+
+// What the app's error handling makes of a ZodError (thrown by `Schema.parse(req.body)`): the
+// status or error class right after `instanceof ZodError`. Null when it doesn't say.
+const zodStatus = (g) => {
+  if ("__zodStatus" in g) return g.__zodStatus;
+  const statusOf = errorClasses(g);
+  let st = null;
+  for (const f of (g.files ?? []).filter((f) => SRC.test(f))) {
+    const src = g.text(f) ?? "";
+    const i = src.search(/instanceof\s+(?:z\.)?ZodError/);
+    if (i < 0) continue;
+    const after = src.slice(i, i + 600);
+    st = statusesIn(after)[0] ?? statusOf(after.match(/\bnew\s+(\w+)\s*\(/)?.[1] ?? "") ?? null;
+    if (st) break;
+  }
+  g.__zodStatus = st;
+  return st;
+};
+
+/** Statuses a route sends through what its handler calls (two calls deep) and through its guards. */
+export function calledStatuses(g, route) {
+  const statusOf = errorClasses(g);
+  const out = [];
+  const seen = new Set();
+  const scan = (text, file, depth, via) => {
+    for (const st of statusesIn(text)) out.push({ status: st, line: null, via });
+    for (const m of text.matchAll(/\b(?:throw|next\()\s*new\s+(\w+)\s*\(/g)) {
+      const st = statusOf(m[1]);
+      if (st) out.push({ status: st, line: null, via: via ?? m[1] });
+    }
+    if (depth >= 2) return;
+    const imports = importsIn(g, file);
+    for (const m of text.matchAll(/\b([A-Za-z_$][\w$]*)\s*\(/g)) {
+      const name = m[1];
+      if (KEYWORDS.has(name) || seen.has(`${file}#${name}`)) continue;
+      seen.add(`${file}#${name}`);
+      const target = imports.get(name) ?? file;
+      const body = bodyOf(g.text(target) ?? "", name);
+      if (body) scan(body, target, depth + 1, via ?? name);
+    }
+  };
+  const lines = (g.lines(route.file) ?? []).slice(route.start - 1, route.end).join("\n");
+  scan(lines, route.file, 0, null);
+  if (/\.parse\(\s*req\.(?:body|params|query)\b/.test(lines) && zodStatus(g)) out.push({ status: zodStatus(g), line: null, via: "request validation" });
+  for (const gd of route.guards ?? []) {
+    const name = String(gd.name ?? gd).split(/[\s(]/)[0];
+    const at = String(gd.at ?? "").split(":")[0] || route.file;
+    const target = importsIn(g, at).get(name) ?? at;
+    const body = bodyOf(g.text(target) ?? "", name);
+    if (body) for (const st of statusesIn(body)) out.push({ status: st, line: null, via: name });
+  }
+  return out.filter((x) => x.status >= 300);
+}
