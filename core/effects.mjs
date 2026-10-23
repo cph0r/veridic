@@ -10,6 +10,17 @@ import { handlerFacts } from "./contract.mjs";
 
 // Line patterns, checked on code (comments ignored). Each effect cites the line.
 const EFFECTS = [
+  // SQL/Drizzle, a storage layer, and the MongoDB/Mongoose, Sequelize and Prisma calls that delete.
+  ["destructive", /\.delete\s*\(\s*\w+Table\b|\bdb\.delete\(|DELETE\s+FROM\b|\bstorage\.(?:delete|remove|purge)\w*\(|(?<!\b(?:res|response|req|request|stream|socket|conn\w*|ws|reader|writer|readable|writable|upstream|passThrough)\s*)\.destroy\s*\(|status:\s*["'](?:cancelled|canceled|deleted|archived|revoked|deactivated)["']|\.(?:deleteOne|deleteMany|findOneAndDelete|findByIdAndDelete|findOneAndRemove|findByIdAndRemove|bulkDelete)\s*\(|\.\w+\.delete(?:Many)?\s*\(\s*\{\s*where\b|(?<!\$\([^()]*\))\.remove\s*\(\s*(?:\{|\)|[\w.]+\s*[,)])/], // not $(…).remove(): cheerio/jQuery editing HTML
+  ["write", /\.insert\s*\(\s*\w+|\.update\s*\(\s*\w+Table\b|\bdb\.update\(|\.upsert\s*\(|INSERT\s+INTO\b|UPDATE\s+\w+\s+SET\b|\bstorage\.(?:create|update|add|set|save|record|upsert|mark|activate|increment|insert)\w*\(|(?<!\b(?:res|response|reply|ctx|headers)\s*)\.set\(\s*\{|\.(?:insertOne|insertMany|updateOne|updateMany|replaceOne|findOneAndUpdate|findByIdAndUpdate|findOneAndReplace|bulkWrite|bulkCreate)\s*\(|(?<!\b\w*(?:pdf|Pdf|canvas|ctx|workbook|zip|image|img|sharp|png|jpe?g)\w*)\.save\s*\(\s*\)|\b(?:(?!PDF|Object\b|Promise\b|Buffer\b|Date\b|Array\b|Map\b|Set\b|Symbol\b|Reflect\b|URL\b|Image\b|Canvas\b|Document\b|Readable\b|Stream\b)[A-Z]\w*|prisma\.\w+|\w*[Mm]odels?(?:\.\w+)?|\w+(?:Repository|Repo))\.create\s*\(|\.(?:insert|update)\s*\(\s*\{|\$(?:set|push|pull|inc|addToSet|unset)\b/],
+  ["moves_money", /\b(?:razorpay|phonepe|stripe|paypal|cashfree|paytm)\b[\w.]*\s*\.|\binitiatePayment\s*\(|\bcheckPaymentStatus\s*\(|\b(?:refund|charge|capture)(?:Payment)?\s*\(|\bconfirm\w*Payment\s*\(|\bactivateSubscription\s*\(|\bpaidAt\s*:(?!\s*\w+Table\.)|\.(?:increment|decrement)\s*\(\s*\{\s*\w*(?:balance|credit|amount)\b|\bwallet\w*\s*\.\s*(?:increment|decrement|update|save)\s*\(/i],
+  ["external", /\bfetch\s*\(|\baxios\b[\w.]*\(|\bgot\s*\(|\bnew\s+(?:Razorpay|Stripe|OpenAI|Anthropic)\b|\.chat\.completions\.create\s*\(|\bgenerateContent\s*\(/],
+  // Calls that tell someone else (email, SMS, WhatsApp, push, a dashboard, a POS): not
+  // logger or internal event wiring, and not the functions' own declarations.
+  ["notifies", /(?<!function\s)(?<![.\w])(?:send\w*(?:Email|Mail|Sms|SMS|Whatsapp|WhatsApp|Push|Message|Notification)\w*|notify\w*|pushOrderTo\w+|sendTemplate\w*)\s*\(|\bresend\.emails\.send\(|\btwilio\.messages\./],
+];
+// Next.js routes: the same, plus Supabase, and fewer false hits (cookies, analytics, streams).
+const NEXT_EFFECTS = [
   // Supabase Auth: deleting, changing or creating an account, and the emails it sends.
   ["destructive", /\.auth\.admin\.deleteUser\s*\(/],
   ["write", /\.auth\.(?:updateUser|signUp|admin\.(?:createUser|updateUserById))\s*\(/],
@@ -42,6 +53,8 @@ function inFromChain(lines, n) {
 
 /** Effects found along a route's call tree, each with where it happens and how far from the handler. */
 export function routeEffects(g, route) {
+  // Express keeps its own patterns, unchanged; the Next.js ones are wider.
+  const next = route.framework === "nextjs";
   const found = [];
   const seen = new Set();
   for (const r of reached(g, route)) {
@@ -49,9 +62,9 @@ export function routeEffects(g, route) {
     for (let n = r.start; n <= Math.min(r.end, lines.length); n++) {
       const line = lines[n - 1];
       if (!line || COMMENT.test(line)) continue;
-      const chainDelete = CHAIN_DELETE.test(line) && inFromChain(lines, n);
-      if (/^\s*\)\s*\.remove\s*\(/.test(line) && domCall(lines, n)) continue;
-      for (const [kind, re] of EFFECTS) {
+      const chainDelete = next && CHAIN_DELETE.test(line) && inFromChain(lines, n);
+      if (next && /^\s*\)\s*\.remove\s*\(/.test(line) && domCall(lines, n)) continue;
+      for (const [kind, re] of next ? NEXT_EFFECTS : EFFECTS) {
         if (!re.test(line) && !(kind === "destructive" && chainDelete)) continue;
         const key = `${kind}@${r.file}:${n}`;
         if (seen.has(key)) continue;

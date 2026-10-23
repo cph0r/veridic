@@ -91,7 +91,12 @@ function handlers(src) {
   };
   const local = (name) => localHandler(src, name, code);
   // export async function GET(…) / export const POST = …
-  for (const m of code.matchAll(/\bexport\s+(?:async\s+)?function\s+([A-Z]+)\s*\(/g)) add(m[1], functionExtent(src, m[1]));
+  for (const m of code.matchAll(/\bexport\s+(?:async\s+)?function\s+([A-Z]+)\s*(?:<[^>]*>\s*)?\(/g)) {
+    // A body the parser can't balance (a `{` in a regex literal) still is a route: its line.
+    const sp = functionSpan(src, m[1], { generics: true });
+    const line = lineOf(src, m.index);
+    add(m[1], sp && sp.close > sp.open ? [line, lineOf(src, sp.close)] : functionExtent(src, m[1]) ?? [line, line]);
+  }
   for (const m of code.matchAll(/\bexport\s+const\s+([A-Z]+)\s*(?::[^=]+)?=\s*(?:([\w$]+)\s*\(|([\w$]+)\s*;?\s*$)?/gm)) {
     if (!HTTP.includes(m[1])) continue;
     const line = lineOf(src, m.index);
@@ -321,7 +326,14 @@ function actionsIn(src) {
   // (`export const signIn = validatedAction(schema, async () => …)`) spanning its statement.
   if (/^(?:\s*(?:\/\/[^\n]*|\/\*[\s\S]*?\*\/))*\s*["']use server["']/.test(src)) {
     const code = codeOnly(src);
-    for (const m of code.matchAll(/\bexport\s+(?:async\s+)?function\s+([\w$]+)/g)) add(m[1]);
+    for (const m of code.matchAll(/\bexport\s+(?:default\s+)?(?:async\s+)?function\s+([\w$]+)/g)) add(m[1]);
+    // export { create, rename as renameItem }: the action is called by its exported name.
+    for (const m of code.matchAll(/\bexport\s*\{([^}]*)\}(?!\s*from)/g))
+      for (const part of m[1].split(",").map((x) => x.trim()).filter(Boolean)) {
+        const [local, exported = local] = part.split(/\s+as\s+/).map((x) => x.trim());
+        const ext = functionExtent(src, local) ?? (() => { const c = new RegExp(`\\bconst\\s+${local.replace(/\$/g, "\\$")}\\b`).exec(code); if (!c) return null; const st = statementLines(src, code, c.index); return [st.start, st.end]; })();
+        if (ext && exported !== "default" && !out.some((a) => a.name === exported)) out.push({ name: exported, start: ext[0], end: ext[1] });
+      }
     for (const m of code.matchAll(/\bexport\s+const\s+([\w$]+)\s*(?::[^=]+)?=\s*/g)) {
       const direct = /^(?:async\s*)?(?:function\b|\([^)]*\)\s*(?::[^=]+)?=>|[\w$]+\s*=>)/.test(code.slice(m.index + m[0].length));
       if (direct) add(m[1]);
@@ -362,11 +374,18 @@ export function matcherRegex(p) {
  * redirect, a 401/403, Clerk's protect(), Auth.js's `auth` as middleware), else null.
  */
 function middlewareGuard(g, dir) {
-  for (const n of ["middleware.ts", "middleware.js", "src/middleware.ts", "src/middleware.js"]) {
+  // middleware.ts, or proxy.ts since Next 16.
+  for (const n of ["middleware.ts", "middleware.js", "src/middleware.ts", "src/middleware.js", "proxy.ts", "proxy.js", "src/proxy.ts", "src/proxy.js"]) {
     const f = dir ? `${dir}/${n}` : n;
     const t = textOf(g, f);
     if (t == null) continue;
-    const rejects = /\b(?:NextResponse|Response)\s*\.\s*redirect\s*\(|\bredirect\s*\(|\bstatus\s*:\s*40[13]\b|\.protect\s*\(|\bexport\s+default\s+(?:auth|withAuth)\b/.test(codeOnly(t)) || /\bas\s+middleware\b/.test(t);
+    // It turns a caller away: a 401/403, a redirect to a sign-in page (not any redirect: a locale
+    // redirect isn't sign-in), Clerk's protect(), or an auth library's middleware.
+    const code = codeOnly(t);
+    const loginUrls = [...t.matchAll(/\b(?:const|let)\s+([\w$]+)\s*=\s*new\s+URL\s*\(\s*["'`][^"'`]*(?:login|sign-?in|auth)/gi)].map((x) => x[1]);
+    const rejects = /\bstatus\s*:\s*40[13]\b|\.protect\s*\(|\bexport\s+default\s+(?:auth|withAuth)\b/.test(code) || REJECT_REDIRECT.test(t)
+      || loginUrls.some((u) => new RegExp(`\\bredirect\\s*\\(\\s*${u}\\b`).test(code))
+      || /\bas\s+middleware\b/.test(code) || /\bexport\s*\{\s*default\s*\}\s*from\s*["']next-auth\/middleware["']/.test(t);
     if (!rejects) return null;
     const m = t.match(/\bmatcher\s*:\s*(\[[\s\S]*?\]|["'`][^"'`]*["'`])/);
     const pats = m ? [...m[1].matchAll(/["'`]([^"'`]*)["'`]/g)].map((x) => x[1]) : [];
@@ -378,7 +397,12 @@ function middlewareGuard(g, dir) {
     for (const c of t.matchAll(/\bconst\s+([\w$]+)\s*(?::[^=]+)?=\s*(\[[^\]]*\]|["'`][^"'`]*["'`])/g)) consts.set(c[1], [...c[2].matchAll(/["'`]([^"'`]*)["'`]/g)].map((x) => x[1]));
     const lits = (e) => (/^["'`]/.test(e.trim()) ? [e.trim().slice(1, -1)] : consts.get(e.trim()) ?? []);
     const include = [], exclude = [];
-    for (const x of t.matchAll(/\bpathname\s*\.\s*startsWith\s*\(\s*([^)]+?)\s*\)/g)) for (const v of lits(x[1])) include.push((u) => u.startsWith(v));
+    // A path it lets straight through (`if (pathname.startsWith(X)) return NextResponse.next()`),
+    // or one a negated check leaves alone (`!pathname.startsWith(X)`), isn't guarded.
+    for (const x of t.matchAll(/(!\s*)?\bpathname\s*\.\s*startsWith\s*\(\s*([^)]+?)\s*\)/g)) {
+      const passes = /^\s*\)?\s*\{?\s*return\s+(?:NextResponse\s*\.\s*next\s*\(|;|\})/.test(t.slice(x.index + x[0].length));
+      for (const v of lits(x[2])) (x[1] || passes ? exclude : include).push((u) => u.startsWith(v));
+    }
     for (const x of t.matchAll(/\b([\w$]+)\s*\.\s*some\s*\(\s*\(?\s*([\w$]+)\s*\)?\s*=>\s*pathname\s*\.\s*startsWith\s*\(\s*\2\s*\)/g)) for (const v of consts.get(x[1]) ?? []) include.push((u) => u.startsWith(v));
     for (const x of t.matchAll(/\bpathname\s*===?\s*(["'`][^"'`]*["'`]|[\w$]+)/g)) for (const v of lits(x[1])) include.push((u) => u === v);
     for (const x of t.matchAll(/\bconst\s+([\w$]+)\s*=\s*createRouteMatcher\s*\(\s*\[([^\]]*)\]/g)) {
@@ -405,12 +429,15 @@ function signInGuards(text) {
       const vars = m[1].startsWith("{") ? [...m[1].matchAll(/[\w$]+/g)].map((x) => x[0]).filter((v) => /^(?:session|user|userId)$/.test(v)) : [m[1]];
       if (exitsIfMissing(text.slice(m.index + m[0].length), vars) && !out.some((o) => o.name === name)) out.push({ name, line: text.slice(0, m.index).split("\n").length });
     }
+  // Auth.js v5's route form, `auth(function GET(req) { if (!req.auth) return 401 })`.
+  const v5 = text.search(/\bif\s*\(\s*!\s*(?:req|request)\.auth\b/);
+  if (v5 >= 0 && exitsIfMissing(text.slice(v5 - 1), ["req\\.auth", "request\\.auth"]) && !out.some((o) => o.name === "auth()")) out.push({ name: "auth()", line: text.slice(0, v5).split("\n").length });
   return out;
 }
 
 /** Whether, after a value is fetched, an if on it being missing leaves: return, throw, redirect, notFound. */
 function exitsIfMissing(after, vars) {
-  return vars.some((v) => [...after.matchAll(new RegExp(`\\bif\\s*\\([^)]*!\\s*${v.replace(/\$/g, "\\$")}\\b[^)]*\\)\\s*`, "g"))].some((m) => {
+  return vars.some((v) => [...after.matchAll(new RegExp(`\\bif\\s*\\([^)]*!\\s*${v.includes("\\") ? v : v.replace(/\$/g, "\\$")}\\b[^)]*\\)\\s*`, "g"))].some((m) => {
     const rest = after.slice(m.index + m[0].length);
     let block = rest.split(/;|\n/)[0];
     if (rest.startsWith("{")) { let d = 0, i = 0; for (; i < rest.length; i++) { if (rest[i] === "{") d++; else if (rest[i] === "}" && --d === 0) break; } block = rest.slice(0, i + 1); }
@@ -423,13 +450,13 @@ function exitsIfMissing(after, vars) {
  * followed by an exit when it's missing, where the helper (followed 3 deep) checks sign-in.
  * Scoping too, when the helper looks up the caller's membership of the URL's ids.
  */
-function helperGuards(g, dir, file, text, params) {
+function helperGuards(g, dir, file, text, params, depth = 3) {
   const out = [];
   for (const m of text.matchAll(/\b(?:const|let)\s+([\w$]+)\s*=\s*(?:await\s+)?([A-Za-z_$][\w$]*)\s*\(/g)) {
     const fn = m[2];
     if (/^(?:auth|getServerSession|currentUser|require|fetch|String|Number|Boolean|parseInt)$/.test(fn) || out.some((o) => o.name === `${fn}()`)) continue;
-    if (!exitsIfMissing(text.slice(m.index + m[0].length), [m[1]]) || !checksSignIn(g, dir, file, fn)) continue;
-    out.push({ name: `${fn}()`, line: text.slice(0, m.index).split("\n").length, kind: "auth", ...(scopesCaller(g, dir, file, fn, params) ? { scope: "caller" } : {}) });
+    if (!exitsIfMissing(text.slice(m.index + m[0].length), [m[1]]) || !checksSignIn(g, dir, file, fn, depth)) continue;
+    out.push({ name: `${fn}()`, line: text.slice(0, m.index).split("\n").length, kind: "auth", ...(params.length && scopesCaller(g, dir, file, fn, params) ? { scope: "caller" } : {}) });
   }
   return out;
 }
@@ -450,6 +477,13 @@ function definitionBody(src, name) {
 
 /** Where `name` comes from in `file`: that file when defined there, else the file it's imported from. */
 function definitionOf(g, dir, file, name) {
+  const memo = (g.__defs ??= new Map());
+  const key = `${file}#${name}`;
+  if (!memo.has(key)) memo.set(key, definitionOfNow(g, dir, file, name));
+  return memo.get(key);
+}
+
+function definitionOfNow(g, dir, file, name) {
   const src = textOf(g, file) ?? "";
   const body = definitionBody(src, name) ?? constStatement(src, name);
   if (body) return { file, body };
@@ -474,7 +508,9 @@ function constStatement(src, name) {
 // Turning a caller away: a 401/403 answer, a redirect to a sign-in page, an Unauthorized error.
 const REJECT = /\bstatus\s*:\s*40[13]\b|\.status\s*\(\s*40[13]\s*\)|\bunauthori[sz]ed\s*\(|\bnew\s+Unauthori[sz]ed\w*\s*\(/i;
 // An if on a missing user/session that leaves: if (!user) { throw … } / if (!session?.user) throw …
-const MISSING_USER = /\bif\s*\(\s*!\s*(?:user|session|userId|currentUser|ctx\.user)\b[^)]*\)\s*(?:\{[^}]*?)?\b(?:throw|return|redirect\s*\()/;
+// …only when that value came from the session: `const user = await getUser()` (no argument, or
+// only the request), not a record looked up by an id (`findUser(params.id)`).
+const MISSING_USER = /\b(?:const|let)\s+(?:user|session|currentUser)\s*=\s*(?:await\s+)?(?:get|load|fetch|read|current)\w*(?:User|Session)\s*\(\s*(?:req|request|ctx|cookies\(\)|headers\(\))?\s*\)[\s\S]*?\bif\s*\(\s*!\s*(?:user|session|currentUser)\b[^)]*\)\s*(?:\{[^}]*?)?\b(?:throw|return|redirect\s*\()|\bif\s*\(\s*!\s*(?:ctx\.user|ctx\.session)\b[^)]*\)\s*(?:\{[^}]*?)?\b(?:throw|return|redirect\s*\()/;
 const CREDENTIAL_CHECK = /^(?:validate|verify|assert|require|authenticate|check)\w*(?:ApiKey|Auth|Token|Session|User|Secret|Signature|Key)\w*$/i;
 const REJECT_REDIRECT = /\bredirect\s*\(\s*(?:new\s+URL\s*\(\s*)?["'`][^"'`]*(?:login|sign-?in|auth)/i;
 
@@ -492,21 +528,38 @@ function withoutCatch(text) {
 
 /** Whether the function `name`, used in `file`, turns a caller away, itself or through the functions it hands the request to. */
 function checksSignIn(g, dir, file, name, depth = 3, seen = new Set()) {
+  const memo = (g.__signIn ??= new Map());
+  const mkey = `${file}#${name}#${depth}`;
+  if (memo.has(mkey)) return memo.get(mkey);
   const key = `${file}#${name}`;
   if (seen.has(key)) return false;
   seen.add(key);
+  const result = checksSignInNow(g, dir, file, name, depth, seen);
+  memo.set(mkey, result);
+  return result;
+}
+
+function checksSignInNow(g, dir, file, name, depth, seen) {
   const def = definitionOf(g, dir, file, name);
   if (!def) return false;
   // A credential check by name that throws (validateApiKey, verifyToken, requireUser…): the
   // thrown error becomes the 401 somewhere else.
   if (CREDENTIAL_CHECK.test(name) && /\bthrow\b/.test(codeOnly(def.body))) return true;
-  // A 401 in a catch block translates a thrown error; it doesn't check sign-in.
+  // A 401 in a catch block translates a thrown error; it doesn't check sign-in. Nothing there
+  // is followed either: an error mapper isn't a sign-in check.
   const body = withoutCatch(def.body);
-  if (REJECT.test(codeOnly(body)) || REJECT_REDIRECT.test(body) || signInGuards(body).length || MISSING_USER.test(codeOnly(body))) return true;
+  const code = codeOnly(body);
+  if (REJECT.test(code) || REJECT_REDIRECT.test(body) || signInGuards(body).length || MISSING_USER.test(code)) return true;
   if (depth <= 1) return false;
-  const names = new Set([...codeOnly(def.body).matchAll(/\b([A-Za-z_$][\w$]*)\b/g)].map((m) => m[1]).filter((n) => n !== name && /[a-z]/.test(n) && !/^(?:return|const|let|await|async|function|if|else|new|typeof|undefined|null|true|false|this)$/.test(n)));
+  // `const user = await getUser(); if (!user) …` where getUser checks sign-in.
+  if (helperGuards(g, dir, def.file, body, [], depth - 1).length) return true;
+  // What it calls, and functions it hands to a call (`withMiddleware(handler, authMiddleware)`).
+  const called = [...code.matchAll(/\b([A-Za-z_$][\w$]*)\s*\(/g)].map((m) => m[1]);
+  const passed = [...code.matchAll(/[(,]\s*([A-Za-z_$][\w$]*)\s*(?=[,)])/g)].map((m) => m[1]);
+  const names = new Set([...called, ...passed].filter((n) => n !== name && !CALL_KEYWORDS.test(n)));
   return [...names].some((n) => checksSignIn(g, dir, def.file, n, depth - 1, seen));
 }
+const CALL_KEYWORDS = /^(?:if|for|while|switch|return|function|catch|typeof|await|new|async)$/;
 
 /** A user id: the caller's, as code that looks one up names it. */
 const USER_ID = /\buserId\b|\buser_id\b|\buser\??\.id\b/;
@@ -520,17 +573,30 @@ const LOOKUP = /\b(?:where|findUnique|findFirst|findMany|eq|match)\b/;
  * so does one that loads the caller's own record from another table (`getTeamForUser()`).
  */
 function scopesCaller(g, dir, file, name, params, depth = 3, seen = new Set()) {
+  const memo = (g.__scopes ??= new Map());
+  const mkey = `${file}#${name}#${depth}#${params.join(",")}`;
+  if (memo.has(mkey)) return memo.get(mkey);
   const key = `${file}#${name}`;
   if (seen.has(key)) return false;
   seen.add(key);
+  const result = scopesCallerNow(g, dir, file, name, params, depth, seen);
+  memo.set(mkey, result);
+  return result;
+}
+
+function scopesCallerNow(g, dir, file, name, params, depth, seen) {
   const def = definitionOf(g, dir, file, name);
   if (!def) return false;
-  const code = codeOnly(def.body);
-  for (const st of code.split(";")) {
-    if (!LOOKUP.test(st)) continue;
-    // With ids in the URL: a lookup pairing the caller with one of them. Without: the caller's own
+  const code = codeOnly(withoutCatch(def.body));
+  for (const raw of code.split(";")) {
+    if (!LOOKUP.test(raw)) continue;
+    // Loading the caller themselves (`where: { id: session.user.id }`) pairs nothing with the URL.
+    const st = raw.replace(/\bid\s*:\s*(?:[\w$]+\??\.)*(?:user\??\.id|userId)\b/g, " ");
+    // With ids in the URL: a lookup pairing the caller with one of them, used as a value
+    // (`{ userId, teamId }`, `teamId: params.teamId`), not as a key. Without: the caller's own
     // record from another table, keyed by its user-id column (the wrapper hands it to the handler).
-    if (params.length ? USER_ID.test(st.replace(/\buserId_\w+/g, "")) && params.some((p) => new RegExp(`\\b${p}\\b`).test(st)) : USER_COLUMN.test(st)) return true;
+    const used = (p) => new RegExp(`\\b${p}\\b(?!\\s*:)`).test(st);
+    if (params.length ? USER_ID.test(st.replace(/\buserId_\w+/g, "")) && params.some(used) : USER_COLUMN.test(st)) return true;
   }
   if (depth <= 1) return false;
   const names = new Set([...code.matchAll(/\b([A-Za-z_$][\w$]*)\s*\(/g)].map((m) => m[1]).filter((n) => n !== name && !/^(?:if|for|while|switch|return|function|catch|typeof)$/.test(n)));
@@ -713,7 +779,9 @@ export const idioms = {
   // Fields read straight from a parsed body or a form: `const { name } = await req.json()`, `form.get("email")`.
   // The signed-in caller's identity, used in a query, scopes a record to them.
   // The caller's id: the session's user, or the account a sign-in wrapper put on the request.
-  caller: /\bsession\??\.user\??\.id\b|\buser\??\.id\b|\b(?:req|request)\.(?:auth|apiAuth)\b/,
+  // Used in the query: a key's value (`ownerId: session.user.id`), a drizzle eq(), or userId as a
+  // value; a mention elsewhere (a log line) doesn't scope anything.
+  caller: /\b[\w$]+\s*:\s*(?:[\w$]+\??\.)*user\??\.id\b|\beq\s*\([^()]*\buser\??\.id\b|[{,]\s*userId\s*[,}]|:\s*userId\b|\b(?:req|request)\.(?:auth|apiAuth)\b/,
   // Guards that require sign-in, by name.
   authGuard: /^(?:middleware|auth\(\)|getServerSession\(\)|currentUser\(\)|supabase\.auth\.getUser\(\))$/,
   bodyFields: [/\{([^}]*)\}\s*(?::[^=]+)?=\s*await\s+(?:req|request)\s*\.\s*json\s*\(/, /\.get\(\s*["']([\w-]+)["']\s*\)/g],

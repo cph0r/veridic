@@ -537,7 +537,7 @@ test("effects: Supabase writes and deletes", async () => {
     "}",
   ].join("\n");
   const { g, done } = fakeRepo({ "app/api/posts/route.ts": src });
-  const found = routeEffects(g, { id: "POST /api/posts", file: "app/api/posts/route.ts", start: 1, end: 18 });
+  const found = routeEffects(g, { id: "POST /api/posts", file: "app/api/posts/route.ts", start: 1, end: 18, framework: "nextjs" });
   done();
   const at = (kind) => found.filter((e) => e.kind === kind).map((e) => Number(e.at.split(":").pop()));
   assert.deepEqual(at("write"), [2, 5, 7]);
@@ -558,7 +558,7 @@ test("effects: Supabase account changes and emails", async () => {
     "}",
   ].join("\n");
   const { g, done } = fakeRepo({ "utils/auth.ts": src });
-  const found = routeEffects(g, { id: "ACTION /_action/auth/updateName", file: "utils/auth.ts", start: 1, end: 9 });
+  const found = routeEffects(g, { id: "ACTION /_action/auth/updateName", file: "utils/auth.ts", start: 1, end: 9, framework: "nextjs" });
   done();
   const at = (kind) => found.filter((e) => e.kind === kind).map((e) => Number(e.at.split(":").pop()));
   assert.deepEqual(at("write"), [2, 3]);
@@ -663,7 +663,7 @@ test("effects: an analytics capture isn't a payment capture", async () => {
     "}",
   ].join("\n");
   const { g, done } = fakeRepo({ "app/api/x/route.ts": src });
-  const found = routeEffects(g, { id: "POST /api/x", file: "app/api/x/route.ts", start: 1, end: 6 });
+  const found = routeEffects(g, { id: "POST /api/x", file: "app/api/x/route.ts", start: 1, end: 6, framework: "nextjs" });
   done();
   assert.deepEqual(found.filter((e) => e.kind === "moves_money").map((e) => Number(e.at.split(":").pop())), [4, 5]);
 });
@@ -864,7 +864,7 @@ test("effects: closing a stream and a multi-line $(…).remove() aren't deletes"
     "}",
   ].join("\n");
   const { g, done } = fakeRepo({ "app/api/x/route.ts": src });
-  const found = routeEffects(g, { id: "GET /api/x", file: "app/api/x/route.ts", start: 1, end: 9 });
+  const found = routeEffects(g, { id: "GET /api/x", file: "app/api/x/route.ts", start: 1, end: 9, framework: "nextjs" });
   done();
   assert.deepEqual(found.filter((e) => e.kind === "destructive").map((e) => Number(e.at.split(":").pop())), [8]);
 });
