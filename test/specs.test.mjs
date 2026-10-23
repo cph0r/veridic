@@ -34,3 +34,20 @@ test("check: warns about story-like headings it can't read, without failing", ()
   const out = JSON.parse(r.stdout);
   assert.deepEqual(out.story_warnings, ['spec.md:3 "Story two: Pay" looks like a story but isn\'t read']);
 });
+
+test("success criteria are criteria, not untested rules", async () => {
+  const { ruleIds } = await import("../core/worklist.mjs");
+  const { testCoverage } = await import("../core/tests.mjs");
+  const spec = "# Spec: A\n\n## Requirements\n\n- **FR-001**: a is one [evidence: a.ts:1]\n- **FR-002**: b is two [evidence: a.ts:2]\n\n## Success Criteria\n\n- **SC-001**: every a is one [evidence: a.ts:1]\n- SC-002: nothing breaks\n";
+  assert.deepEqual(ruleIds(spec), ["FR-001", "FR-002"]);
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "veridic-sc-"));
+  fs.writeFileSync(path.join(repo, "a.ts"), "export const a = 1;\nexport const b = 2;\n");
+  spawnSync("git", ["init", "-q"], { cwd: repo });
+  spawnSync("git", ["add", "."], { cwd: repo });
+  const cov = testCoverage(repo, spec);
+  fs.rmSync(repo, { recursive: true, force: true });
+  assert.deepEqual(cov.requirements.map((r) => r.id), ["FR-001", "FR-002"]);
+  assert.deepEqual(cov.criteria.map((c) => c.id), ["SC-001", "SC-002"]);
+  assert.equal(cov.summary.requirements, 2);
+  assert.deepEqual(specDoc(spec).criteria, [{ id: "SC-001", text: "every a is one" }, { id: "SC-002", text: "nothing breaks" }]);
+});

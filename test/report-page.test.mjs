@@ -298,3 +298,12 @@ test("blueprint: a saved view sorted by a column the table no longer has falls b
   for (const k of ["broken", "outdated", "untested"]) assert.equal(m.cleanView({ sort: k, filter: "all" }).sort, null, k);
   for (const k of ["name", "health", "rules", "proven", "stories", "covered"]) assert.equal(m.cleanView({ sort: k, filter: "all" }).sort, k, k);
 });
+
+test("report page: a part's success criteria are listed apart, never as rules", () => {
+  const d = data();
+  d.specs[0].doc.criteria = [{ id: "SC-001", text: "Every order is paid once" }];
+  const m = load()(d);
+  const p = m.parts.find((x) => x.name === "Orders");
+  assert.deepEqual(p.criteria, [{ id: "SC-001", text: "Every order is paid once" }]);
+  assert.ok(!p.rules.some((r) => r.id === "SC-001"));
+});

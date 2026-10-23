@@ -14,7 +14,11 @@ import { testRecipe, exampleTest } from "./recipe.mjs";
 // Coverage statuses, in the work list's words.
 const STATUS = { covered: "tested", passing: "tested", broken: "broken", failing: "failing", marker_stale: "failing", unasserted: "weak", tagged_only: "weak", ambiguous: "weak", todo: "untested", none: "untested" };
 const REASON = { marker_stale: "its expected-failure test now fails: the code satisfies the rule, so make it a normal test", ambiguous: "a test names this id, but it also runs another spec's rule with the same id: write the id with its spec, e.g. `FR-008 (auth-2)`" };
-const RULE = /^\s*(?:-\s*\*\*|#{1,6}\s+)((?:FR|SC|NFR|AC|INV)-\d+[a-z]?)\b/;
+// Rules, not success criteria (SC-…): those describe outcomes and cite no code to test.
+const RULE = /^\s*(?:-\s*\*\*|#{1,6}\s+)((?:FR|NFR|AC|INV)-\d+[a-z]?)\b/;
+
+/** The rule ids a spec's text declares, in order. */
+export const ruleIds = (text) => [...new Set(String(text).split("\n").map((l) => l.match(RULE)?.[1]).filter(Boolean))];
 
 const read = (repo, f) => {
   try {
@@ -77,7 +81,7 @@ export async function workList(repo, moduleId, opts = {}) {
     const cov = testCoverage(repo, text, { specPath: path.join(repo, spec), run: !!opts.run, module: m.id });
     errors.push(...(cov.errors ?? []));
     const byId = new Map(cov.requirements.map((r) => [r.id, r]));
-    const ids = [...new Set(text.split("\n").map((l) => l.match(RULE)?.[1]).filter(Boolean))];
+    const ids = ruleIds(text);
     for (const id of ids) {
       const r = byId.get(id);
       if (!r || !(r.cites ?? []).length) {

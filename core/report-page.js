@@ -59,7 +59,7 @@ var veridicModel = (D) => {
   const specs = (D.specs || []).map((s) => {
     const rules = (s.requirements || []).filter((r) => r.requirement !== false);
     const by = (k) => rules.filter((r) => stateOf(r).key === k);
-    const sp = { path: s.path, name: nameOf(s), rules, stories: (s.doc && s.doc.stories) || [], meta: (s.doc && s.doc.meta) || {},
+    const sp = { path: s.path, name: nameOf(s), rules, stories: (s.doc && s.doc.stories) || [], criteria: (s.doc && s.doc.criteria) || [], meta: (s.doc && s.doc.meta) || {},
       broken: by("broken"), lost: by("lost"), stale: by("stale"), proven: by("proven"), weak: by("weak"),
       untested: rules.filter((r) => statusOf(r).tone === "none") };
     sp.tone = !rules.length ? "none" : sp.broken.length ? "bad" : sp.lost.length || sp.stale.length || sp.weak.length ? "warn" : sp.untested.length ? "todo" : "good";
@@ -96,7 +96,7 @@ var veridicModel = (D) => {
   const coverOf = new Map(((D.coverage || {}).parts || []).map((c) => [c.id, c]));
   const makePart = (id, name, kind, ss) => {
     const all = (k) => ss.flatMap((x) => x[k]);
-    const p = { id, name, kind, specs: ss, path: ss.length ? ss[0].path : null, rules: all("rules"), stories: all("stories"), broken: all("broken"), stale: all("stale"), lost: all("lost"), proven: all("proven"), weak: all("weak"), untested: all("untested") };
+    const p = { id, name, kind, specs: ss, path: ss.length ? ss[0].path : null, rules: all("rules"), stories: all("stories"), criteria: all("criteria"), broken: all("broken"), stale: all("stale"), lost: all("lost"), proven: all("proven"), weak: all("weak"), untested: all("untested") };
     p.outdated = p.stale.length + p.lost.length;
     p.files = new Set(p.rules.flatMap((r) => (r.cites || []).map((c) => c.file).filter(Boolean))).size;
     p.tone = !p.rules.length ? "none" : p.broken.length ? "bad" : p.outdated || p.weak.length ? "warn" : p.untested.length ? "todo" : "good";
@@ -349,11 +349,16 @@ var veridicModel = (D) => {
     const files = '<div class="sub-h">' + (p.specs.length === 1 ? "Spec file" : plural(p.specs.length, "spec file")) + "</div>" + p.specs.map((sp) => '<div class="sfile"><div><b>' + esc(sp.name) + '</b><span class="path">' + esc(sp.path) + '</span></div><span class="sn">' + plural(sp.rules.length, "rule") + " · " + plural((sp.stories || []).length, "story", "stories") + "</span></div>").join("");
     return pie + (attention ? '<div class="blk">' + attention + "</div>" : "") + '<div class="blk">' + files + "</div>";
   }
+  // success criteria: outcomes the spec promises, listed as written (no state: they cite no code)
+  function criteriaHTML(p) {
+    if (!p.criteria || !p.criteria.length) return "";
+    return '<div class="sub-h">Success criteria <span class="n">' + p.criteria.length + "</span></div>" + p.criteria.map((c) => '<div class="crit"><b>' + esc(c.id) + "</b> " + esc(c.text) + "</div>").join("");
+  }
   function storiesHTML(p) {
     const all = M.storiesOf(p), loose = M.rulesInNoStory(p);
     const list = all.length ? fold("st", all, storyHTML, 8, (k) => "Show " + k + " more stories") : '<div class="empty-req">No user stories written yet.</div>';
     const rest = loose.length ? '<div class="blk"><button class="req" data-unfold="ns"><span class="mark none">' + loose.length + '</span><span class="tx"><span><b>Rules in no story</b></span><div class="why">Rules no story names · tap to see them</div></span></button>' + loose.map((x) => ruleRow(x, "ns")).join("") + "</div>" : "";
-    return list + rest;
+    return list + rest + criteriaHTML(p);
   }
   function rulesList(p) {
     const list = M.partRules(p, { state: sheet.rstate, q: sheet.q });

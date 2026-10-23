@@ -269,3 +269,7 @@ table.specs { width: 100%; border-collapse: collapse; font-size: 14px; }
 .legend i { width: 10px; height: 10px; border-radius: 3px; flex: none; }
 .legend span { flex: 1; }
 .legend b { font-weight: 600; color: var(--ink); }
+
+/* Success criteria: listed as written, no state. */
+.crit { padding: 6px 2px; color: var(--ink2); font-size: 13px; line-height: 1.45; border-bottom: 1px solid var(--line); }
+.crit b { font-family: var(--mono); color: var(--ink); margin-right: 6px; }

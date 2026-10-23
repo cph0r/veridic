@@ -8,7 +8,7 @@ import path from "node:path";
 import { openGraph } from "./graph.mjs";
 import { routeInventory } from "./routes.mjs";
 import { effectManifest, readiness } from "./effects.mjs";
-import { auditTests, testCoverage } from "./tests.mjs";
+import { auditTests, testCoverage, successCriteria } from "./tests.mjs";
 import { metrics, defaultSpecs, isSpecFile } from "./metrics.mjs";
 import { checkCitations, repoFiles } from "./citations.mjs";
 import { screenGroups } from "./screens.mjs";
@@ -71,7 +71,7 @@ export function storyHeadingProblems(text) {
 
 export function specDoc(text) {
   const lines = text.split("\n");
-  const doc = { title: null, meta: {}, stories: [], tables: [], notes: [], reqs: {} };
+  const doc = { title: null, meta: {}, stories: [], tables: [], notes: [], reqs: {}, criteria: successCriteria(text) };
   let h2 = null, h3 = null, cur = null, story = null;
   const cells = (row) => row.trim().replace(/^\||\|$/g, "").split("|").map((c) => c.trim());
   for (let i = 0; i < lines.length; i++) {
@@ -183,7 +183,7 @@ function specSection(repo, file, m) {
       };
     });
     // Citations under a heading (a decision table, a contract section) aren't requirements.
-    const requirement = /^(?:FR|SC|NFR|R|AC|INV|D)-?\d+[a-z]?$/.test(id);
+    const requirement = /^(?:FR|NFR|R|AC|INV|D)-?\d+[a-z]?$/.test(id); // success criteria are listed apart
     const text = (r.text ?? "").replace(/^\*\*[\w-]+\*\*\s*(?:\([^)]*\))?\s*:?\s*/, "").replace(/^#{1,6}\s+[\w-]+\s*[:.\-–—]\s*/, "");
     const extra = doc.reqs[id] ?? {};
     return { id, requirement, text, section: extra.section ?? null, holds: extra.holds ?? null, checks: extra.vcs ?? [], status: r.status ?? "none", tests: (r.tests ?? []).map((t) => (typeof t === "string" ? t : t.at ?? `${t.file}:${t.line}`)), stale: stale.has(id), cites };

@@ -542,6 +542,16 @@ export function runByFramework(repo, testFiles, files) {
  * @returns {{ summary, requirements: [{ id, tests: [...], status }], errors? }}
  *   status: passing | failing | covered (not run) | unasserted (named tests check nothing) | tagged_only (test doesn't reach the cited code) | ambiguous (a plain id another spec shares, on a test running both rules' code) | todo | none
  */
+/** A spec's success criteria (SC-…), with their text: outcomes, not rules to test. */
+export function successCriteria(spec) {
+  const out = [];
+  for (const l of String(spec).split("\n")) {
+    const m = l.match(/^\s*[-*]\s*(?:\*\*)?(SC-?\d+[a-z]?)(?:\*\*)?\s*[:.]\s*(.*)$/);
+    if (m && !out.some((c) => c.id === m[1])) out.push({ id: m[1], text: m[2].replace(/\s*\[evidence:[^\]]*\]/g, "").trim() });
+  }
+  return out;
+}
+
 export function testCoverage(repo, spec, opts = {}) {
   const files = execFileSync("git", ["ls-files", "--cached", "--others", "--exclude-standard"], { cwd: repo, encoding: "utf8", maxBuffer: 64 << 20 }).split("\n").filter(Boolean);
   const fileSet = new Set(files);
@@ -553,7 +563,7 @@ export function testCoverage(repo, spec, opts = {}) {
   const texts = new Map(); // requirement id -> requirement text
   const specLines = spec.split("\n");
   for (const c of parsed.citations) {
-    if (!/^(FR|SC|NFR|AC|INV)-?\d+/.test(c.fr)) continue;
+    if (!/^(FR|NFR|AC|INV)-?\d+/.test(c.fr)) continue; // success criteria (SC) are listed apart
     const f = !c.bad && resolve(c.file).file;
     if (!cited.has(c.fr)) cited.set(c.fr, new Set());
     if (!cites.has(c.fr)) cites.set(c.fr, []);
@@ -695,6 +705,7 @@ export function testCoverage(repo, spec, opts = {}) {
       untested: count("none"),
     },
     requirements,
+    criteria: successCriteria(spec),
     // The code these results describe: cited files plus the tests named for them.
     basis: basisOf(repo, [...[...cited.values()].flatMap((s) => [...s]), ...tagged.map((t) => t.file)]),
     ...(run?.errors.length ? { errors: run.errors } : {}),
