@@ -230,6 +230,44 @@ export function testStrength(body, helpers = null) {
   return loose >= total ? "weak" : "strong";
 }
 
+/** The env flags a repo's tests are run with: this process's, plus `.veridic.json` "testEnv". */
+const envOf = (repo) => {
+  let extra = {};
+  try {
+    extra = JSON.parse(fs.readFileSync(path.join(repo, ".veridic.json"), "utf8")).testEnv ?? {};
+  } catch {}
+  return { ...process.env, ...extra };
+};
+
+/**
+ * Test blocks gated on an env flag that isn't set: `describe.skipIf(!process.env.X)(…)`,
+ * `it.runIf(process.env.X)(…)`, `(process.env.X ? describe : describe.skip)(…)`.
+ * -> { gates: [[start, end, "X"]], matchable }: `matchable` is the source with each gate's
+ * condition blanked (same length), so `describe(…)`'s title is found as usual.
+ */
+function envGates(src, code, env) {
+  const gates = [];
+  let matchable = src;
+  const blank = (a, b) => (matchable = matchable.slice(0, a) + " ".repeat(b - a) + matchable.slice(b));
+  const flag = (cond) => cond.match(/\b(?:process\.env|import\.meta\.env)\.(\w+)/)?.[1] ?? null;
+  for (const m of code.matchAll(/\b(?:it|test|describe)(\.(?:skipIf|runIf)\s*\()/g)) {
+    const condOpen = m.index + m[0].length;
+    const condClose = closeParen(code, condOpen);
+    const name = flag(src.slice(condOpen, condClose));
+    const call = code.indexOf("(", condClose + 1);
+    if (!name || call < 0) continue;
+    blank(m.index + m[0].length - m[1].length, condClose + 1);
+    if (!env[name]) gates.push([m.index, closeParen(code, call + 1), name]);
+  }
+  for (const m of code.matchAll(/\(\s*(?:process\.env|import\.meta\.env)\.(\w+)\s*\?\s*(describe|it|test)\s*:\s*\2\.skip\s*\)\s*\(/g)) {
+    const end = m.index + m[0].length - 1;
+    blank(m.index, end);
+    matchable = matchable.slice(0, end - m[2].length) + m[2] + matchable.slice(end);
+    if (!env[m[1]]) gates.push([m.index, closeParen(code, end + 1), m[1]]);
+  }
+  return { gates, matchable };
+}
+
 /** Every test title in the repo that names a requirement id. */
 export function findTaggedTests(repo, files) {
   const out = [];
@@ -241,7 +279,9 @@ export function findTaggedTests(repo, files) {
     // Ranges of skipped describe blocks: tests inside them never run.
     const skipped = [...code.matchAll(/\b(?:xdescribe|describe\.skip)\s*\(/g)].map((m) => [m.index, closeParen(code, m.index + m[0].length)]);
     const lineOf = (idx) => src.slice(0, idx).split("\n").length;
-    for (const t of src.matchAll(TITLE)) {
+    // Blocks that run only when an env flag is set; `matchable` blanks the gate so the title reads as usual.
+    const { gates, matchable } = envGates(src, code, envOf(repo));
+    for (const t of matchable.matchAll(TITLE)) {
       if (code[t.index] === " ") continue; // inside a comment or string
       const ids = [
         ...[...t[4].matchAll(REQ_ID)].map((m) => ({ id: /^R-/.test(m[1]) ? toFr(m[1].split("-").pop()) : m[1], vc: m[2] ?? null })),
@@ -256,10 +296,11 @@ export function findTaggedTests(repo, files) {
       // such marker (mocha, node:test) skip the test with "[broken]" in its title: broken, not proven.
       const expectFail = t[2] === "fails" || t[2] === "failing";
       const brokenSkip = todo && /\[broken\]/i.test(t[4]);
+      const needs = gates.find(([a, b]) => t.index >= a && t.index < b)?.[2] ?? null;
       for (const { id, vc } of ids) {
         // "FR-001 (orders): …": the rule belongs to module orders (ids repeat across specs).
         const qual = t[4].match(new RegExp(`\\b${id}\\s*\\(([\\w-]+)\\)`))?.[1] ?? null;
-        out.push({ id, vc, file, line: lineOf(t.index), title: t[4], todo, strength, spec: bound, expectFail, brokenSkip, qual });
+        out.push({ id, vc, file, line: lineOf(t.index), title: t[4], todo: todo || !!needs, strength, spec: bound, expectFail, brokenSkip, qual, ...(needs ? { needs } : {}) });
       }
     }
   }
@@ -675,7 +716,7 @@ export function testCoverage(repo, spec, opts = {}) {
       .filter((t) => t.id === id)
       .map((t) => {
         const result = run?.results.get(`${t.file}\0${t.title}`);
-        return { at: `${t.file}:${t.line}`, title: t.title, todo: t.todo, ...(t.expectFail ? { expect_fail: true } : {}), ...(t.brokenSkip ? { broken_skip: true } : {}), ...(t.strength ? { strength: t.strength } : {}), reaches_cited_code: reaches(t.file, cited.get(id)), ...(run ? { result: result ?? "not run" } : {}) };
+        return { at: `${t.file}:${t.line}`, title: t.title, todo: t.todo, ...(t.needs ? { needs: t.needs } : {}), ...(t.expectFail ? { expect_fail: true } : {}), ...(t.brokenSkip ? { broken_skip: true } : {}), ...(t.strength ? { strength: t.strength } : {}), reaches_cited_code: reaches(t.file, cited.get(id)), ...(run ? { result: result ?? "not run" } : {}) };
       });
     const real = tests.filter((t) => !t.todo && !t.expect_fail && t.reaches_cited_code && checks(t));
     const proving = tests.filter((t) => !t.todo && t.expect_fail && t.reaches_cited_code && checks(t));
@@ -690,6 +731,7 @@ export function testCoverage(repo, spec, opts = {}) {
     else if (tests.some((t) => !t.todo && t.reaches_cited_code)) status = "unasserted";
     else if (tests.some((t) => !t.todo)) status = "tagged_only";
     else if (ambiguous.has(id)) status = "ambiguous";
+    else if (tests.some((t) => t.needs)) status = "skipped";
     else if (tests.length) status = "todo";
     // Tests that reach the cited code without being named for this requirement:
     // candidates for "covered" once someone checks they assert the behavior.
@@ -700,7 +742,8 @@ export function testCoverage(repo, spec, opts = {}) {
       const vt = tagged.filter((t) => t.id === id && t.vc === vc && !t.todo && checks(t) && reaches(t.file, cited.get(id)));
       return { id: vc, covered: vt.length > 0, tests: vt.map((t) => ({ at: `${t.file}:${t.line}`, title: t.title, ...(run ? { result: run.results.get(`${t.file}\0${t.title}`) ?? "not run" } : {}) })) };
     });
-    return { id, status, ...(proven != null ? { proven } : {}), tests, ...(ambiguous.has(id) ? { ambiguous_tests: ambiguous.get(id) } : {}), related_tests, text: texts.get(id), cites: cites.get(id), ...(verification.length ? { verification, vc_covered: verification.filter((v) => v.covered).length } : {}) };
+    const needs = status === "skipped" ? [...new Set(tests.filter((t) => t.needs).map((t) => t.needs))] : null;
+    return { id, status, ...(needs ? { needs } : {}), ...(proven != null ? { proven } : {}), tests, ...(ambiguous.has(id) ? { ambiguous_tests: ambiguous.get(id) } : {}), related_tests, text: texts.get(id), cites: cites.get(id), ...(verification.length ? { verification, vc_covered: verification.filter((v) => v.covered).length } : {}) };
   });
 
   const count = (s) => requirements.filter((r) => r.status === s).length;

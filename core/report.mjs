@@ -188,7 +188,7 @@ function specSection(repo, file, m) {
     const requirement = /^(?:FR|NFR|R|AC|INV|D)-?\d+[a-z]?$/.test(id); // success criteria are listed apart
     const text = (r.text ?? "").replace(/^\*\*[\w-]+\*\*\s*(?:\([^)]*\))?\s*:?\s*/, "").replace(/^#{1,6}\s+[\w-]+\s*[:.\-–—]\s*/, "");
     const extra = doc.reqs[id] ?? {};
-    return { id, requirement, text, section: extra.section ?? null, holds: extra.holds ?? null, checks: extra.vcs ?? [], status: r.status ?? "none", tests: (r.tests ?? []).map((t) => (typeof t === "string" ? t : t.at ?? `${t.file}:${t.line}`)), stale: stale.has(id), cites };
+    return { id, requirement, text, section: extra.section ?? null, holds: extra.holds ?? null, checks: extra.vcs ?? [], status: r.status ?? "none", ...(r.needs ? { needs: r.needs } : {}), tests: (r.tests ?? []).map((t) => (typeof t === "string" ? t : t.at ?? `${t.file}:${t.line}`)), stale: stale.has(id), cites };
   });
   const { reqs: _, ...rest } = doc;
   return { spec: m.spec, path: path.relative(repo, file), numbers: m, doc: rest, requirements: reqs };

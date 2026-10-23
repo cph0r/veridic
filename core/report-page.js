@@ -22,8 +22,9 @@ var veridicModel = (D) => {
     tagged_only: ["Its test misses the code", "warn"], ambiguous: ["Its test doesn't say which spec", "warn"], todo: ["Its test is a todo", "none"], none: ["Not tested yet", "none"],
     broken: ["Broken, proven", "bad"], // an expected-failure test shows the code breaks the rule
     marker_stale: ["Fixed: make its test a normal one", "warn"], // the expected-failure test now fails
+    skipped: ["Its test is skipped", "none"], // runs only with an env flag set
   };
-  const statusOf = (r) => { const [label, tone] = REQ[r.status] || REQ.none; return { label, tone }; };
+  const statusOf = (r) => { const [label, tone] = REQ[r.status] || REQ.none; return { label: r.status === "skipped" && r.needs && r.needs.length ? "Skipped (needs " + r.needs.join(", ") + ")" : label, tone }; };
   // What the page says about a rule, worst first: the code breaks it; it cites code that's gone;
   // the code it cites changed since it was written; its test is weak; no test yet; proven.
   const STATE = {

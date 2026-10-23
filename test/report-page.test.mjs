@@ -325,3 +325,8 @@ test("report page: the product spec, above the parts table, each journey and gua
   // In the shell, the product section comes before the parts table.
   assert.ok(src.indexOf('id="product"') > 0 && src.indexOf('id="product"') < src.indexOf('id="specs-sec"'));
 });
+
+test("report page: a rule whose test needs an env flag says which", () => {
+  const m = load()(data());
+  assert.equal(m.statusOf({ status: "skipped", needs: ["DB_TESTS"] }).label, "Skipped (needs DB_TESTS)");
+});

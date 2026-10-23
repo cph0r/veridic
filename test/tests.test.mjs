@@ -305,3 +305,28 @@ test("tests: each kind of reach on its own", async () => {
   fs.rmSync(repo, { recursive: true, force: true });
   assert.deepEqual(out, [["src/lib/apps.ts"], ["lib/db/src/index.ts"], ["scripts/x.ts"]]);
 });
+
+test("tests: a test that needs an env flag says so, and counts once the flag is set", () => {
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "veridic-env-"));
+  const w = (f, t) => (fs.mkdirSync(path.dirname(path.join(repo, f)), { recursive: true }), fs.writeFileSync(path.join(repo, f), t));
+  w("src/a.ts", "export const a = 1;\nexport const b = 2;\nexport const c = 3;\n");
+  w("test/db.test.ts", [
+    'import { a, b, c } from "../src/a";',
+    'describe.skipIf(!process.env.DB_TESTS)("db", () => {',
+    '  it("FR-001: a is one", () => { expect(a).toBe(1); });',
+    "});",
+    'it.runIf(process.env.DB_TESTS)("FR-002: b is two", () => { expect(b).toBe(2); });',
+    '(process.env.DB_TESTS ? describe : describe.skip)("more", () => {',
+    '  it("FR-003: c is three", () => { expect(c).toBe(3); });',
+    "});",
+  ].join("\n"));
+  execFileSync("git", ["init", "-q"], { cwd: repo });
+  execFileSync("git", ["add", "."], { cwd: repo });
+  const spec = "- **FR-001**: a [evidence: src/a.ts:1]\n- **FR-002**: b [evidence: src/a.ts:2]\n- **FR-003**: c [evidence: src/a.ts:3]\n";
+  const before = testCoverage(repo, spec).requirements;
+  w(".veridic.json", JSON.stringify({ testEnv: { DB_TESTS: "1" } }));
+  const after = testCoverage(repo, spec).requirements;
+  fs.rmSync(repo, { recursive: true, force: true });
+  assert.deepEqual(before.map((r) => [r.id, r.status, r.needs]), [["FR-001", "skipped", ["DB_TESTS"]], ["FR-002", "skipped", ["DB_TESTS"]], ["FR-003", "skipped", ["DB_TESTS"]]]);
+  assert.deepEqual(after.map((r) => r.status), ["covered", "covered", "covered"]);
+});
