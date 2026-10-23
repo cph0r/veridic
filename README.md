@@ -180,7 +180,19 @@ Express (JavaScript and TypeScript) today; Fastify, NestJS and Next.js route han
 <details>
 <summary><strong>What does it get wrong?</strong></summary>
 
-It reads middleware by name, so an oddly named auth guard can be misread; it matches tests to routes by name, so a test that never names the route or function counts as missing (it errs toward NOT DONE); and a route prefix computed at run time is left out. Known misses are listed in the [benchmark](https://github.com/cph0r/veridic-bench/blob/main/RESULTS.md).
+It reads middleware by name and by whether it can turn a request away, so an oddly named auth guard can be misread; it matches tests to routes by name and by the URLs they call, so a test that does neither counts as missing (it errs toward NOT DONE); and a route prefix computed at run time is left out. When a test names a rule id that two specs share and runs both rules' code, Veridic won't guess which one it proves: the rule shows as ambiguous until the title names its spec (`FR-008 (auth-2)`). Known misses are listed in the [benchmark](https://github.com/cph0r/veridic-bench/blob/main/RESULTS.md).
+</details>
+
+<details>
+<summary><strong>My tests need a database or a flag to run. How does Veridic run them?</strong></summary>
+
+`veridic tests --run` runs your tests with your own framework (Vitest, Jest or node:test). Give it the environment they need in `.veridic.json` at the repo root, for example `{ "testEnv": { "DB_TESTS": "1" } }`. If the runner can't start at all, Veridic shows the runner's own error line and doesn't count those rules as failing.
+</details>
+
+<details>
+<summary><strong>Does it understand multi-tenant apps?</strong></summary>
+
+Yes. Guards attached to a parent router (`workspace.use(requireAuth, requireWorkspace)`) cover every route mounted below it, and a record looked up inside the workspace a membership guard checked (`workspaceOf(req)`, `req.workspace`) counts as scoped to the caller, the way row-level security scopes it. A route that ignores the workspace is still flagged.
 </details>
 
 <details>
