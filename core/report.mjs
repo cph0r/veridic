@@ -56,8 +56,12 @@ const REQ_ID = "(?:FR|SC|NFR|R|AC|INV|D)-?\\d+[a-z]?";
  * "Story 2: Pay (P1)", "Story 2 - Pay", "US-2: Pay [P2]". -> { n, title, priority } or null.
  */
 export function parseStoryHeading(h) {
-  const m = String(h).trim().match(/^(?:user\s+story|story|us)\s*-?\s*(\d+)\s*[-–—:.]\s*(.*?)\s*(?:[([]\s*(?:priority\s*:\s*)?(P\d)\s*[)\]])?\s*$/i);
-  return m && m[2] ? { n: Number(m[1]), title: m[2], priority: m[3]?.toUpperCase() ?? null } : null;
+  // Two linear steps (one regex with an optional suffix after a lazy title backtracks badly).
+  const m = String(h).trim().match(/^(?:user\s+story|story|us)\s*-?\s*(\d+)\s*[-–—:.]\s*(\S.*)$/i);
+  if (!m) return null;
+  const pr = m[2].match(/[([][ \t]*(?:priority[ \t]*:[ \t]*)?(P\d)[ \t]*[)\]]$/i);
+  const title = (pr ? m[2].slice(0, pr.index) : m[2]).trim();
+  return title ? { n: Number(m[1]), title, priority: pr ? pr[1].toUpperCase() : null } : null;
 }
 
 /** `###` headings that look like stories but don't parse: [{ line, heading }]. */

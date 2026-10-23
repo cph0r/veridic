@@ -161,7 +161,16 @@ export function findModules(g, inv) {
       // Two parts with one name: the later is named after the folder its routes live in (oauth,
       // not "Auth 2"), else the folder's path; `was` keeps the old id so its spec stays attached.
       const dirs = new Map();
-      for (const r of m.routes) { const parts = String(r.file ?? "").split("/").slice(0, -1).filter((x) => !WORDS_GENERIC.has(x)); const k = parts.slice(-2).join("/"); if (k) dirs.set(k, (dirs.get(k) ?? 0) + 1); }
+      // The folder: its last meaningful name (auth in src/api/auth), and with the folder above it
+      // as written (api/auth), for when another part already has the name.
+      for (const r of m.routes) {
+        const segs = String(r.file ?? "").split("/").slice(0, -1);
+        let li = segs.length - 1;
+        while (li >= 0 && WORDS_GENERIC.has(segs[li])) li--;
+        if (li < 0) continue;
+        const k = [segs[li - 1], segs[li]].filter(Boolean).join("/");
+        dirs.set(k, (dirs.get(k) ?? 0) + 1);
+      }
       const dir = [...dirs].sort((a, b) => b[1] - a[1])[0]?.[0] ?? "";
       const old = `${id}-${n}`;
       const leaf = dir.split("/").pop(), pathId = slug(dir.replace(/\//g, "-"));

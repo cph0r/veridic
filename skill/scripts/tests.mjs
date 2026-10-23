@@ -36,12 +36,12 @@ run(async () => {
   }
   // --module <id> for a spec folder that isn't a part (specs/server/spec.md): the spec's tests.
   const specOfFolder = a.module && a.repo && !a.spec ? path.join(a.repo, "specs", a.module, "spec.md") : null;
-  if (a.module && a.repo) {
-    const wl = await workList(a.repo, a.module, { run: !!a.run });
+  let wl = null;
+  if (a.module && a.repo && !a.spec) {
+    wl = await workList(a.repo, a.module, { run: !!a.run });
     if (wl.error && specOfFolder && fs.existsSync(specOfFolder)) a.spec = specOfFolder;
   }
   if (a.module && a.repo && !a.spec) {
-    const wl = await workList(a.repo, a.module, { run: !!a.run });
     // --mutate N: change the cited code of N tested rules; count those whose tests notice.
     if (!wl.error && a.mutate) wl.mutation = testMutation(a.repo, wl.rules, Number(a.mutate));
     if (a.json) emit({ repo: a.repo, ...wl }, wl.error ? 2 : 0);

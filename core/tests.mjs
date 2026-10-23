@@ -253,11 +253,17 @@ function envGates(src, code, env) {
   for (const m of code.matchAll(/\b(?:it|test|describe)(\.(?:skipIf|runIf)\s*\()/g)) {
     const condOpen = m.index + m[0].length;
     const condClose = closeParen(code, condOpen);
-    const name = flag(src.slice(condOpen, condClose));
+    const cond = src.slice(condOpen, condClose);
+    const name = flag(cond);
     const call = code.indexOf("(", condClose + 1);
     if (!name || call < 0) continue;
     blank(m.index + m[0].length - m[1].length, condClose + 1);
-    if (!env[name]) gates.push([m.index, closeParen(code, call + 1), name]);
+    // skipIf(!X) / runIf(X): runs only with X set. skipIf(X) / runIf(!X): runs only without it.
+    // A condition other than a bare flag or its negation isn't read.
+    const neg = /^\s*!\s*(?:process\.env|import\.meta\.env)\.\w+\s*$/.test(cond);
+    if (!neg && !/^\s*(?:process\.env|import\.meta\.env)\.\w+\s*$/.test(cond)) continue;
+    const needsSet = m[1].startsWith(".skipIf") ? neg : !neg;
+    if (needsSet ? !env[name] : !!env[name]) gates.push([m.index, closeParen(code, call + 1), needsSet ? name : `${name} unset`]);
   }
   for (const m of code.matchAll(/\(\s*(?:process\.env|import\.meta\.env)\.(\w+)\s*\?\s*(describe|it|test)\s*:\s*\2\.skip\s*\)\s*\(/g)) {
     const end = m.index + m[0].length - 1;

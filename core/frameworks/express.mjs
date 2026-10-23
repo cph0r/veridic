@@ -442,7 +442,9 @@ function expressRoutes(g, { entry } = {}) {
         const raw = (c.args[0]?.raw ?? "").trim();
         // A path held in a constant: a string, an array (`router.post(ROUTES, …)`), maybe imported.
         const paths = [routePathOf(raw) ?? routePath ?? null];
-        if (!paths[0] && /^[A-Za-z_$][\w$]*$/.test(raw)) paths.splice(0, 1, ...(constPaths(f, raw) ?? [null]));
+        // Only when the call has no path of its own (not in a `.route("/x")` chain) can its first argument be one.
+        const fromConst = !paths[0] && /^[A-Za-z_$][\w$]*$/.test(raw) ? constPaths(f, raw) : null;
+        if (fromConst) paths.splice(0, 1, ...fromConst);
         for (const p of paths) {
           if (!p || !/^[/*]|^:[\w$]+\//.test(p)) continue; // `app.get("env")` reads a setting; `${base}/x` is a path
           const name = `${c.name.toUpperCase()} ${p}`;
@@ -452,7 +454,7 @@ function expressRoutes(g, { entry } = {}) {
           // A chain can put several methods on one line (`.post(add).get(list)`): keep
           // this call's own arguments, so its handlers aren't confused with its neighbours'.
           const args = c.args.map((x) => x.raw);
-          if (paths.length && !routePathOf(raw) && args.length) args[0] = JSON.stringify(p); // a path constant isn't middleware
+          if (fromConst && args.length) args[0] = JSON.stringify(p); // a path constant isn't middleware
           const n = { id: `veridic:route:${f}:${start}:${name}`, kind: "route", name, file: f, start, end: c.endLine, receiver: ch.root, extent: [start, c.endLine], handlerText: args.join(", ") };
           routeNodes.push(n);
           g.nodes.set(n.id, n);
@@ -593,7 +595,9 @@ function expressRoutes(g, { entry } = {}) {
         let depth = 0, i = open;
         for (; i < text.length; i++) { if (text[i] === "{") depth++; else if (text[i] === "}" && --depth === 0) break; }
         const body = text.slice(d.index, i + 1);
-        if (!/\breq\.(?:hostname|subdomains)\b|\breq\.headers\.host\b|headers\[\s*["']host["']\s*\]/.test(body) || !/\bres\.(?:send|end|json|sendFile|redirect|status|write|setHeader)\s*\(|\b[\w$]+\(\s*res\s*,/.test(body)) continue;
+        if (!/\breq\.(?:hostname|subdomains)\b|\breq\.headers\.host\b|headers\[\s*["']host["']\s*\]/.test(body) || !/\bres\.(?:send|sendFile|end|render|write)\s*\(|\b[\w$]+\(\s*res\s*,/.test(body)) continue;
+        // It serves pages itself: CORS or tenant middleware sets a header or rejects, then passes on.
+        if (/\bnext\s*\(\s*\)\s*;?\s*\}\s*;?\s*$/.test(body.replace(/\/\/[^\n]*/g, ""))) continue;
         const line = (k) => text.slice(0, k).split("\n").length;
         routes.push({ id: "ALL /*", method: "ALL", path: "/*", file, start: line(d.index), end: line(i), guards: [], host: true });
       }

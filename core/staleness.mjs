@@ -107,6 +107,7 @@ export function staleness(repo, spec, opts = {}) {
   const conflicts = []; // anchor and diff disagree, or the anchor can't be found
   const symbols = opts.symbols ?? null; // from anchors.openSymbols(repo): the index as of now
   let untouched = 0;
+  let unchecked = 0; // unhashed citations of a new spec: nothing to compare them with
 
   // Where the citation is now, by diff and (if anchored and indexed) by symbol.
   // A rewrite is proposed only when every available method agrees.
@@ -131,15 +132,25 @@ export function staleness(repo, spec, opts = {}) {
   // from the range's base doesn't apply to its citations. Hashed citations are judged by their
   // text either way.
   const dirty = opts.specFile ? specChanged(repo, opts.specFile) : false;
+  // An edited committed spec: a line that isn't as committed was (re)written against the working
+  // tree, so its unhashed citations aren't diffed; unchanged lines are checked as usual.
+  let committedLines = null;
+  if (opts.specFile && !dirty) {
+    try {
+      committedLines = new Set(git(repo, ["show", `HEAD:${opts.specFile}`]).split("\n"));
+    } catch {}
+  }
+  const specLines = spec.split("\n");
+  const rewritten = (c) => committedLines != null && !committedLines.has(specLines[c.spec_line - 1]);
   const resolveNow = makeResolver(repo, { aliases: parsed.aliases, bases: [...(opts.bases ?? []), ...parsed.bases] });
 
   for (const c of parsed.citations) {
     const at = { fr: c.fr, spec_line: c.spec_line, cite: c.cite };
     if (c.hash) {
-      const t = textCheck(repo, c, resolveNow);
+      const t = textCheck(repo, c, resolveNow, { base });
       const now = resolveNow(c.file).file ?? c.file;
       if (t.state === "fresh") untouched++;
-      else if (t.state === "stale") stale.push({ ...at, file: now, change: "edited (the cited text changed)", hunk: null });
+      else if (t.state === "stale") stale.push({ ...at, file: now, change: t.deleted ? "deleted" : t.ambiguous ? `edited (the cited text changed; the same text is in ${t.ambiguous} other places)` : "edited (the cited text changed)", hunk: null });
       else if (t.state === "moved") {
         shifted.push({ ...at, file: now, now: `${t.file ?? now}:${t.start}-${t.end}`, ...(t.file ? { renamed_to: t.file } : {}) });
         const anchor = c.anchor ? { name: c.anchor.name, line: c.anchor.line + t.start - c.start } : null;
@@ -147,8 +158,8 @@ export function staleness(repo, spec, opts = {}) {
       }
       continue;
     }
-    if (dirty) {
-      untouched++;
+    if (dirty || rewritten(c)) {
+      unchecked++;
       continue;
     }
     const file = !c.bad && resolve(c.file).file;
@@ -206,13 +217,14 @@ export function staleness(repo, spec, opts = {}) {
     range,
     base,
     head: head ?? "working tree",
-    ...(dirty ? { baseline: "spec not committed: unhashed citations taken as of the working tree" } : {}),
+    ...(dirty ? { baseline: "new spec, not committed: its unhashed citations can't be checked yet (stamp them with --stamp)" } : {}),
     summary: {
       citations: parsed.citations.length,
       stale: stale.length,
       stale_requirements: [...new Set(stale.map((s) => s.fr))],
       shifted: shifted.length,
       untouched,
+      ...(unchecked ? { unchecked } : {}),
       unresolved: unresolved.length,
       fixable: fixes.length,
       conflicts: conflicts.length,
@@ -320,10 +332,13 @@ export function fixSpec(repo, spec, opts = {}) {
 
 const nowAt = (ch, c) => `${ch.new}:${shiftLine(ch.hunks, c.start)}-${shiftLine(ch.hunks, c.end)}`;
 
-/** Whether a spec file is untracked or differs from HEAD (staged or not). */
+/**
+ * Whether a spec was written against the working tree: untracked (new). A committed spec that is
+ * only edited still describes its committed code, so its citations are checked as usual.
+ */
 function specChanged(repo, specFile) {
   try {
-    return git(repo, ["status", "--porcelain", "--", specFile]).trim() !== "";
+    return git(repo, ["status", "--porcelain", "--", specFile]).startsWith("??");
   } catch {
     return false;
   }
@@ -349,4 +364,15 @@ export function stampSpec(repo, spec, opts = {}) {
   });
   const { spec: out, applied } = applyEdits(spec, edits);
   return { spec: out, stamped: applied, skipped };
+}
+
+/**
+ * A re-rendered spec keeps the hashes its citations had before (matched by file, lines and
+ * anchor), so code that drifted since stays out of date instead of being stamped fresh.
+ */
+export function carryHashes(before, now) {
+  const key = (c) => `${c.file}:${c.start}-${c.end}#${c.anchor?.name ?? ""}`;
+  const had = new Map(parseSpec(before ?? "").citations.filter((c) => c.hash).map((c) => [key(c), c.hash]));
+  const edits = parseSpec(now).citations.filter((c) => !c.hash && !c.bad && had.has(key(c))).map((c) => ({ fr: c.fr, spec_line: c.spec_line, cite: c.cite, replacement: formatCite(c.file, c.start, c.end, c.anchor ?? null, had.get(key(c))) }));
+  return applyEdits(now, edits).spec;
 }

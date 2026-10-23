@@ -159,9 +159,9 @@ export function citeHash(lines) {
 }
 
 /** Where a file was renamed to since the last commit (git's rename detection), or null. */
-function renamedTo(repo, file) {
+function renamedTo(repo, file, base = "HEAD") {
   try {
-    const out = execFileSync("git", ["diff", "-M", "--name-status", "HEAD"], { cwd: repo, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+    const out = execFileSync("git", ["diff", "-M", "--name-status", base], { cwd: repo, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
     for (const l of out.split("\n")) {
       const [st, from, to] = l.split("\t");
       if (/^R/.test(st ?? "") && from === file) return to;
@@ -176,7 +176,7 @@ function renamedTo(repo, file) {
  * in the file (the copy nearest the old place), "stale" when it's nowhere, "unhashed" without
  * a hash (checked the old way).
  */
-export function textCheck(repo, c, resolve) {
+export function textCheck(repo, c, resolve, { base = "HEAD" } = {}) {
   if (!c.hash || c.bad) return { state: "unhashed" };
   let file = resolve(c.file).file ?? null;
   let renamed = null;
@@ -189,15 +189,21 @@ export function textCheck(repo, c, resolve) {
   };
   let src = file ? read(file) : null;
   if (!src) {
-    renamed = renamedTo(repo, file ?? c.file);
+    // Renamed since the range's base (committed or not), else deleted.
+    renamed = renamedTo(repo, file ?? c.file, base);
     src = renamed ? read(renamed) : null;
-    if (!src) return { state: "stale" };
+    if (!src) return { state: "stale", deleted: true };
   }
   const len = c.end - c.start + 1;
   if (!renamed && citeHash(src.slice(c.start - 1, c.end)) === c.hash && c.end <= src.length) return { state: "fresh" };
-  let best = null;
-  for (let s = 1; s + len - 1 <= src.length; s++)
-    if (citeHash(src.slice(s - 1, s - 1 + len)) === c.hash && (!best || Math.abs(s - c.start) < Math.abs(best - c.start))) best = s;
-  if (best == null) return { state: "stale" };
-  return { state: "moved", ...(renamed ? { file: renamed } : {}), start: best, end: best + len - 1 };
+  const found = [];
+  for (let s = 1; s + len - 1 <= src.length; s++) if (citeHash(src.slice(s - 1, s - 1 + len)) === c.hash) found.push(s);
+  if (!found.length) return { state: "stale" };
+  // Common text (`return next();`) can be anywhere: one copy is where it went; several are
+  // trusted only for a citation of 2+ lines with one copy strictly nearest. Else it's for a person.
+  const dist = (x) => Math.abs(x - c.start);
+  const sorted = [...found].sort((a, b) => dist(a) - dist(b));
+  const clear = found.length === 1 || (len >= 2 && dist(sorted[0]) < dist(sorted[1]));
+  if (!clear) return { state: "stale", ambiguous: found.length };
+  return { state: "moved", ...(renamed ? { file: renamed } : {}), start: sorted[0], end: sorted[0] + len - 1 };
 }

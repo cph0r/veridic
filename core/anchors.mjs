@@ -95,11 +95,18 @@ export function formatCite(ref, start, end, anchor, hash) {
 export function applyEdits(spec, edits, { anywhere = false } = {}) {
   const lines = spec.split("\n");
   let applied = 0;
+  // The whole citation, not a prefix of a longer one (`a.ts:1-2` inside `a.ts:1-20`): it starts after
+  // `[evidence:`, a separator or a backtick, and ends at one.
+  const esc = (x) => x.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const find = (line, cite) => {
+    const m = new RegExp(`(^|[\\s,;:\\[\`])${esc(cite)}(?=$|[\\s,;\\]\`])`).exec(line ?? "");
+    return m ? m.index + m[1].length : -1;
+  };
   for (const e of edits) {
     let i = e.spec_line - 1;
-    if (anywhere && !lines[i]?.includes(e.cite)) i = lines.findIndex((l) => l.includes(e.cite));
-    const at = lines[i]?.indexOf(e.cite);
-    if (at == null || at < 0) continue;
+    if (anywhere && find(lines[i], e.cite) < 0) i = lines.findIndex((l) => find(l, e.cite) >= 0);
+    const at = i < 0 ? -1 : find(lines[i], e.cite);
+    if (at < 0) continue;
     lines[i] = lines[i].slice(0, at) + e.replacement + lines[i].slice(at + e.cite.length);
     applied++;
   }

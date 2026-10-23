@@ -7,8 +7,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { validate, renderMarkdown, generatedSections, renderScaffolding } from "../../core/specdata.mjs";
-import { testCoverage, traceabilityTable } from "../../core/tests.mjs";
-import { stampSpec } from "../../core/staleness.mjs";
+import { testCoverage, traceabilityTable, reviewedSection } from "../../core/tests.mjs";
+import { stampSpec, carryHashes } from "../../core/staleness.mjs";
 import { checkDecisions, committedSpec } from "../../core/decisions.mjs";
 import { parseArgs, emit, fail, run } from "./_cli.mjs";
 
@@ -32,11 +32,13 @@ run(() => {
   const dir = a["out-dir"] ?? path.dirname(specPath);
   const generated = generatedSections(a.repo, spec.seeds);
   // Each citation records what it points at now (a hash of its lines), so it's judged by its text.
-  const md = stampSpec(a.repo, renderMarkdown(spec, generated)).spec;
   const mdPath = path.join(dir, "spec.md");
+  const before = fs.existsSync(mdPath) ? fs.readFileSync(mdPath, "utf8") : "";
+  const md = stampSpec(a.repo, carryHashes(before, renderMarkdown(spec, generated))).spec;
   fs.writeFileSync(mdPath, md);
   const cov = testCoverage(a.repo, md, { specPath: mdPath, run: !!a["run-tests"] });
-  fs.writeFileSync(path.join(dir, "traceability.md"), traceabilityTable(cov));
+  const tracePath = path.join(dir, "traceability.md");
+  fs.writeFileSync(tracePath, traceabilityTable(cov, { reviewed: reviewedSection(fs.existsSync(tracePath) ? fs.readFileSync(tracePath, "utf8") : "") }));
   const wrote = [mdPath, path.join(dir, "traceability.md")];
   if (spec.domain) {
     fs.writeFileSync(path.join(dir, "requirements.md"), renderScaffolding(spec, cov));
