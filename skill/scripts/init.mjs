@@ -44,7 +44,7 @@ function startClaude(repo, prompt) {
 }
 
 run(async () => {
-  const a = parseArgs(process.argv.slice(2), { flags: ["repo"], bools: ["install", "json", "enforce", "specs", "no-specs", "tests", "no-tests"] });
+  const a = parseArgs(process.argv.slice(2), { flags: ["repo"], bools: ["install", "json", "enforce", "specs", "no-specs", "tests", "no-tests", "card"] });
   if (!a.repo) fail("need --repo", usage);
   const rows = [];
   const next = [];

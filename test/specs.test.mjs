@@ -51,3 +51,52 @@ test("success criteria are criteria, not untested rules", async () => {
   assert.equal(cov.summary.requirements, 2);
   assert.deepEqual(specDoc(spec).criteria, [{ id: "SC-001", text: "every a is one" }, { id: "SC-002", text: "nothing breaks" }]);
 });
+
+const tempRepo = (files) => {
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "veridic-ids-"));
+  for (const [f, t] of Object.entries(files)) fs.mkdirSync(path.dirname(path.join(repo, f)), { recursive: true }), fs.writeFileSync(path.join(repo, f), t);
+  spawnSync("git", ["init", "-q"], { cwd: repo });
+  spawnSync("git", ["add", "."], { cwd: repo });
+  return { repo, read: (f) => fs.readFileSync(path.join(repo, f), "utf8"), done: () => fs.rmSync(repo, { recursive: true, force: true }) };
+};
+
+test("link: an id two specs use is always written qualified, and a bare title is repaired, not refused", async () => {
+  const { linkTests, sharedRuleIds } = await import("../core/link.mjs");
+  const r = tempRepo({
+    "specs/apps/spec.md": "- **INV-3**: apps hold [evidence: a.ts:1]\n- **FR-001**: only here [evidence: a.ts:1]\n",
+    "specs/auth/spec.md": "- **INV-3**: auth holds [evidence: a.ts:1]\n",
+    "a.ts": "export const a = 1;\n",
+    "t.test.ts": 'test("rejects", () => {});\ntest("INV-3: rejects twice", () => {});\ntest("FR-001: once", () => {});\n',
+  });
+  const shared = sharedRuleIds(r.repo);
+  assert.deepEqual([...shared], ["INV-3"]);
+  const res = linkTests(r.repo, [{ id: "INV-3", at: "t.test.ts:1" }, { id: "INV-3", at: "t.test.ts:2" }, { id: "FR-001", at: "t.test.ts:3" }], { module: "apps", qualify: shared });
+  const t = r.read("t.test.ts");
+  r.done();
+  assert.match(t, /test\("INV-3 \(apps\): rejects"/);
+  assert.match(t, /test\("INV-3 \(apps\): rejects twice"/);
+  assert.match(t, /test\("FR-001: once"/);
+  assert.deepEqual(res.skipped.map((s) => s.reason), ["already named FR-001"]);
+});
+
+test("tests: a bare id two specs use counts for neither and is listed as ambiguous", async () => {
+  const { testCoverage } = await import("../core/tests.mjs");
+  const r = tempRepo({
+    "specs/apps/spec.md": "- **INV-3**: apps hold [evidence: a.ts:1]\n",
+    "specs/auth/spec.md": "- **INV-3**: auth holds [evidence: a.ts:1]\n",
+    "a.ts": "export const a = 1;\n",
+    "a.test.ts": 'import { a } from "./a";\ntest("INV-3: holds", () => { expect(a).toBe(1); });\n',
+  });
+  const cov = testCoverage(r.repo, r.read("specs/apps/spec.md"), { specPath: path.join(r.repo, "specs/apps/spec.md") });
+  r.done();
+  assert.equal(cov.requirements[0].status, "ambiguous");
+  assert.deepEqual(cov.ambiguous, [{ id: "INV-3", at: "a.test.ts:2" }]);
+});
+
+test("init: --card is accepted", () => {
+  const r = tempRepo({ "a.ts": "export const a = 1;\n" });
+  const out = spawnSync(process.execPath, [path.resolve("skill/scripts/init.mjs"), "--repo", r.repo, "--card", "--bogus-flag"], { encoding: "utf8" });
+  r.done();
+  // Parsing stops at the first unknown option: with --card accepted, that's --bogus-flag.
+  assert.match(out.stdout + out.stderr, /unknown option --bogus-flag/);
+});

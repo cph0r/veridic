@@ -4,6 +4,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 import { isTestFile } from "./graph.mjs";
 
 const TITLE_AT = /(?<![\w$.])(x?)(it|test|describe)(?:\.\w+)?\s*\(\s*(["'`])((?:(?!\3).)*)\3/;
@@ -36,8 +37,18 @@ export function linkTests(repo, links, { module = null, qualify = new Set() } = 
     if (!m) { skip("no test title on that line"); continue; }
     if (m[2] === "describe") { skip("describe block, not a test"); continue; }
     const title = m[4];
-    if (new RegExp(String.raw`\b${id}\b`).test(title)) { skip(`already named ${id}`); continue; }
     const tag = qual ? `${id} (${qual})` : qualify.has(id) && module ? `${id} (${module})` : id;
+    // Already named: done, unless it's a bare id that must be qualified ("INV-3:" -> "INV-3 (apps):").
+    const bare = new RegExp(String.raw`\b${id}\b(?!\s*\()`);
+    if (new RegExp(String.raw`\b${id}\b`).test(title)) {
+      if (tag !== id && bare.test(title)) {
+        const next = title.replace(bare, tag);
+        const start = m.index + m[0].length - m[4].length - 1;
+        lines[i] = lines[i].slice(0, start) + next + lines[i].slice(start + title.length);
+        linked.push({ id, at, title: next });
+      } else skip(`already named ${id}`);
+      continue;
+    }
     const named = title.match(NAMED);
     const next = named ? `${named[1]}, ${tag}: ${title.slice(named[0].length)}` : `${tag}: ${title}`;
     const start = m.index + m[0].length - m[4].length - 1;
@@ -46,6 +57,21 @@ export function linkTests(repo, links, { module = null, qualify = new Set() } = 
   }
   for (const [file, lines] of files) if (linked.some((l) => l.at.startsWith(file + ":"))) fs.writeFileSync(path.join(repo, file), lines.join("\n"));
   return { linked, skipped };
+}
+
+/** Rule ids declared in more than one spec file: a test for one of them must say which spec. */
+export function sharedRuleIds(repo) {
+  const seen = new Map();
+  let files = [];
+  try {
+    files = execFileSync("git", ["ls-files", "--cached", "--others", "--exclude-standard", "--", "*spec.md"], { cwd: repo, encoding: "utf8" }).split("\n").filter(Boolean);
+  } catch {}
+  for (const f of files) {
+    let text = "";
+    try { text = fs.readFileSync(path.join(repo, f), "utf8"); } catch {}
+    for (const m of text.matchAll(/^\s*(?:[-*]\s*\*\*|#{1,6}\s+)((?:FR|NFR|AC|INV)-\d+[a-z]?)\b/gm)) (seen.get(m[1]) ?? seen.set(m[1], new Set()).get(m[1])).add(f);
+  }
+  return new Set([...seen].filter(([, fs2]) => fs2.size > 1).map(([id]) => id));
 }
 
 /**
@@ -68,7 +94,7 @@ export async function linkForModule(repo, moduleId, args, opts = {}) {
     const rule = rules.find((r) => !want || r.qual === want);
     for (const ln of lns.split(",").filter(Boolean)) links.push({ id, at: `${file}:${ln}`, ...(rule?.ambiguous || quals.length > 1 ? { qual: rule.qual } : {}) });
   }
-  const r = linkTests(repo, links, { module: moduleId });
+  const r = linkTests(repo, links, { module: moduleId, qualify: sharedRuleIds(repo) });
   return { module: moduleId, linked: r.linked, skipped: [...bad, ...r.skipped] };
 }
 

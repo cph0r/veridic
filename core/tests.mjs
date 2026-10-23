@@ -706,6 +706,8 @@ export function testCoverage(repo, spec, opts = {}) {
     },
     requirements,
     criteria: successCriteria(spec),
+    // Bare ids another spec also declares: counted for neither until the title names its spec.
+    ambiguous: [...ambiguous].flatMap(([id, ats]) => ats.map((at) => ({ id, at }))),
     // The code these results describe: cited files plus the tests named for them.
     basis: basisOf(repo, [...[...cited.values()].flatMap((s) => [...s]), ...tagged.map((t) => t.file)]),
     ...(run?.errors.length ? { errors: run.errors } : {}),
