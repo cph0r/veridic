@@ -237,6 +237,11 @@ function importsIn(g, file) {
     const base = path.posix.normalize(path.posix.join(path.posix.dirname(file), spec)).replace(/\.(?:[cm]?js)$/, "");
     return [base, ...[".ts", ".tsx", ".js", ".mjs", ".cjs", ".jsx", "/index.ts", "/index.js"].map((e) => base + e)].find((f) => g.text(f) != null) ?? null;
   };
+  // import * as apps from "./apps.service": calls `apps.getApp(…)` go there.
+  for (const m of src.matchAll(/import\s+\*\s+as\s+(\w+)\s+from\s*["']([^"']+)["']/g)) {
+    const f = resolve(m[2]);
+    if (f) out.set(m[1], f);
+  }
   for (const m of src.matchAll(/import\s+(?:type\s+)?(?:(\w+)\s*,?\s*)?(?:\{([^}]*)\})?\s*from\s*["']([^"']+)["']/g)) {
     const f = resolve(m[3]);
     if (!f) continue;
@@ -314,6 +319,14 @@ export function calledStatuses(g, route) {
       const target = imports.get(name) ?? file;
       const body = bodyOf(g.text(target) ?? "", name);
       if (body) scan(body, target, depth + 1, via ?? name);
+    }
+    // A call through a namespace or default-imported module: `apps.getApp(…)`.
+    for (const m of text.matchAll(/\b([A-Za-z_$][\w$]*)\.([A-Za-z_$][\w$]*)\s*\(/g)) {
+      const target = imports.get(m[1]);
+      if (!target || seen.has(`${target}#${m[2]}`)) continue;
+      seen.add(`${target}#${m[2]}`);
+      const body = bodyOf(g.text(target) ?? "", m[2]);
+      if (body) scan(body, target, depth + 1, via ?? m[2]);
     }
   };
   const lines = (g.lines(route.file) ?? []).slice(route.start - 1, route.end).join("\n");

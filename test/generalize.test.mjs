@@ -1396,3 +1396,47 @@ test("adapters: every route says which framework it comes from, and Express's ro
   assert.ok(routes.every((r) => r.framework === "express"));
   assert.deepEqual(adapters.map((a) => a.name), ["express", "nextjs"]);
 });
+
+test("contract: statuses thrown from helpers, through a callback and an error subclass", async () => {
+  const { calledStatuses } = await import("../core/contract.mjs");
+  const { g, done } = fakeRepo({
+    "src/lib/errors.ts": [
+      "export class AppError extends Error {",
+      "  constructor(status, code, message) { super(message); this.status = status; }",
+      "}",
+      'export class NotFoundError extends AppError { constructor(m) { super(404, "not_found", m); } }',
+      'export class ForbiddenError extends AppError { constructor(m) { super(403, "forbidden", m); } }',
+    ].join("\n"),
+    "src/apps/apps.service.ts": [
+      'import { NotFoundError, ForbiddenError } from "../lib/errors";',
+      "async function findApp(tx, ref) {",
+      "  const app = await tx.query.apps.findFirst({ where: { ref } });",
+      '  if (!app) throw new NotFoundError("no app");',
+      "  return app;",
+      "}",
+      "export function requireOwner(user, app) {",
+      '  if (app.ownerId !== user.id) throw new ForbiddenError("not yours");',
+      "}",
+      "export async function getApp(workspaceId, ref, user) {",
+      "  return withWorkspaceRead(workspaceId, async (tx) => {",
+      "    const app = await findApp(tx, ref);",
+      "    requireOwner(user, app);",
+      "    return app;",
+      "  });",
+      "}",
+    ].join("\n"),
+    "src/apps/apps.routes.ts": [
+      'import { Router } from "express";',
+      'import * as apps from "./apps.service";',
+      "const router = Router();",
+      'router.get("/apps/:ref", async (req, res) => {',
+      "  res.json(await apps.getApp(req.workspaceId, req.params.ref, req.user));",
+      "});",
+      "export default router;",
+    ].join("\n"),
+  });
+  const r = { id: "GET /apps/:ref", method: "GET", path: "/apps/:ref", file: "src/apps/apps.routes.ts", start: 4, end: 6, guards: [] };
+  const st = [...new Set(calledStatuses(g, r).map((s) => s.status))].sort();
+  done();
+  assert.deepEqual(st, [403, 404]);
+});
