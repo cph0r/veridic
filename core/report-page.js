@@ -264,7 +264,7 @@ var veridicModel = (D) => {
   // ---- every part of the app, as a row: filter by health or text, sort by any column ----
   const COLS = [
     ["name", "Part", "text"], ["health", "Health", "text"], ["rules", "Rules", "num"], ["proven", "Proven", "num"],
-    ["broken", "Broken", "num"], ["outdated", "Out of date", "num"], ["untested", "Not tested", "num"], ["stories", "Stories", "num"], ["covered", "Covered", "num"],
+    ["broken", "Broken", "num"], ["outdated", "Outdated", "num", "Rules the code changed after they were written"], ["untested", "Untested", "num", "Rules no test proves yet"], ["stories", "Stories", "num"], ["covered", "Covered", "num"],
   ];
   const FILTER = [["all", "All"], ["fix", "Needs fixing"], ["stale", "Out of date"], ["untested", "Not tested"], ["proven", "Proven"], ["nospec", "No spec"]];
   let view = { q: "", filter: "all", sort: null, dir: "desc", page: 1, size: 10 };
@@ -283,7 +283,7 @@ var veridicModel = (D) => {
   };
   function drawTable() {
     store.set("table:" + D.name, JSON.stringify(view));
-    $("#thead").innerHTML = COLS.map(([k, label, kind]) => '<th class="' + kind + '" aria-sort="' + (view.sort === k ? (view.dir === "asc" ? "ascending" : "descending") : "none") + '"><button data-sort="' + k + '">' + label + '<span class="arrow">' + (view.sort === k ? (view.dir === "asc" ? "↑" : "↓") : "") + "</span></button></th>").join("");
+    $("#thead").innerHTML = COLS.map(([k, label, kind, tip]) => '<th class="' + kind + '" aria-sort="' + (view.sort === k ? (view.dir === "asc" ? "ascending" : "descending") : "none") + '"><button data-sort="' + k + '"' + (tip ? ' title="' + tip + '"' : "") + ">"+ label + '<span class="arrow">' + (view.sort === k ? (view.dir === "asc" ? "↑" : "↓") : "") + "</span></button></th>").join("");
     $("#filters").innerHTML = FILTER.map(([k, label]) => { const n = M.rows({ filter: k }).length; return k === "nospec" && !n ? "" : '<option value="' + k + '"' + (view.filter === k ? " selected" : "") + ">" + (k === "all" ? "All parts" : label) + " (" + n + ")</option>"; }).join("");
     const pg = M.page(M.rows(view), view);
     view.page = pg.page;

@@ -196,13 +196,14 @@ button:focus-visible, .gnode:focus-visible { outline: 2px solid var(--accent); o
 .seg .n { font-size: 11.5px; opacity: .7; }
 .tablewrap { background: var(--card); border-radius: 20px; box-shadow: var(--shadow); overflow-x: auto; }
 table.specs { width: 100%; border-collapse: collapse; font-size: 14px; }
-.specs th { text-align: left; font-weight: 600; font-size: 11px; color: var(--ink3); text-transform: uppercase; letter-spacing: .05em; padding: 0; border-bottom: 1px solid var(--line); white-space: normal; line-height: 1.3; vertical-align: bottom; position: sticky; top: 0; background: var(--card); }
+.specs th { text-align: left; font-weight: 600; font-size: 11px; color: var(--ink3); text-transform: uppercase; letter-spacing: .05em; padding: 0; border-bottom: 1px solid var(--line); white-space: nowrap; line-height: 1.3; vertical-align: middle; position: sticky; top: 0; background: var(--card); }
 .specs th button { width: 100%; text-align: inherit; padding: 14px 10px 12px; color: inherit; font: inherit; letter-spacing: inherit; text-transform: inherit; }
 .specs th button:hover { color: var(--ink); }
 .specs th.num { text-align: right; }
 .specs th[aria-sort="ascending"], .specs th[aria-sort="descending"] { color: var(--ink); }
 .specs .arrow { display: inline-block; width: 10px; margin-left: 2px; }
-.specs th.num button { max-width: 84px; margin-left: auto; display: block; }
+.specs th.num button { text-align: right; }
+.specs th.num .arrow { width: 0; margin: 0; overflow: visible; } /* headings end where the numbers do */
 .specs td { padding: 12px 10px; border-bottom: 1px solid var(--line); vertical-align: middle; }
 .specs tbody tr { cursor: pointer; transition: background .15s; }
 .specs tbody tr:hover, .specs tbody tr:focus-visible { background: var(--bg); outline: none; }
