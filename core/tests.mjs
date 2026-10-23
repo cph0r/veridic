@@ -398,7 +398,7 @@ export function runVitest(repo, testFiles) {
   const errors = [];
   for (const [pkg, files] of byPkg) {
     const outFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "veridic-vitest-")), "out.json");
-    const r = spawnSync("npx", ["--no-install", "vitest", "run", ...files, "--reporter=json", `--outputFile=${outFile}`], { cwd: pkg, encoding: "utf8", timeout: 600_000 });
+    const r = spawnSync("npx", ["--no-install", "vitest", "run", ...files, "--reporter=json", `--outputFile=${outFile}`], { cwd: pkg, encoding: "utf8", timeout: 600_000, env: testEnv(repo) });
     if (!fs.existsSync(outFile)) {
       errors.push({ package: path.relative(repo, pkg) || ".", error: (r.stderr || r.stdout || "vitest produced no report").slice(-800) });
       continue;
@@ -425,6 +425,15 @@ function byPackage(repo, testFiles) {
   return out;
 }
 
+/** The environment a project's tests need (`.veridic.json` "testEnv", e.g. { "DB_TESTS": "1" }), over this process's. */
+function testEnv(repo, base = process.env) {
+  let extra = {};
+  try {
+    extra = JSON.parse(fs.readFileSync(path.join(repo, ".veridic.json"), "utf8")).testEnv ?? {};
+  } catch {}
+  return { ...base, ...Object.fromEntries(Object.entries(extra).map(([k, v]) => [k, String(v)])) };
+}
+
 /** Run node:test files, one at a time, and return results by test title (TAP output). */
 export function runNodeTest(repo, testFiles) {
   const results = new Map();
@@ -433,7 +442,7 @@ export function runNodeTest(repo, testFiles) {
     for (const f of files) {
       // Inside a node:test run, NODE_TEST_CONTEXT makes a nested `node --test` report to its parent
       // instead of printing results: clear it so this run prints its own TAP.
-      const { NODE_TEST_CONTEXT, ...env } = process.env;
+      const { NODE_TEST_CONTEXT, ...env } = testEnv(repo);
       const r = spawnSync(process.execPath, ["--test", "--test-reporter=tap", path.relative(pkg, path.join(repo, f))], { cwd: pkg, encoding: "utf8", timeout: 600_000, env });
       if (r.error || r.status == null) {
         errors.push({ file: f, error: String(r.error?.message ?? "node --test did not run").slice(0, 800) });
@@ -451,7 +460,7 @@ export function runJest(repo, testFiles) {
   const errors = [];
   for (const [pkg, files] of byPackage(repo, testFiles)) {
     const outFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), "veridic-jest-")), "out.json");
-    const r = spawnSync("npx", ["--no-install", "jest", ...files.map((f) => path.relative(pkg, path.join(repo, f))), "--json", `--outputFile=${outFile}`], { cwd: pkg, encoding: "utf8", timeout: 600_000 });
+    const r = spawnSync("npx", ["--no-install", "jest", ...files.map((f) => path.relative(pkg, path.join(repo, f))), "--json", `--outputFile=${outFile}`], { cwd: pkg, encoding: "utf8", timeout: 600_000, env: testEnv(repo) });
     if (!fs.existsSync(outFile)) {
       errors.push({ package: path.relative(repo, pkg) || ".", error: (r.stderr || r.stdout || "jest produced no report").slice(-800) });
       continue;

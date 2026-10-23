@@ -1262,3 +1262,24 @@ test("routes: middleware that only loads the session (never rejects) is not a gu
   done();
   assert.deepEqual(r.guards, []);
 });
+
+test("FR-012: a runner that can't start is explained by its error line, not the last line of its output", async () => {
+  const { runError } = await import("../core/worklist.mjs");
+  const out = "⎯⎯ Startup Error ⎯⎯\nError: Cannot find module @rollup/rollup-darwin-arm64. npm has a bug related to optional dependencies.\n  [cause]: Error: Cannot find module '@rollup/rollup-darwin-arm64'\n    at Module._load (node:internal/modules/cjs/loader:1370:5)\n    code: 'MODULE_NOT_FOUND',\n  }\n}\n\n";
+  assert.equal(runError(out), "Error: Cannot find module @rollup/rollup-darwin-arm64. npm has a bug related to optional dependencies.");
+  assert.equal(runError("plain failure\n"), "plain failure");
+});
+
+test("FR-011: --run passes the environment .veridic.json's testEnv gives (e.g. DB_TESTS=1) to the test runner", async () => {
+  const { testCoverage } = await import("../core/tests.mjs");
+  const repo = await rulesRepo('import { test } from "node:test";\nimport assert from "node:assert";\nimport { a } from "../src/a.js";\ntest("FR-001: a adds one, against the database", () => { assert.equal(process.env.DB_TESTS, "1"); assert.equal(a(1), 2); });\n');
+  fs.writeFileSync(path.join(repo, "package.json"), JSON.stringify({ type: "module", scripts: { test: "node --test" } }));
+  const spec = fs.readFileSync(path.join(repo, "specs/orders/spec.md"), "utf8");
+  const status = () => testCoverage(repo, spec, { specPath: path.join(repo, "specs/orders/spec.md"), run: true }).requirements.find((r) => r.id === "FR-001").status;
+  const without = status();
+  fs.writeFileSync(path.join(repo, ".veridic.json"), JSON.stringify({ testEnv: { DB_TESTS: "1" } }));
+  const withEnv = status();
+  fs.rmSync(repo, { recursive: true, force: true });
+  assert.equal(without, "failing");
+  assert.equal(withEnv, "passing");
+});

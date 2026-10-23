@@ -139,7 +139,7 @@ export function workListMarkdown(wl) {
   if (wl.error) return `${wl.error}${wl.modules ? `\nParts: ${wl.modules.join(", ")}` : ""}\n`;
   const t = wl.totals;
   const L = [`# Rules to tests: ${wl.module.name}`, "", `Totals: ${t.rules} rules · ${t.tested} tested · ${t.broken} broken · ${t.failing} failing · ${t.weak} weak · ${t.untested} untested${t["not run"] ? ` · ${t["not run"]} not run` : ""}`, ""];
-  for (const e of wl.errors ?? []) L.push(`Could not run: ${e.package ?? e.file ?? (e.files ?? []).join(", ")}: ${String(e.error).trim().split("\n").pop().slice(0, 160)}`);
+  for (const e of wl.errors ?? []) L.push(`Could not run: ${e.package ?? e.file ?? (e.files ?? []).join(", ")}: ${runError(e.error).slice(0, 200)}`);
   if (wl.errors?.length) L.push("");
   for (const [dir, r] of Object.entries(wl.recipe)) {
     L.push(`Recipe (${dir}): ${r.framework ?? "no test framework here: test this code from a package that has one"}${r.run ? ` · run one: \`${r.run}\`` : ""} · tests ${r.layout} · ${r.style === "http" ? "HTTP tests" : "direct calls"}${r.marker ? ` · expected failure: \`${r.marker}\`` : " · no expected-failure marker: skip with [broken] in the title"}${r.example ? ` · example test: \`${r.example}\`` : ""}`);
@@ -151,4 +151,10 @@ export function workListMarkdown(wl) {
   if (wl.code?.length) L.push("", "## Cited code", "", ...wl.code.flatMap((c) => [`\`${c.cite}\``, "```", ...c.lines, "```"]));
   L.push("", ...wl.next.map((n) => `Next: ${n}`));
   return L.join("\n") + "\n";
+}
+
+/** The line of a test runner's output that says why it couldn't run: the first error line, not a stack frame or a closing brace. */
+export function runError(out) {
+  const lines = String(out ?? "").split("\n").map((l) => l.trim()).filter((l) => l && !/^at\s|^[{}\[\](),]+$|^⎯/.test(l));
+  return lines.find((l) => /\b(?:Error|ERR_[A-Z_]+|Cannot find|not found|failed|ENOENT|EACCES)\b/i.test(l)) ?? lines.at(-1) ?? "";
 }

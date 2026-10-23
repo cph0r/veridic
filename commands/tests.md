@@ -36,7 +36,10 @@ have no candidates is skipped.
 4. **Report.** Run `veridic tests --module <id> --run` for each part and show
    the totals line, before and after. List any rule now `broken`: the code
    breaks it today, proven by an expected-failure test. Those are bugs to fix,
-   not tests to change.
+   not tests to change. If the run says "Could not run", show that line: a
+   runner that can't start (missing packages) is the project's to fix, and tests
+   that need an environment variable (a database flag like `DB_TESTS=1`) get it
+   from `.veridic.json`: `{ "testEnv": { "DB_TESTS": "1" } }`.
 
 ## A spec file (`*.md`): which rules have real tests
 
