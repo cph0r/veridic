@@ -357,7 +357,7 @@ test("prepare for a screen group lists its pages and the server rules its calls 
     name: "shop", app: { title: "Shop" },
     routes: [{ id: "POST /api/orders", handler: "api/src/orders.ts:1-3" }],
     specs: [{ path: "specs/orders/spec.md", requirements: [{ id: "FR-001", requirement: true, text: "Must create an order.", cites: [{ file: "api/src/orders.ts", start: 2, end: 2 }] }] }],
-    screens: [{ id: "guest", name: "Guest screens", pages: ["web/src/pages/order.tsx"], urls: { "web/src/pages/order.tsx": "/t/:table" }, files: ["web/src/pages/order.tsx", "web/src/pages/order/CartPanel.tsx"], calls: ["POST /api/orders"], spec_path: "specs/guest-app/spec.md", specs: [] }],
+    screens: [{ id: "guest-app", name: "Guest screens", pages: ["web/src/pages/order.tsx"], urls: { "web/src/pages/order.tsx": "/t/:table" }, files: ["web/src/pages/order.tsx", "web/src/pages/order/CartPanel.tsx"], calls: ["POST /api/orders"], spec_path: "specs/guest-app/spec.md", specs: [] }],
   };
   const md = screenMarkdown(data, data.screens[0], { uncovered: ["web/src/pages/order/CartPanel.tsx"] });
   assert.match(md, /\/t\/:table/);
@@ -994,4 +994,34 @@ test("FR-018: the work list carries what the agent would otherwise open: full ru
   assert.ok(!code.includes("src/list.js"), "a tested rule's code is left out");
   assert.match(md, /example test: `src\/pay\.test\.js`/);
   assert.match(md, /^Next: veridic tests --module orders --link ID=file:line\[,line\] …$/m);
+});
+
+// ---- one spec path per part ----
+const partData = (specs) => ({
+  name: "shop",
+  modules: [{ id: "orders", name: "Orders", files: ["src/orders.ts"], code: [], specs: [], specified: 0, stats: { routes: 1, high: 0, medium: 0, money: 0 }, does: [], tests: { untested: [] }, usedBy: [], data: { owns: [] } }],
+  screens: [],
+  specs,
+});
+const specOf = (p, n, file = "src/orders.ts") => ({ path: p, requirements: Array.from({ length: n }, (_, i) => ({ id: `FR-00${i + 1}`, requirement: true, cites: [{ file }] })) });
+
+test("one spec path per part: the main file", async () => {
+  const { moduleList } = await import("../core/modulectx.mjs");
+  const pathOf = (specs) => moduleList(partData(specs)).find((r) => r.id === "orders").spec_path;
+  assert.equal(pathOf([specOf("specs/orders-analytics/spec.md", 3), specOf("specs/orders/spec.md", 2)]), "specs/orders/spec.md", "the file named after the part");
+  assert.equal(pathOf([specOf("specs/orders-analytics/spec.md", 3), specOf("specs/orders-payment/spec.md", 5)]), "specs/orders-payment/spec.md", "else the one with the most rules");
+  assert.equal(pathOf([]), "specs/orders/spec.md", "else a new file named after the part");
+  assert.equal(pathOf([specOf("specs/elsewhere/spec.md", 4, "src/other.ts")]), "specs/orders/spec.md", "a spec citing other code isn't this part's");
+});
+
+test("one spec path per part: the same grouping as the dashboard", async () => {
+  const { moduleList } = await import("../core/modulectx.mjs");
+  const vm = await import("node:vm");
+  const ctx = {};
+  vm.runInNewContext(fs.readFileSync(new URL("../core/report-page.js", import.meta.url), "utf8"), ctx);
+  const d = partData([specOf("specs/orders-analytics/spec.md", 3), specOf("specs/orders-payment/spec.md", 5), specOf("specs/notes/spec.md", 1, "src/x.ts")]);
+  const m = ctx.veridicModel({ ...d, routes: [], findings: [] });
+  const row = moduleList(d).find((r) => r.id === "orders");
+  assert.equal(m.partOf(row.spec_path), "orders");
+  assert.deepEqual([...row.part_specs].sort(), [...m.P.get("orders").specs.map((s) => s.path)].sort());
 });

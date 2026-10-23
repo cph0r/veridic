@@ -18,6 +18,7 @@ const COMMANDS = {
   scope: ["skill/scripts/scope.mjs", "what belongs to a feature, and what to read"],
   read: ["skill/scripts/read.mjs", "print all the code to read for a feature in one call"],
   coverage: ["skill/scripts/coverage.mjs", "how much of the app the specs describe: every behaviour file and the spec that cites it (--module <id>, --md)"],
+  parts: ["skill/scripts/modules.mjs", "the parts of the app (same as modules): each part's spec files and where to write its one spec (--md for a table)"],
   modules: ["skill/scripts/modules.mjs", "the app's modules as Veridic found them: routes, state, where each spec goes (--md for a table)"],
   prepare: ["skill/scripts/prepare.mjs", "scope + contract + code for a feature as one document (to start a session with); --module <id> for a whole module with its full context"],
   drift: ["skill/scripts/drift.mjs", "where the OpenAPI contract and the code disagree"],

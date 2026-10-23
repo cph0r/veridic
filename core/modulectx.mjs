@@ -5,6 +5,7 @@
 // person sees.
 
 import { collectReport } from "./report.mjs";
+import { specHomes, partSpec } from "./parts.mjs";
 
 const EFF = { read: "reads", write: "changes data", destructive: "deletes data" };
 const ACC = { public: "anyone", auth: "signed-in users", role: "admins or set roles" };
@@ -24,6 +25,9 @@ export function findModule(modules, key) {
 
 /** One line per module: the split and the state of each. */
 export function moduleList(data) {
+  // One spec per part: where to write it (spec_path) and the files it is made of (part_specs).
+  const homes = specHomes(data);
+  const one = (id) => partSpec(data, id, homes);
   return (data.modules ?? []).map((m) => ({
     id: m.id,
     name: m.name,
@@ -33,7 +37,8 @@ export function moduleList(data) {
     untested: m.tests.untested.length,
     specs: m.specs,
     specified: m.specified,
-    spec_path: m.specs[0] ?? `specs/${m.id}/spec.md`,
+    spec_path: one(m.id).spec_path,
+    part_specs: one(m.id).specs,
     tables: (m.data?.owns ?? []).map((t) => t.table),
     screens: (m.screens ?? []).length,
     used_by: m.usedBy.map((u) => u.module),
@@ -49,7 +54,8 @@ export function moduleList(data) {
     untested: 0,
     specs: g.specs,
     specified: 0,
-    spec_path: g.specs[0] ?? g.spec_path,
+    spec_path: one(g.id).spec_path,
+    part_specs: one(g.id).specs,
     tables: [],
     screens: g.pages.length,
     used_by: [],
@@ -80,10 +86,13 @@ export function moduleMarkdown(data, m) {
   L.push(m.tests.files.length ? `- reaching it: ${m.tests.files.map((t) => `\`${t.file}\``).join(", ")}` : "- none reach it");
   if (m.tests.untested.length) L.push(`- routes no test calls or names: ${m.tests.untested.map((x) => `\`${x}\``).join(", ")}`);
   L.push("", "## Written rules");
-  const specs = (data.specs ?? []).filter((s) => m.specs.includes(s.path));
-  if (!specs.length) L.push(`None yet. A new spec for this module goes in \`specs/${m.id}/spec.md\`.`);
+  // This part's one spec (its files), where to write, and other specs that touch its code.
+  const one = partSpec(data, m.id);
+  const specs = (data.specs ?? []).filter((s) => one.specs.includes(s.path) || m.specs.includes(s.path));
+  if (!one.specs.length) L.push(`None yet. This part's spec goes in \`${one.spec_path}\`.`);
+  else L.push(`This part's spec is ${one.specs.map((p) => `\`${p}\``).join(", ")}. Write to \`${one.spec_path}\`: extend it, never start a second spec file for this part.`);
   for (const s of specs) {
-    L.push(`- \`${s.path}\` covers ${m.specified} of ${plural(m.stats.routes, "route")}. Extend it rather than writing a second spec.`);
+    L.push(one.specs.includes(s.path) ? `- \`${s.path}\` covers ${m.specified} of ${plural(m.stats.routes, "route")}.` : `- \`${s.path}\` (another part's spec; it also cites this part's code)`);
     for (const r of s.requirements.filter((q) => q.requirement)) L.push(`  - ${r.id}: ${r.text}${r.stale ? " [its code changed since it was written]" : ""}${r.status === "passing" || r.status === "covered" ? "" : " [no test]"}`);
   }
   const issues = (data.findings ?? []).filter((f) => f.module === m.id && f.severity !== "low");
@@ -113,7 +122,8 @@ export function moduleMarkdown(data, m) {
  */
 export function screenMarkdown(data, s, { uncovered = [] } = {}) {
   const L = [`# Screens: ${s.name} (\`${s.id}\`) of ${data.app?.title ?? data.name}`, ""];
-  L.push(`Write this group's spec to \`${s.specs?.[0] ?? s.spec_path}\`${s.specs?.length ? " (extend it; it already describes some of these screens)" : ""}. Describe what someone using these screens sees and can do; where a screen depends on a server rule, link it in one line (\`Server rules: specs/orders FR-016\`) instead of restating it.`, "");
+  const one = partSpec(data, s.id);
+  L.push(`Write this group's spec to \`${one.spec_path}\`${one.specs.length ? " (extend it; never start a second spec file for these screens)" : ""}. Describe what someone using these screens sees and can do; where a screen depends on a server rule, link it in one line (\`Server rules: specs/orders FR-016\`) instead of restating it.`, "");
   L.push(`## Pages (${s.pages.length})`, "");
   for (const p of s.pages) L.push(`- \`${p}\`${s.urls?.[p] ? ` at \`${s.urls[p]}\`` : ""}`);
   L.push("", `## Files (${s.files.length})`, "");
