@@ -263,5 +263,20 @@ test("tabs: the rules tab filters by state and text and counts each filter", () 
   assert.deepEqual(ids({ state: "untested" }).sort(), ["orders-payment:FR-001", "orders:FR-003"]);
   assert.deepEqual(ids({ state: "proven" }), ["orders:FR-001"]);
   assert.deepEqual(ids({ q: "fr-003" }), ["orders:FR-003"]);
-  assert.deepEqual({ ...m.ruleCounts(p) }, { all: 4, attention: 1, untested: 2, proven: 1 });
+  assert.deepEqual({ ...m.ruleCounts(p) }, { all: 4, attention: 1, weak: 0, untested: 2, proven: 1 });
+});
+
+test("tabs: each rule is in exactly one state, so the sheet's chart adds up", () => {
+  const m = load()(data({
+    modules: [{ id: "orders", name: "Orders", files: ["src/orders.ts"], code: [] }],
+    specs: [spec("specs/orders/spec.md", [
+      rule("FR-001", "covered", { cites: [cite("src/orders.ts")] }),
+      rule("FR-002", "none", { stale: true, cites: [cite("src/orders.ts")] }),
+      rule("FR-003", "none", { cites: [cite("src/orders.ts")] }),
+      rule("FR-004", "unasserted", { cites: [cite("src/orders.ts")] }),
+    ])],
+  }));
+  const c = m.ruleCounts(m.P.get("orders"));
+  assert.deepEqual({ ...c }, { all: 4, attention: 1, weak: 1, untested: 1, proven: 1 });
+  assert.equal(c.attention + c.weak + c.untested + c.proven, c.all);
 });

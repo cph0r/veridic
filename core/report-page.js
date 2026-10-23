@@ -201,10 +201,12 @@ var veridicModel = (D) => {
     const named = new Set((sp.stories || []).flatMap((st) => (st.scenarios || []).flatMap((x) => x.refs || [])));
     return sp.rules.filter((r) => !named.has(r.id)).map((r) => ({ spec: sp.path, rule: r }));
   });
+  // Each rule in exactly one state (its first in RANK), so the counts add up to all.
   const RULE_STATES = {
     all: () => true,
     attention: (r) => ["broken", "lost", "stale"].includes(stateOf(r).key),
-    untested: (r) => statusOf(r).tone === "none",
+    weak: (r) => stateOf(r).key === "weak",
+    untested: (r) => stateOf(r).key === "untested",
     proven: (r) => stateOf(r).key === "proven",
   };
   const partRules = (p, { state = "all", q = "" } = {}) => {
@@ -318,7 +320,7 @@ var veridicModel = (D) => {
   }
   // ---- a part's sheet, in three tabs: Overview, Stories, Rules ----
   const TABS = [["overview", "Overview"], ["stories", "Stories"], ["rules", "Rules"]];
-  const RSTATES = [["all", "All"], ["attention", "Needs attention"], ["untested", "Not tested"], ["proven", "Proven"]];
+  const RSTATES = [["all", "All"], ["attention", "Needs attention"], ["weak", "Weak test"], ["untested", "Not tested"], ["proven", "Proven"]];
   const tabOf = (k) => (TABS.some(([t]) => t === k) ? k : "overview");
   let sheet = { tab: tabOf(store.get("sheet-tab")), rstate: "all", q: "", by: "state" };
   const tag = (h, inn) => h.replace(/data-rule="/g, 'data-in="' + esc(inn) + '" data-rule="');
@@ -334,12 +336,17 @@ var veridicModel = (D) => {
   }
   function overviewHTML(p, rc) {
     const att = M.partRules(p, { state: "attention" });
-    const stat = (k, n, label) => '<button class="stat" data-tab="rules" data-rstate="' + k + '"><b>' + n + "</b><span>" + label + "</span></button>";
-    const stats = '<div class="stats">' + stat("all", rc.all, "rules") + stat("proven", rc.proven, "proven") + stat("untested", rc.untested, "not tested") + '<button class="stat" data-tab="stories"><b>' + p.stories.length + "</b><span>" + (p.stories.length === 1 ? "story" : "stories") + "</span></button></div>";
+    // The part's rules as a donut, one slice per state; each legend row opens those rules.
+    const SLICES = [["proven", "Proven", "var(--good)"], ["attention", "Needs attention", "var(--bad)"], ["weak", "Weak test", "var(--warn)"], ["untested", "Not tested", "var(--line2)"]];
+    const R = 34, C = 2 * Math.PI * R;
+    let at = 0;
+    const arcs = SLICES.filter(([k]) => rc[k]).map(([k, , color]) => { const len = (C * rc[k]) / rc.all, gap = SLICES.filter(([j]) => rc[j]).length > 1 ? 2 : 0; const a = '<circle cx="44" cy="44" r="' + R + '" fill="none" stroke="' + color + '" stroke-width="12" stroke-dasharray="' + Math.max(len - gap, 0.5) + " " + (C - Math.max(len - gap, 0.5)) + '" stroke-dashoffset="' + -at + '"/>'; at += len; return a; }).join("");
+    const pie = '<div class="pie"><div class="donut"><svg viewBox="0 0 88 88" aria-hidden="true"><circle cx="44" cy="44" r="' + R + '" fill="none" stroke="var(--line)" stroke-width="12"/>' + arcs + '</svg><div class="mid"><b>' + rc.all + "</b><span>" + (rc.all === 1 ? "rule" : "rules") + '</span></div></div><div class="legend">' +
+      SLICES.map(([k, label, color]) => '<button data-tab="rules" data-rstate="' + k + '"' + (rc[k] ? "" : " disabled") + '><i style="background:' + color + '"></i><span>' + label + "</span><b>" + rc[k] + "</b></button>").join("") + "</div></div>";
     const attention = att.length ? '<div class="sub-h">Needs attention</div>' + att.slice(0, 5).map((x) => ruleRow(x)).join("") + (att.length > 5 ? '<button class="showall" data-tab="rules" data-rstate="attention">See all ' + att.length + " in Rules →</button>" : "")
       : p.rules.length ? '<div class="calm"><span class="mark good">✓</span>Nothing needs attention: every rule still matches the code.</div>' : "";
     const files = '<div class="sub-h">' + (p.specs.length === 1 ? "Spec file" : plural(p.specs.length, "spec file")) + "</div>" + p.specs.map((sp) => '<div class="sfile"><div><b>' + esc(sp.name) + '</b><span class="path">' + esc(sp.path) + '</span></div><span class="sn">' + plural(sp.rules.length, "rule") + " · " + plural((sp.stories || []).length, "story", "stories") + "</span></div>").join("");
-    return stats + (attention ? '<div class="blk">' + attention + "</div>" : "") + '<div class="blk">' + files + "</div>";
+    return pie + (attention ? '<div class="blk">' + attention + "</div>" : "") + '<div class="blk">' + files + "</div>";
   }
   function storiesHTML(p) {
     const all = M.storiesOf(p), loose = M.rulesInNoStory(p);
@@ -364,11 +371,8 @@ var veridicModel = (D) => {
   }
   // A part's sheet: its head, the tabs, then only the open tab.
   function partHTML(p) {
-    const summary = !p.specs.length ? "No spec yet."
-      : !p.rules.length ? "No rules written yet."
-      : [p.broken.length && plural(p.broken.length, "rule") + " broken", p.stale.length && p.stale.length + " out of date", p.lost.length && p.lost.length + " pointing at code that's gone", p.proven.length + " of " + p.rules.length + " proven"].filter(Boolean).join(" · ") + ".";
     const tone = p.specs.length ? p.tone : "none";
-    const head = '<div class="part-head"><div><h3' + (p.name.length > 40 ? ' class="long"' : "") + '><i class="sh ' + tone + '">' + SH[tone] + "</i>" + esc(p.name) + "</h3><p>" + summary + '</p></div><button class="close" aria-label="Close">✕</button></div>';
+    const head = '<div class="part-head"><div><h3' + (p.name.length > 40 ? ' class="long"' : "") + '><i class="sh ' + tone + '">' + SH[tone] + "</i>" + esc(p.name) + '</h3></div><button class="close" aria-label="Close">✕</button></div>';
     if (!p.specs.length) return head + '<div class="cols"><div><div class="empty-req">Nothing describes ' + esc(p.name) + ' yet. Ask Claude to <b>write a spec for ' + esc(p.name) + "</b> (<code>/veridic:specs</code> does every part that has none).</div></div></div>";
     const rc = M.ruleCounts(p), n = { overview: null, stories: p.stories.length, rules: rc.all };
     const tabs = '<div class="tabs" role="tablist">' + TABS.map(([k, label]) => '<button role="tab" data-tab="' + k + '" aria-selected="' + (sheet.tab === k) + '">' + label + (n[k] != null ? '<span class="n">' + n[k] + "</span>" : "") + "</button>").join("") + "</div>";
