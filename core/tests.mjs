@@ -12,6 +12,7 @@
 
 import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
+import { importResolver } from "./resolve.mjs";
 import { testRecipe } from "./recipe.mjs";
 import os from "node:os";
 import path from "node:path";
@@ -32,6 +33,7 @@ const T_ID = /\bT-[A-Z]{2,6}-(\d{4})\.(\d+)\.\d+(?:-[A-Z]+)?\b/g;
 // R-ORD-0001 and T-ORD-0001.… name spec requirement FR-001.
 const toFr = (n) => `FR-${String(Number(n)).padStart(3, "0")}`;
 
+const resolvers = new Map();
 const relImports = (repo, file, files) => {
   let src = "";
   try {
@@ -44,8 +46,31 @@ const relImports = (repo, file, files) => {
     const base = path.posix.normalize(path.posix.join(path.posix.dirname(file), m[1])).replace(/\.[cm]?js$/, "");
     for (const c of [base, `${base}.ts`, `${base}.tsx`, `${base}.js`, `${base}.mjs`, `${base}.cjs`, `${base}/index.ts`, `${base}/index.js`]) if (files.has(c)) out.push(c);
   }
+  // Path aliases (`@/lib/apps`) and workspace packages (`@workspace/db`).
+  if (!resolvers.has(repo)) resolvers.set(repo, importResolver(repo, { workspaces: true }));
+  const resolve = resolvers.get(repo);
+  for (const m of src.matchAll(/(?:from\s+|import\s*\(\s*|vi\.mock\(\s*|jest\.mock\(\s*|require\(\s*)["']([^."'][^"']*)["']/g)) {
+    if (/^node:/.test(m[1])) continue;
+    const hit = resolve(file, m[1]);
+    if (hit && files.has(hit)) out.push(hit);
+  }
+  // A script it runs in a child process: spawn("node", ["scripts/seed.mjs"]), execFile("tsx", ["x.ts"]).
+  for (const m of src.matchAll(/\b(?:spawn|spawnSync|execFile|execFileSync|fork|exec|execSync)\s*\(([^)]*)\)/g))
+    for (const a of m[1].matchAll(/["'`](\.{0,2}\/?[\w@.\/-]+\.(?:[cm]?[jt]s|sh|py))["'`]/g)) {
+      const rel = a[1].replace(/^\.\//, "");
+      const near = path.posix.dirname(file);
+      for (const c of [rel, path.posix.normalize(path.posix.join(near, a[1])), ...pkgDirsOf(file).map((d) => path.posix.join(d, rel))]) if (files.has(c)) { out.push(c); break; }
+    }
   return out;
 };
+// The folders above a file that hold a package.json-rooted project: scripts run from there.
+const pkgDirsOf = (file) => { const out = []; for (let d = path.posix.dirname(file); d && d !== "."; d = path.posix.dirname(d)) out.push(d); return out; };
+
+/** The repo files a test file reaches: imports (relative, aliases, workspace packages) and the scripts it spawns. */
+export function reachedFiles(repo, file, levels = 2) {
+  const files = new Set(execFileSync("git", ["ls-files", "--cached", "--others", "--exclude-standard"], { cwd: repo, encoding: "utf8", maxBuffer: 64 << 20 }).split("\n").filter(Boolean));
+  return reach(repo, file, files, levels);
+}
 
 /** Files a test file reaches through relative imports, `levels` deep (two by default). */
 function reach(repo, file, files, levels = 2) {

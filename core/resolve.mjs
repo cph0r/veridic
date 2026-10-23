@@ -2,6 +2,7 @@
 // projects set up for themselves: tsconfig/jsconfig `paths` (`"~/*": ["./*"]`),
 // package.json `_moduleAliases` (module-alias) and `imports` (`"#lib/*"`).
 
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { jsonc } from "./routes.mjs";
@@ -9,7 +10,7 @@ import { jsonc } from "./routes.mjs";
 const EXT = (base) => [base, `${base}.ts`, `${base}.tsx`, `${base}.js`, `${base}.mjs`, `${base}.cjs`, `${base}/index.ts`, `${base}/index.js`];
 
 /** resolve(fromFile, spec) -> repo-relative file or null, for a graph-like { repo }. */
-export function importResolver(repo) {
+export function importResolver(repo, { workspaces = false } = {}) {
   const exists = (rel) => {
     try {
       return fs.statSync(path.join(repo, rel)).isFile();
@@ -53,8 +54,40 @@ export function importResolver(repo) {
     cache.set(dir, list);
     return list;
   };
+  // Workspace packages by their package.json name (`@workspace/db` -> lib/db): opt-in, since
+  // following them changes what a route is seen to reach.
+  let pkgs = null;
+  const packages = () => {
+    if (pkgs) return pkgs;
+    pkgs = new Map();
+    let list = [];
+    try {
+      list = execFileSync("git", ["ls-files", "--cached", "--others", "--exclude-standard", "--", "*package.json"], { cwd: repo, encoding: "utf8", maxBuffer: 64 << 20 }).split("\n").filter((f) => f && !f.includes("node_modules/"));
+    } catch {}
+    for (const f of list) {
+      const p = read(f);
+      if (p?.name) pkgs.set(p.name, { dir: path.posix.dirname(f), pkg: p });
+    }
+    return pkgs;
+  };
+  const entryOf = ({ dir, pkg }, sub) => {
+    const at = (rel) => withExt(path.posix.normalize(path.posix.join(dir, rel)));
+    if (sub) return at(sub) ?? at(path.posix.join("src", sub));
+    const exp = typeof pkg.exports === "string" ? pkg.exports : pkg.exports?.["."];
+    const expPath = typeof exp === "string" ? exp : exp?.import ?? exp?.default ?? exp?.types;
+    for (const c of [expPath, pkg.module, pkg.main, pkg.types, "src/index", "index"].filter((x) => typeof x === "string")) {
+      const hit = at(c);
+      if (hit) return hit;
+    }
+    return null;
+  };
   return (fromFile, spec) => {
     if (spec.startsWith(".")) return withExt(path.posix.normalize(path.posix.join(path.posix.dirname(fromFile), spec)));
+    if (workspaces) {
+      const m = spec.match(/^((?:@[^/]+\/)?[^/]+)(?:\/(.+))?$/);
+      const p = m && packages().get(m[1]);
+      if (p) return entryOf(p, m[2]);
+    }
     for (const a of aliasesFrom(path.posix.dirname(fromFile))) {
       if (!(a.wild ? spec.startsWith(a.prefix) : spec === a.prefix)) continue;
       for (const t of a.to) {

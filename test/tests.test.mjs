@@ -260,3 +260,48 @@ test("audit: table-driven test.each([…])('…', fn) and test.each`table` are t
   assert.equal(a.flagged.unasserted[0].title, "adds $a");
   fs.rmSync(repo, { recursive: true, force: true });
 });
+
+test("tests: reach through path aliases, workspace packages and spawned scripts", () => {
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "veridic-reach-"));
+  const w = (f, t) => (fs.mkdirSync(path.dirname(path.join(repo, f)), { recursive: true }), fs.writeFileSync(path.join(repo, f), t));
+  w("pnpm-workspace.yaml", "packages:\n  - lib/*\n  - apps/*\n");
+  w("lib/db/package.json", JSON.stringify({ name: "@workspace/db", main: "src/index.ts" }));
+  w("lib/db/src/index.ts", "export const db = {};\n");
+  w("apps/api/package.json", JSON.stringify({ name: "api" }));
+  w("apps/api/tsconfig.json", JSON.stringify({ compilerOptions: { paths: { "@/*": ["./src/*"] } } }));
+  w("apps/api/src/lib/apps.ts", "export const apps = 1;\n");
+  w("apps/api/scripts/seed.mjs", "console.log('seed');\n");
+  w("apps/api/test/a.test.ts", [
+    'import { apps } from "@/lib/apps";',
+    'import { db } from "@workspace/db";',
+    'import { spawnSync } from "node:child_process";',
+    'test("FR-001: seeds", () => { spawnSync("node", ["scripts/seed.mjs"]); expect(apps).toBe(1); expect(db).toBeTruthy(); });',
+  ].join("\n"));
+  execFileSync("git", ["init", "-q"], { cwd: repo });
+  execFileSync("git", ["add", "."], { cwd: repo });
+  const cov = testCoverage(repo, "- **FR-001**: apps, db and the seed script [evidence: apps/api/src/lib/apps.ts:1, lib/db/src/index.ts:1, apps/api/scripts/seed.mjs:1]\n");
+  const t = cov.requirements[0].tests[0];
+  fs.rmSync(repo, { recursive: true, force: true });
+  assert.ok(t, "the test is named for FR-001");
+  assert.equal(t.reaches_cited_code, true);
+});
+
+test("tests: each kind of reach on its own", async () => {
+  const { reachedFiles } = await import("../core/tests.mjs");
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "veridic-reach2-"));
+  const w = (f, t) => (fs.mkdirSync(path.dirname(path.join(repo, f)), { recursive: true }), fs.writeFileSync(path.join(repo, f), t));
+  w("lib/db/package.json", JSON.stringify({ name: "@workspace/db", exports: { ".": "./src/index.ts" } }));
+  w("lib/db/src/index.ts", "export const db = {};\n");
+  w("tsconfig.json", JSON.stringify({ compilerOptions: { paths: { "@/*": ["./src/*"] } } }));
+  w("src/lib/apps.ts", "export const apps = 1;\n");
+  w("scripts/x.ts", "export {};\n");
+  w("t/alias.test.ts", 'import { apps } from "@/lib/apps";\n');
+  w("t/pkg.test.ts", 'import { db } from "@workspace/db";\n');
+  w("t/spawn.test.ts", 'import { execFile } from "node:child_process";\nexecFile("tsx", ["scripts/x.ts"]);\n');
+  execFileSync("git", ["init", "-q"], { cwd: repo });
+  execFileSync("git", ["add", "."], { cwd: repo });
+  const r = (f) => [...reachedFiles(repo, f)].sort();
+  const out = [r("t/alias.test.ts"), r("t/pkg.test.ts"), r("t/spawn.test.ts")];
+  fs.rmSync(repo, { recursive: true, force: true });
+  assert.deepEqual(out, [["src/lib/apps.ts"], ["lib/db/src/index.ts"], ["scripts/x.ts"]]);
+});
