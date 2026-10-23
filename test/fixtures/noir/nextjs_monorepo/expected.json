@@ -1,0 +1,6 @@
+{
+ "source": "owasp-noir/noir spec/functional_test/testers/javascript/nextjs_monorepo_spec.cr",
+ "endpoints": [
+  "GET /api/real"
+ ]
+}

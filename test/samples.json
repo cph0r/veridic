@@ -1,0 +1,7 @@
+[
+  { "name": "saas-starter", "url": "https://github.com/nextjs/saas-starter", "sha": "6e33e58b1e55" },
+  { "name": "nextjs-subscription-payments", "url": "https://github.com/vercel/nextjs-subscription-payments", "sha": "bdd0813206e4" },
+  { "name": "taxonomy", "url": "https://github.com/shadcn-ui/taxonomy", "sha": "298a8857c712" },
+  { "name": "papermark", "url": "https://github.com/papermark/papermark", "sha": "ed19717ec02a" },
+  { "name": "inbox-zero", "url": "https://github.com/elie222/inbox-zero", "sha": "83290dedc535" }
+]

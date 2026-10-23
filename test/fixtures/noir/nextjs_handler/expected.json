@@ -1,0 +1,10 @@
+{
+ "source": "owasp-noir/noir spec/functional_test/testers/javascript/nextjs_handler_spec.cr",
+ "endpoints": [
+  "GET /api/legacy",
+  "GET /api/list",
+  "GET /api/me",
+  "POST /api/legacy",
+  "POST /api/me"
+ ]
+}

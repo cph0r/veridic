@@ -9,6 +9,7 @@ import path from "node:path";
 import { parseYaml } from "./yaml.mjs";
 import { codeOnly, cache } from "./graph.mjs";
 import { joinPath, normRoute } from "./routes.mjs";
+import { functionSpan } from "./frameworks/paths.mjs";
 
 const METHODS = ["get", "post", "put", "patch", "delete", "head", "options"];
 const AUTH_GUARD = /auth|admin|owner|require|session|verify|login|perm|role|token|csrf/i;
@@ -217,39 +218,8 @@ const statusesIn = (text) => [
 ];
 // The body of the function `name` declared in `src`, or null.
 function bodyOf(src, name) {
-  const code = codeOnly(src);
-  const m = new RegExp(`(?:function\\s*\\*?\\s*${name}\\s*\\(|\\b(?:const|let|var)\\s+${name}\\s*(?::[^=]+)?=\\s*(?:async\\s*)?(?:function\\b[^(]*)?\\(?)`).exec(code);
-  if (!m) return null;
-  // Past the parameter list (whose types may hold braces: `user: { id: string }`) and any return
-  // type (`Promise<{ deleted: string }>`): the body is the first brace outside them.
-  let at = m.index + m[0].length;
-  const paren = code.indexOf("(", m.index + m[0].length - 1);
-  if (paren >= 0 && paren - at < 40) {
-    let d = 0;
-    for (let i = paren; i < code.length; i++) {
-      if (code[i] === "(") d++;
-      else if (code[i] === ")" && --d === 0) { at = i + 1; break; }
-    }
-  }
-  let open = -1;
-  for (let i = at, ang = 0; i < code.length; i++) {
-    const c = code[i];
-    if (c === "=" && code[i + 1] === ">") {
-      const rest = code.slice(i + 2), lead = rest.search(/\S/);
-      if (rest[lead] !== "{") { const end = rest.slice(lead).search(/;|\n\s*\n|\n(?=\S)/); return src.slice(i + 2 + lead, end < 0 ? undefined : i + 2 + lead + end); }
-      i++;
-    } else if (c === "<") ang++;
-    else if (c === ">") ang = Math.max(0, ang - 1);
-    else if (c === "{" && ang === 0) { open = i; break; }
-    else if (c === ";" && ang === 0) return null;
-  }
-  if (open < 0) return null;
-  let depth = 0;
-  for (let i = open; i < code.length; i++) {
-    if (code[i] === "{") depth++;
-    else if (code[i] === "}" && --depth === 0) return src.slice(open, i + 1);
-  }
-  return null;
+  const s = functionSpan(src, name);
+  return s ? src.slice(s.open, s.close + 1) : null;
 }
 // What `file` imports: local name -> the file it comes from (relative imports only).
 function importsIn(g, file) {

@@ -1,0 +1,13 @@
+{
+ "source": "owasp-noir/noir spec/functional_test/testers/javascript/nextjs_callees_spec.cr",
+ "endpoints": [
+  "DELETE /api/local",
+  "GET /api/arrow",
+  "GET /api/orders/:id",
+  "GET /api/reports",
+  "POST /api/orders/:id",
+  "POST /api/users",
+  "POST /createUser",
+  "POST /deleteUser"
+ ]
+}

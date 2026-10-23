@@ -1,0 +1,12 @@
+Veridic
+Copyright (c) Chirag Phor. MIT License (see LICENSE).
+
+This project includes or adapts work from these MIT-licensed projects:
+
+- OWASP Noir (https://github.com/owasp-noir/noir), commit 4daba14314fd4aed486bdbc24601213228f2b072.
+  test/fixtures/noir/ holds its Next.js sample apps (spec/functional_test/fixtures/javascript/nextjs*)
+  and, in each expected.json, the endpoints its specs expect. Its licence: test/fixtures/noir/LICENSE.
+- nextjs-routes (https://github.com/tatethurston/nextjs-routes): how a Next.js file path becomes
+  a URL (core/frameworks/nextjs.mjs).
+- next-openapi-gen (https://github.com/tazo90/next-openapi-gen): how Next.js route handlers and
+  their response statuses are read (core/frameworks/nextjs.mjs).

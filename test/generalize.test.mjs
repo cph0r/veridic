@@ -1394,5 +1394,5 @@ test("adapters: every route says which framework it comes from, and Express's ro
   done();
   assert.ok(routes.length > 0);
   assert.ok(routes.every((r) => r.framework === "express"));
-  assert.deepEqual(adapters.map((a) => a.name), ["express"]);
+  assert.deepEqual(adapters.map((a) => a.name), ["express", "nextjs"]);
 });

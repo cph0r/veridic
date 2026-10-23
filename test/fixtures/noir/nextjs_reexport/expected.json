@@ -1,0 +1,8 @@
+{
+ "source": "owasp-noir/noir spec/functional_test/testers/javascript/nextjs_reexport_spec.cr",
+ "endpoints": [
+  "GET /api/analytics",
+  "GET /api/projects",
+  "POST /api/workflows"
+ ]
+}

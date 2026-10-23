@@ -1,0 +1,21 @@
+{
+ "source": "owasp-noir/noir spec/functional_test/testers/javascript/nextjs_verb_map_spec.cr",
+ "endpoints": [
+  "DELETE /api/auth",
+  "DELETE /api/spread",
+  "DELETE /api/traces",
+  "GET /api/auth",
+  "GET /api/comments",
+  "GET /api/e2e",
+  "GET /api/spread",
+  "GET /api/traces",
+  "PATCH /api/auth",
+  "PATCH /api/spread",
+  "PATCH /api/traces",
+  "POST /api/auth",
+  "POST /api/comments",
+  "POST /api/spread",
+  "PUT /api/auth",
+  "PUT /api/spread"
+ ]
+}
