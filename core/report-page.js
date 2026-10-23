@@ -243,8 +243,6 @@ var veridicModel = (D) => {
   <section id="specs-sec"><h2 class="sr">Your app</h2>
   <div class="tools rv" style="animation-delay:.22s"><input id="q" type="search" placeholder="Search parts and specs" aria-label="Search parts and specs"><label class="pick"><span>Show</span><select id="filters" aria-label="Show"></select></label></div>
   <div class="tablewrap rv" style="animation-delay:.25s"><table class="specs"><thead><tr id="thead"></tr></thead><tbody id="tbody"></tbody></table><div class="noresults" id="noresults" hidden>No part matches.</div></div><div class="pager" id="pager"></div></section>
-  <section id="fix-sec"><h2 class="rv" style="animation-delay:.3s">Fix first</h2><div class="cards rv" style="animation-delay:.35s" id="fix"></div></section>
-  <section id="later-sec"><h2 class="rv" style="animation-delay:.35s">When you have time</h2><div class="cards rv" style="animation-delay:.4s" id="later"></div></section>
   <footer class="foot" id="foot"></footer>
 </div>
 <div class="scrim" id="scrim"></div>
@@ -448,15 +446,7 @@ var veridicModel = (D) => {
     if (rq) rq.classList.toggle("open");
   });
 
-  // ---- fix first, then what can wait ----
-  const card = (l, s, i, g) => '<button class="card' + (i >= 6 ? " x" : "") + '"' + hid(i >= 6 ? g : "") +  (l.spec ? ' data-spec="' + esc(l.spec) + '"' : "") + (l.rule ? ' data-rule="' + esc(l.rule) + '"' : "") + '><i class="sh ' + (l.tone || s) + '">' + SH[l.tone || s] + '</i><span><div class="t">' + l.html + '</div><div class="w">' + l.w + '</div>' + (l.spec ? '<div class="p">' + esc((M.P.get(M.partOf(l.spec)) || S.get(l.spec)).name) + " →</div>" : "") + "</span></button>";
-  const deal = (sec, id, list, s) => {
-    if (!list.length) { $(sec).remove(); return; }
-    $("#" + id).innerHTML = list.map((l, i) => card(l, s, i, id)).join("");
-    if (list.length > 6) $("#" + id).insertAdjacentHTML("afterend", '<button class="showall" data-unfold="' + id + '" style="margin-top:14px">Show all ' + list.length + " →</button>");
-  };
-  deal("#fix-sec", "fix", M.fix, "bad");
-  deal("#later-sec", "later", M.later, "warn");
+  // ---- all good: every rule true to the code and proven ----
   if (specs.length && !M.fix.length && !M.later.length) $("#foot").insertAdjacentHTML("beforebegin", '<div class="allgood">Every rule is true to the code and proven by a test.</div>');
   const errs = D.errors || [];
   $("#foot").innerHTML = "<span>" + esc(M.title) + (counts.specs ? " · " + plural(counts.specs, "spec") + " · " + plural(counts.rules, "rule") : "") + "</span><span>Veridic · " + ago(D.generated).toLowerCase() + "</span>" +
