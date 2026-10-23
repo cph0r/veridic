@@ -14,6 +14,8 @@ export function specHomes(data) {
   ];
   const homes = new Map();
   for (const s of data.specs ?? []) {
+    // The product spec describes the whole app: it belongs to no part.
+    if (/(^|\/)specs\/product\/spec\.md$/.test(String(s.path))) { homes.set(s.path, null); continue; }
     const cited = rulesOf(s).flatMap((r) => (r.cites ?? []).map((c) => c.file).filter(Boolean));
     let best = null;
     for (const p of parts) { const n = cited.filter((f) => p.files.has(f)).length; if (n && (!best || n > best[1])) best = [p.id, n]; }

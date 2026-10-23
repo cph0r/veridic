@@ -9,6 +9,7 @@ import { openGraph } from "./graph.mjs";
 import { routeInventory } from "./routes.mjs";
 import { effectManifest, readiness } from "./effects.mjs";
 import { auditTests, testCoverage, successCriteria } from "./tests.mjs";
+import { parseProduct, productState, ruleRowState } from "./product.mjs";
 import { metrics, defaultSpecs, isSpecFile } from "./metrics.mjs";
 import { checkCitations, repoFiles } from "./citations.mjs";
 import { screenGroups } from "./screens.mjs";
@@ -250,6 +251,13 @@ export async function collectReport(repo, { specs: specFiles } = {}) {
         }
       });
       out.coverage = m.coverage;
+      // The product spec: journeys and guarantees, each in the state of the part rules it names.
+      const pf = path.join(repo, "specs/product/spec.md");
+      if (fs.existsSync(pf)) {
+        const byFolder = new Map(out.specs.map((sp) => [String(sp.path).split("/").slice(-2)[0], sp]));
+        const row = (ref) => { const [folder, id] = ref.split(":"); return byFolder.get(folder)?.requirements.find((r) => r.id === id) ?? null; };
+        out.product = { path: "specs/product/spec.md", ...productState(parseProduct(fs.readFileSync(pf, "utf8")), (ref) => ruleRowState(row(ref))) };
+      }
       // Which spec covers each route: it cites the handler's lines, or names the route as a seed.
       for (const r of out.routes) {
         const h = r.handler.match(/^(.*):(\d+)-(\d+)$/);
