@@ -12,14 +12,14 @@ const TAG = String.raw`[A-Z]+-\d+[a-z]?(?:\s+VC\d+)?(?:\s*\([\w-]+\))?`;
 const NAMED = new RegExp(String.raw`^(${TAG}(?:\s*,\s*${TAG})*)\s*:\s*`);
 
 /**
- * @param links {id, at: "file:line"}[]
+ * @param links {id, at: "file:line", qual?}[]: a link with qual is written "FR-002 (qual)"
  * @param opts.module, opts.qualify: ids written as "FR-002 (module)" (ids shared with another spec)
  * @returns { linked: {id, at, title}[], skipped: {id, at, reason}[] }
  */
 export function linkTests(repo, links, { module = null, qualify = new Set() } = {}) {
   const linked = [], skipped = [];
   const files = new Map();
-  for (const { id, at } of links) {
+  for (const { id, at, qual } of links) {
     const [, file, ln] = at.match(/^(.*):(\d+)$/) ?? [null, at, null];
     const skip = (reason) => skipped.push({ id, at, reason });
     if (!isTestFile(file)) { skip("not a test file"); continue; }
@@ -37,7 +37,7 @@ export function linkTests(repo, links, { module = null, qualify = new Set() } = 
     if (m[2] === "describe") { skip("describe block, not a test"); continue; }
     const title = m[4];
     if (new RegExp(String.raw`\b${id}\b`).test(title)) { skip(`already named ${id}`); continue; }
-    const tag = qualify.has(id) && module ? `${id} (${module})` : id;
+    const tag = qual ? `${id} (${qual})` : qualify.has(id) && module ? `${id} (${module})` : id;
     const named = title.match(NAMED);
     const next = named ? `${named[1]}, ${tag}: ${title.slice(named[0].length)}` : `${tag}: ${title}`;
     const start = m.index + m[0].length - m[4].length - 1;
@@ -48,18 +48,27 @@ export function linkTests(repo, links, { module = null, qualify = new Set() } = 
   return { linked, skipped };
 }
 
-/** `ID=file:line[,line…]` arguments, for one module: ids its spec shares with another get the module's name. */
+/**
+ * `ID=file:line[,line…]` arguments, for one part. An id another spec also uses is written
+ * qualified with its spec file ("FR-002 (orders)"); when two of the part's own spec files use
+ * the id, the argument names which: `FR-002@voice-conversation=file:line`.
+ */
 export async function linkForModule(repo, moduleId, args, opts = {}) {
-  const links = [], bad = [];
-  for (const a of args) {
-    const m = a.match(/^([A-Z]+-\d+[a-z]?)=(.+):([\d,]+)$/);
-    if (!m) { bad.push({ id: a, at: null, reason: "expected ID=file:line" }); continue; }
-    for (const ln of m[3].split(",").filter(Boolean)) links.push({ id: m[1], at: `${m[2]}:${ln}` });
-  }
   const { workList } = await import("./worklist.mjs");
   const wl = await workList(repo, moduleId, { data: opts.data });
-  const qualify = new Set((wl.rules ?? []).filter((r) => r.ambiguous).map((r) => r.id));
-  const r = linkTests(repo, links, { module: moduleId, qualify });
+  const links = [], bad = [];
+  for (const a of args) {
+    const m = a.match(/^([A-Z]+-\d+[a-z]?)(?:@([\w-]+))?=(.+):([\d,]+)$/);
+    if (!m) { bad.push({ id: a, at: null, reason: "expected ID=file:line" }); continue; }
+    const [, id, want, file, lns] = m;
+    const rules = (wl.rules ?? []).filter((r) => r.id === id);
+    const quals = [...new Set(rules.map((r) => r.qual))].sort();
+    if (want && rules.length && !quals.includes(want)) { bad.push({ id, at: null, reason: `no ${id} in ${want}'s spec; it is in ${quals.join(", ")}` }); continue; }
+    if (!want && quals.length > 1) { bad.push({ id, at: null, reason: `${id} is in ${quals.length} of this part's spec files: write ${quals.map((q) => `${id}@${q}`).join(" or ")}` }); continue; }
+    const rule = rules.find((r) => !want || r.qual === want);
+    for (const ln of lns.split(",").filter(Boolean)) links.push({ id, at: `${file}:${ln}`, ...(rule?.ambiguous || quals.length > 1 ? { qual: rule.qual } : {}) });
+  }
+  const r = linkTests(repo, links, { module: moduleId });
   return { module: moduleId, linked: r.linked, skipped: [...bad, ...r.skipped] };
 }
 
