@@ -201,6 +201,17 @@ export function routeInventory(g, { entry } = {}) {
   // Routers created in a file: `const workspace = Router()` / `express.Router(...)`.
   const localRouters = (file) =>
     new Set([...(g.text(file) ?? "").matchAll(/\b(?:const|let|var)\s+(\w+)\s*(?::[^=]+)?=\s*(?:express\s*\.\s*)?Router\s*\(/g)].map((m) => m[1]));
+  // Whether middleware named `id` in `file` can turn a request away: a 4xx response, a throw,
+  // or an error handed to next(). Its body runs to the next top-level declaration.
+  const rejects = (file, id) => {
+    const src = g.text(file) ?? "";
+    const at = src.search(new RegExp(`(?:function\\s+${id}\\b|\\b(?:const|let|var)\\s+${id}\\b)`));
+    if (at < 0) return true; // can't see it: keep it, as before
+    const rest = src.slice(at + 1);
+    const end = rest.search(/\n(?:export\s|function\s|const\s|let\s|class\s)/);
+    const body = rest.slice(0, end < 0 ? undefined : end);
+    return /\b(?:status|sendStatus)\s*\(\s*4\d\d|\bthrow\b|\bnext\s*\(\s*(?:new\b|err|e\b|error|createError)|\bres\s*\.\s*redirect\s*\(/.test(body);
+  };
   // `app`, `router` or `server` handed in as a function parameter: `(app) => …`, `({ app }) => …`.
   const paramVars = (file) => {
     const src = g.text(file) ?? "";
@@ -364,7 +375,15 @@ export function routeInventory(g, { entry } = {}) {
         const candidates = use.idents.filter((id) => imports[id] || (locals.has(id) && id !== v));
         const routerLike = (id) => locals.has(id) || routeFiles.has(imports[id]?.file) || localRouters(imports[id]?.file ?? "").size > 0;
         let routers = candidates.filter(routerLike);
-        if (!routers.length && candidates.length) routers = [candidates.at(-1)];
+        // When none is plainly a router, the last argument is taken for one, unless it is
+        // middleware: `workspace.use(requireAuth, requireWorkspace)` mounts no router, it
+        // guards everything the router mounts after it.
+        const middleware = (id) => {
+          if (/^(?:require|ensure|verify|check|validate|authenticate|authori[sz]e|protect|guard|is[A-Z]|has[A-Z]|can[A-Z])/.test(id)) return true;
+          const src = g.text(imports[id]?.file ?? file) ?? "";
+          return new RegExp(`(?:function\\s+${id}\\s*\\(\\s*req\\b|\\b${id}\\b\\s*(?::[^=]+)?=\\s*(?:async\\s*)?(?:function\\s*)?\\(\\s*req\\b)`).test(src);
+        };
+        if (!routers.length && candidates.length && !middleware(candidates.at(-1))) routers = [candidates.at(-1)];
         const mw = use.idents.filter((id) => !routers.includes(id)).map((name) => ({ name, at }));
         const full = joinPath(prefix, use.prefix);
         for (const routerIdent of routers) {
@@ -373,8 +392,11 @@ export function routeInventory(g, { entry } = {}) {
             walk(imp.file, exportVar(imp.file, imp.name), full, [...guards, ...mw]);
           } else walk(file, routerIdent, full, [...guards, ...mw]); // a router defined in this file
         }
-        // Middleware with no router: `router.use(requireJwtAuth)` guards everything under this mount.
-        if (!routers.length && mw.length) pathGuards.push({ prefix: full, guards: mw, at });
+        // Middleware with no router: `router.use(requireJwtAuth)` guards everything under this mount,
+        // if it can turn a request away. One that only loads the session and calls next() isn't a guard.
+        // A catch-all (`notFound`, an error handler) answers what no route did: it guards nothing.
+        const guarding = mw.filter((x) => !/not_?found|error|fallback|catch_?all|404/i.test(x.name) && rejects(imports[x.name]?.file ?? file, x.name));
+        if (!routers.length && guarding.length) pathGuards.push({ prefix: full, guards: guarding, at });
       }
       // Registration functions: the app/router passed to an imported (or local) function.
       const receivers = v && v !== "*" ? [v] : appVars(file);

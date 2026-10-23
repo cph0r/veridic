@@ -1220,3 +1220,45 @@ test("init: the parts to offer linking for, most linkable rules first, each once
   const homes = new Map([["specs/voice/spec.md", "voice"], ["specs/voice-conversation/spec.md", "voice"], ["specs/orders/spec.md", "orders"], ["specs/misc/spec.md", null]]);
   assert.deepEqual(linkableParts({ "specs/orders/spec.md": 5, "specs/voice/spec.md": 3, "specs/voice-conversation/spec.md": 4, "specs/misc/spec.md": 9 }, homes), [["voice", 7], ["orders", 5]]);
 });
+
+// Launchpad's shape: guards attached to a tenant router with use(), which then mounts the
+// feature routers; handlers act inside the membership-checked workspace.
+const tenantRepo = () => fakeRepo({
+  "src/main.ts": 'import express from "express";\nimport routes from "./routes";\nimport { notFound } from "./middlewares/not-found";\nconst app = express();\napp.use("/api", routes);\napp.use(notFound);\napp.listen(3000);\n',
+  "src/middlewares/not-found.ts": 'export const notFound = (req, res) => { res.status(404).json({ error: "Not found" }); };\n',
+  "src/routes.ts": 'import { Router } from "express";\nimport { requireAuth } from "./middlewares/require-auth";\nimport { requireWorkspace } from "./middlewares/require-workspace";\nimport appsRouter from "./apps";\nconst router = Router();\nconst workspace = Router({ mergeParams: true });\nworkspace.use(requireAuth, requireWorkspace);\nworkspace.use(appsRouter);\nrouter.use("/workspaces/:workspaceId", workspace);\nexport default router;\n',
+  "src/middlewares/require-auth.ts": 'export const requireAuth = (req, res, next) => { if (!req.user) return res.status(401).end(); next(); };\n',
+  "src/middlewares/require-workspace.ts": 'export const requireWorkspace = async (req, res, next) => {\n  const member = await findMember(req.params.workspaceId, req.user.id);\n  if (!member) return res.status(404).end();\n  req.workspace = { id: req.params.workspaceId };\n  next();\n};\n',
+  "src/apps.ts": 'import { Router } from "express";\nconst router = Router();\nrouter.delete("/apps/:appRef", async (req, res) => {\n  res.json(await deleteApp(workspaceOf(req).id, String(req.params["appRef"])));\n});\nrouter.delete("/apps/:appRef/raw", async (req, res) => {\n  res.json(await wipeApp(String(req.params["appRef"])));\n});\nexport default router;\n',
+});
+
+test("routes: middleware attached with use() and no router guards every route the router mounts later", () => {
+  const { g, done } = tenantRepo();
+  const r = routeInventory(g).routes.find((x) => x.id === "DELETE /api/workspaces/:workspaceId/apps/:appRef");
+  done();
+  assert.ok(r, "the route is found under the tenant mount");
+  assert.deepEqual(r.guards.map((x) => x.name ?? x).sort(), ["requireAuth", "requireWorkspace"]);
+});
+
+test("access: a record looked up inside the workspace a membership guard checked is scoped to the caller", () => {
+  const { g, done } = tenantRepo();
+  const m = accessMatrix(g, routeInventory(g));
+  done();
+  const del = m.find((x) => x.route === "DELETE /api/workspaces/:workspaceId/apps/:appRef");
+  assert.equal(del.access, "auth");
+  assert.equal(del.scoped, "yes");
+  assert.deepEqual(del.flags, []);
+  const raw = m.find((x) => x.route === "DELETE /api/workspaces/:workspaceId/apps/:appRef/raw");
+  assert.ok(raw.flags.includes("id-param-without-caller-scope"), "a handler that ignores the workspace is still flagged");
+});
+
+test("routes: middleware that only loads the session (never rejects) is not a guard, even app-wide", () => {
+  const { g, done } = fakeRepo({
+    "src/main.ts": 'import express from "express";\nimport { authMiddleware } from "./auth";\nimport routes from "./routes";\nconst app = express();\napp.use(authMiddleware);\napp.use("/api", routes);\napp.listen(3000);\n',
+    "src/auth.ts": 'export async function authMiddleware(req, res, next) {\n  const sid = req.cookies.sid;\n  if (!sid) { next(); return; }\n  req.user = await load(sid);\n  next();\n}\n',
+    "src/routes.ts": 'import { Router } from "express";\nconst router = Router();\nrouter.get("/menu", (req, res) => res.json([]));\nexport default router;\n',
+  });
+  const r = routeInventory(g).routes.find((x) => x.id === "GET /api/menu");
+  done();
+  assert.deepEqual(r.guards, []);
+});

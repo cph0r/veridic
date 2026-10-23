@@ -53,6 +53,11 @@ const ROLE_GUARD = /admin|role|platform|staff|superuser|manage|authori[sz]e|perm
 // Middleware that checks the caller owns the resource: the route is scoped even if the handler isn't.
 // Also middleware that injects the caller's own id into the request (`appendUserId()`).
 const OWNER_GUARD = /owner|hasAuthorization|isOwner|ownership|belongsTo|canEdit|canModify|(?:append|attach|inject)\w*User|\w+Access\b|\bacl\b|singleUser|ownerOnly/i; // single-user mode: the one user owns everything
+// Multi-tenant apps: a guard that checks the caller is a member of the workspace (team, org,
+// tenant…) the URL names, and a handler that then acts inside that workspace. Its records are
+// the caller's workspace's, the same scoping as an owner id (often enforced by row-level security).
+const MEMBER_GUARD = /require(?:Workspace|Tenant|Org(?:ani[sz]ation)?|Team|Project|Member(?:ship)?)\b|(?:workspace|tenant|org|team|project)Member/i;
+const TENANT_USE = /\b(?:workspace|tenant|org(?:ani[sz]ation)?|team|project)Of\(\s*req\b|\breq\.(?:workspace|tenant|org(?:ani[sz]ation)?|team|project)\b/;
 // Parameters that name a code, not a record someone owns: `:continueCode`, `:token`, `:provider`.
 const CODE_PARAM = /code|token|coupon|key|slug|provider|lang|locale|page|hash|secret/i;
 const PLAN_GUARD = /pro\b|Pro[A-Z]|plan|subscri|premium|paid|tier|entitle/i;
@@ -109,7 +114,8 @@ export function accessMatrix(g, inv) {
     // Without sign-in anywhere on the route, req.user can't be the caller (it's whatever was loaded).
     const identity = access !== "public" && (CALLER_IN_HANDLER.test(body) || CALLER_IN_HANDLER.test(text)); // text: an inline handler
     const ownerChecked = guards.some((n) => OWNER_GUARD.test(n)) || OWNER_HELPER.test(body) || OWNER_HELPER.test(text) || factoryChecked(g, r, handlerNames.get(r));
-    let scoped = CALLER.test(text) || identity || ownerChecked || guards.some((n) => OWNER_GUARD.test(n)) ? "yes" : CLIENT_SCOPE.test(text) || CLIENT_SCOPE.test(body) ? "weak" : "no";
+    const tenantScoped = guards.some((n) => MEMBER_GUARD.test(n)) && (TENANT_USE.test(text) || TENANT_USE.test(body));
+    let scoped = CALLER.test(text) || identity || ownerChecked || tenantScoped || guards.some((n) => OWNER_GUARD.test(n)) ? "yes" : CLIENT_SCOPE.test(text) || CLIENT_SCOPE.test(body) ? "weak" : "no";
     const flags = [];
     // Identity or ownership supplied by the client on a write. Not when middleware put the
     // caller's own user id there (`appendUserId()`) and that is the field used.
