@@ -247,3 +247,12 @@ the old one.
 | Stamped specs, two lines inserted above the code | 55 citations moved | 55 moved, fixable by their text |
 
 Express: snapshots and metrics identical; Gobbles' rule counts drop only by its success criteria.
+
+**Phase 2 (2026-10-24).** In the frozen launchpad copy, an agent following `/veridic:spec product`
+wrote `specs/product/spec.md`: 5 journeys (27 steps) and 7 guarantees, 103 references to rules in 7
+part specs, `veridic check` clean (a bad reference fails it, exit 1). The dashboard shows the
+summary, journeys and guarantees above the parts table with their states (4 of 5 journeys and 4 of
+7 guarantees proven). Gaps the agent reported, which a product spec is meant to surface: "data kept
+on the phone" (a README promise) has no rule that enforces it; paid features in the README have no
+part rules yet. Noted for the user: with many guarantees the section pushes the parts table below
+the fold.
