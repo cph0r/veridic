@@ -66,7 +66,7 @@ export async function linkForModule(repo, moduleId, args, opts = {}) {
     if (want && rules.length && !quals.includes(want)) { bad.push({ id, at: null, reason: `no ${id} in ${want}'s spec; it is in ${quals.join(", ")}` }); continue; }
     if (!want && quals.length > 1) { bad.push({ id, at: null, reason: `${id} is in ${quals.length} of this part's spec files: write ${quals.map((q) => `${id}@${q}`).join(" or ")}` }); continue; }
     const rule = rules.find((r) => !want || r.qual === want);
-    for (const ln of lns.split(",").filter(Boolean)) links.push({ id, at: `${file}:${ln}`, ...(rule?.ambiguous ? { qual: rule.qual } : {}) });
+    for (const ln of lns.split(",").filter(Boolean)) links.push({ id, at: `${file}:${ln}`, ...(rule?.ambiguous || quals.length > 1 ? { qual: rule.qual } : {}) });
   }
   const r = linkTests(repo, links, { module: moduleId });
   return { module: moduleId, linked: r.linked, skipped: [...bad, ...r.skipped] };

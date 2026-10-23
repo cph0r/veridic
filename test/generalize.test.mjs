@@ -1165,3 +1165,21 @@ test("FR-003: a plain tag on a test that runs none of a spec's code is another s
   assert.equal(r.requirements[0].status, "none");
   assert.deepEqual(r.requirements[0].tests, []);
 });
+
+test("FR-017: an id two of the part's spec files have is always written with its spec file, even when their tests don't overlap", async () => {
+  const { linkForModule } = await import("../core/link.mjs");
+  const { workList } = await import("../core/worklist.mjs");
+  const { repo, data } = await sharedIdsRepo();
+  fs.writeFileSync(path.join(repo, "src/a.js"), "export const a = (x) => x + 1;\n");
+  fs.writeFileSync(path.join(repo, "src/b.js"), "export const b = () => 'hi';\n");
+  fs.writeFileSync(path.join(repo, "specs/voice/spec.md"), "- **FR-001**: a adds one. [evidence: src/a.js:1]\n");
+  fs.writeFileSync(path.join(repo, "specs/voice-conversation/spec.md"), "- **FR-001**: b greets. [evidence: src/b.js:1]\n");
+  fs.writeFileSync(path.join(repo, "src/a.test.js"), 'import { a } from "./a";\nit("adds one", () => { expect(a(1)).toBe(2); });\n');
+  const r = await linkForModule(repo, "voice", ["FR-001@voice=src/a.test.js:2"], { data });
+  const line = fs.readFileSync(path.join(repo, "src/a.test.js"), "utf8").split("\n")[1];
+  const wl = await workList(repo, "voice", { data });
+  fs.rmSync(repo, { recursive: true, force: true });
+  assert.deepEqual(r.skipped, []);
+  assert.equal(line, 'it("FR-001 (voice): adds one", () => { expect(a(1)).toBe(2); });');
+  assert.ok(wl.rules.every((x) => x.ambiguous), "both files' FR-001 are flagged");
+});

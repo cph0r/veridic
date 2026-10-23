@@ -88,7 +88,9 @@ export async function workList(repo, moduleId, opts = {}) {
       const rec = recipeOf(cited[0]);
       const candidates = (r.related_tests ?? []).flatMap((f) => testsIn(repo, f).filter((t) => (t.strength === "strong" || t.strength === "weak") && !t.title.includes(id)).map((t) => ({ at: `${f}:${t.line}`, title: t.title, strength: t.strength })));
       const mine = reachedBy(cov, id);
-      const ambiguous = others.some((o) => o.f !== spec && covOf(o).requirements.some((x) => x.id === id) && [...reachedBy(covOf(o), id)].some((f) => mine.has(f)));
+      // Shared with another of this part's spec files: always (one part, one set of tests).
+      // Shared with another part's spec: when a test reaches both rules' code.
+      const ambiguous = own.some((o) => o !== spec && (read(repo, o) ?? "").split("\n").some((l) => l.match(RULE)?.[1] === id)) || others.some((o) => o.f !== spec && covOf(o).requirements.some((x) => x.id === id) && [...reachedBy(covOf(o), id)].some((f) => mine.has(f)));
       rules.push({
         id,
         spec,
