@@ -1386,3 +1386,13 @@ test("contract: a handler that parses the request with zod returns what the app'
   done();
   assert.deepEqual(d.operations.find((o) => o.id === "PATCH /api/me")?.unreturned_statuses ?? [], []);
 });
+
+test("adapters: every route says which framework it comes from, and Express's routes are unchanged", async () => {
+  const { adapters } = await import("../core/frameworks/index.mjs");
+  const { g, done } = tenantRepo();
+  const routes = routeInventory(g).routes;
+  done();
+  assert.ok(routes.length > 0);
+  assert.ok(routes.every((r) => r.framework === "express"));
+  assert.deepEqual(adapters.map((a) => a.name), ["express"]);
+});
