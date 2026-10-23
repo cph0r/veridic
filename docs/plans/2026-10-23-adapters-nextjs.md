@@ -161,4 +161,23 @@
 
 ## Results
 
-(filled in at each checkpoint)
+**Phase 1 (2026-10-23).** Express moved behind the interface. Snapshots (routes, guards,
+access, effects, drift) byte-identical on RealWorld (20 routes), Gobbles (161) and launchpad
+(40); metrics identical; `routes`, `parts`, `report` output identical to main.
+
+**Phase 2 (2026-10-23).** Routes found on the samples, each checked against an independent count:
+
+| Sample | route.ts | pages/api | actions | total |
+|---|---|---|---|---|
+| saas-starter | 4 | 0 | 10 | 14 (hand-checked route by route, lines too) |
+| nextjs-subscription-payments | 3 | 0 | 11 | 14 |
+| taxonomy | 8 | 1 (NextAuth) | 0 | 9 |
+| papermark | 69 | 236 files, 306 routes | 0 | 375 |
+| inbox-zero | 385 | 0 | 220 | 605 |
+
+Noir's 6 Next.js fixtures with expectations: every expected endpoint found, none extra (100).
+Found on real code, each fixed with a test first: package.json isn't in the code index;
+multi-line `export { handler as GET }`; wrapped actions (`validatedAction(…)`); `export { default }
+from "@/…"` and `export { handler as default } from`; `export * from` another route; verb maps
+(quoted, shorthand, spread); `const { method, query } = req`; early exits that only count when
+they reject; nested apps in a monorepo.

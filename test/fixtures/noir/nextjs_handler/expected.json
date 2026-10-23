@@ -1,10 +1,25 @@
 {
  "source": "owasp-noir/noir spec/functional_test/testers/javascript/nextjs_handler_spec.cr",
  "endpoints": [
+  "DELETE /api/auth/:nextauth",
+  "DELETE /api/book",
+  "DELETE /api/verify",
+  "GET /api/auth/:nextauth",
+  "GET /api/book",
   "GET /api/legacy",
   "GET /api/list",
   "GET /api/me",
+  "GET /api/verify",
+  "PATCH /api/auth/:nextauth",
+  "PATCH /api/book",
+  "PATCH /api/verify",
+  "POST /api/auth/:nextauth",
+  "POST /api/book",
   "POST /api/legacy",
-  "POST /api/me"
+  "POST /api/me",
+  "POST /api/verify",
+  "PUT /api/auth/:nextauth",
+  "PUT /api/book",
+  "PUT /api/verify"
  ]
 }

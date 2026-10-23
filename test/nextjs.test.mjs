@@ -74,6 +74,7 @@ test("next: pages/api routes and their methods", () => {
     "pages/api/ping.ts": "export default function handler(req, res) {\n  res.json({ ok: true });\n}\n",
     "pages/api/orders/index.ts": 'export default async function (req, res) {\n  switch (req.method) {\n    case "POST":\n      return res.status(201).json({});\n  }\n}\n',
     "pages/api/login.ts": 'export default async function handler(req, res) {\n  if (req.method !== "POST" && req.method !== "PUT") return res.status(405).end();\n  res.json({});\n}\n',
+    "pages/api/record.ts": 'export default async function handler(req, res) {\n  if (req.method !== "POST") {\n    res.status(405).json({ error: "Method Not Allowed" });\n    return;\n  }\n  res.json({});\n}\n',
     "pages/api/alias.ts": 'export default function handler(req, res) {\n  const { method } = req;\n  if (method === "GET") return res.json([]);\n  if (method === "PUT") return res.json({});\n}\n',
     "pages/api/wrapped.ts": 'async function handler(req, res) {\n  res.json({});\n}\n\nexport default withAuth(handler);\n',
     "pages/api/_middleware.ts": "export default function m() {}\n",
@@ -81,7 +82,7 @@ test("next: pages/api routes and their methods", () => {
   });
   const rs = routeInventory(g).routes.filter((r) => r.framework === "nextjs");
   done();
-  assert.deepEqual(rs.map((r) => r.id).sort(), ["ALL /api/ping", "ALL /api/wrapped", "DELETE /api/users/:id", "GET /api/alias", "GET /api/users/:id", "POST /api/login", "POST /api/orders", "PUT /api/alias", "PUT /api/login"]);
+  assert.deepEqual(rs.map((r) => r.id).sort(), ["ALL /api/ping", "ALL /api/wrapped", "DELETE /api/users/:id", "GET /api/alias", "GET /api/users/:id", "POST /api/login", "POST /api/orders", "POST /api/record", "PUT /api/alias", "PUT /api/login"]);
   const w = rs.find((r) => r.id === "ALL /api/wrapped");
   assert.deepEqual([w.start, w.end], [1, 3], "a wrapped default export spans its handler");
   const u = rs.find((r) => r.id === "GET /api/users/:id");
@@ -159,5 +160,77 @@ test("next: every export of a 'use server' file is an action, wrapped ones too",
     ["ACTION /_action/signIn", 3, 6],
     ["ACTION /_action/deleteAccount", 8, 13],
     ["ACTION /_action/signOut", 15, 17],
+  ]);
+});
+
+test("next: each package depending on next is its own app, each file in its nearest app", () => {
+  const { g, done } = fakeRepo({
+    ...PKG,
+    "apps/web/package.json": PKG["package.json"],
+    "apps/web/app/api/x/route.ts": H("GET"),
+    "apps/web/app/settings/actions.ts": '"use server";\nexport async function save() {}\n',
+    "packages/lib/package.json": JSON.stringify({ dependencies: { zod: "3" } }),
+    "packages/lib/app/api/no/route.ts": H("GET"),
+  });
+  const rs = routeInventory(g).routes.filter((r) => r.framework === "nextjs");
+  done();
+  assert.deepEqual(rs.map((r) => [r.id, r.file]).sort(), [
+    ["ACTION /settings/_action/save", "apps/web/app/settings/actions.ts"],
+    ["GET /api/x", "apps/web/app/api/x/route.ts"],
+  ]);
+});
+
+test("adapters: an Express server and a Next app side by side", async () => {
+  const { adapters } = await import("../core/frameworks/index.mjs");
+  const files = {
+    "package.json": JSON.stringify({ workspaces: ["server", "web"] }),
+    "server/package.json": JSON.stringify({ dependencies: { express: "4" } }),
+    "server/src/main.ts": 'import express from "express";\nimport orders from "./orders";\nconst app = express();\napp.use("/api", orders);\napp.listen(3000);\n',
+    "server/src/orders.ts": 'import { Router } from "express";\nconst router = Router();\nrouter.get("/orders", (req, res) => res.json([]));\nexport default router;\n',
+    "web/package.json": PKG["package.json"],
+    "web/app/api/health/route.ts": H("GET"),
+  };
+  const { g, done } = fakeRepo(files);
+  const all = routeInventory(g).routes;
+  const expressAlone = adapters.find((a) => a.name === "express").routes(g, {}).routes;
+  done();
+  assert.deepEqual(all.map((r) => `${r.framework} ${r.id}`).sort(), ["express GET /api/orders", "nextjs GET /api/health"]);
+  assert.deepEqual(all.filter((r) => r.framework === "express").map(({ framework, ...r }) => r), expressAlone);
+});
+
+test("next: Noir's Next.js fixtures give the endpoints its specs expect", async () => {
+  const fs = await import("node:fs");
+  const path = await import("node:path");
+  const root = new URL("./fixtures/noir/", import.meta.url).pathname;
+  const norm = (id) => id.replace(/\/:[\w$]+/g, "/:").replace(/\/\*/g, "/:");
+  // Noir writes ALL as the five methods, a catch-all as {slug}, and a server action as POST /<name>.
+  const expand = (r) => (r.method === "ACTION" ? [`POST /${r.path.split("/").pop()}`] : (r.method === "ALL" ? ["GET", "POST", "PUT", "DELETE", "PATCH"] : [r.method]).map((m) => norm(`${m} ${r.path}`)));
+  for (const dir of fs.readdirSync(root).filter((d) => fs.existsSync(path.join(root, d, "expected.json")))) {
+    const files = {};
+    const walk = (d) => { for (const e of fs.readdirSync(path.join(root, dir, d), { withFileTypes: true })) { const rel = d ? `${d}/${e.name}` : e.name; if (e.isDirectory()) walk(rel); else files[rel] = fs.readFileSync(path.join(root, dir, rel), "utf8"); } };
+    walk("");
+    delete files["expected.json"];
+    const { g, done } = fakeRepo(files);
+    const got = new Set(routeInventory(g).routes.flatMap(expand));
+    done();
+    const want = new Set(JSON.parse(files["expected.json"] ?? fs.readFileSync(path.join(root, dir, "expected.json"), "utf8")).endpoints.map(norm));
+    const missing = [...want].filter((x) => !got.has(x)), extra = [...got].filter((x) => !want.has(x));
+    assert.deepEqual({ dir, missing, extra }, { dir, missing: [], extra: [] });
+  }
+});
+
+test("next: a verb map answers only its verbs, and a renamed re-export is followed", () => {
+  const { g, done } = fakeRepo({
+    ...PKG,
+    "pages/api/legacy.ts": 'import { defaultHandler } from "../../lib/responder";\nconst getHandler = async (req, res) => ({ ok: true });\n\nexport default defaultHandler({\n  GET: Promise.resolve({ default: getHandler }),\n  POST: import("./_post"),\n});\n',
+    "pages/api/verify.ts": 'export { handler as default } from "../../lib/verify";\n',
+    "lib/verify.ts": "export async function handler(req, res) {\n  res.status(200).json({ verified: true });\n}\n",
+  });
+  const rs = routeInventory(g).routes.filter((r) => r.framework === "nextjs");
+  done();
+  assert.deepEqual(rs.map((r) => [r.id, r.file, r.start, r.end]).sort(), [
+    ["ALL /api/verify", "lib/verify.ts", 1, 3],
+    ["GET /api/legacy", "pages/api/legacy.ts", 4, 7],
+    ["POST /api/legacy", "pages/api/legacy.ts", 4, 7],
   ]);
 });

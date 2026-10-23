@@ -132,10 +132,23 @@ function pagesHandler(src) {
  */
 function pagesMethods(body) {
   const code = codeOnly(body.replace(/["']([A-Z]+)["']/g, (m, x) => `__${x}__`)); // keep the method names through blanking
-  const alias = code.match(/\{\s*method\s*\}\s*=\s*req\b/) ? "(?:req\\.method|\\bmethod)" : "req\\.method";
+  const alias = /\{[^=;]*\bmethod\b[^=;]*\}\s*=\s*req\b/.test(code) ? "(?:req\\.method|\\bmethod)" : "req\\.method";
   const M = "(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS)";
-  const neg = code.match(new RegExp(`if\\s*\\(\\s*${alias}\\s*!==?\\s*__${M}__((?:\\s*&&\\s*${alias}\\s*!==?\\s*__${M}__)*)\\s*\\)`));
-  if (neg) return [...neg[0].matchAll(new RegExp(`__${M}__`, "g"))].map((m) => m[1]);
+  // An early exit bounds the methods only when it turns the request away (a 4xx, often
+  // 405 / METHOD_NOT_ALLOWED); a negated check that does the work instead is a branch.
+  for (const neg of code.matchAll(new RegExp(`if\\s*\\(\\s*${alias}\\s*!==?\\s*__${M}__((?:\\s*&&\\s*${alias}\\s*!==?\\s*__${M}__)*)\\s*\\)`, "g"))) {
+    const after = code.slice(neg.index + neg[0].length);
+    let body = after.split(/\n|;/)[0];
+    if (after.trimStart().startsWith("{")) { // the block, to its matching brace
+      const open = after.indexOf("{");
+      let depth = 0, i = open;
+      for (; i < after.length; i++) { if (after[i] === "{") depth++; else if (after[i] === "}" && --depth === 0) break; }
+      body = after.slice(open, i + 1);
+    }
+    const st = body.search(/status\s*\(\s*(?:4\d\d|[\w.]*METHOD_NOT_ALLOWED|[\w.]*MethodNotAllowed)\b/);
+    if (st >= 0 && !/\bif\s*\(/.test(body.slice(0, st)) && /\breturn\b|\.end\s*\(/.test(body)) // the branch's own answer, not a nested check
+      return [...neg[0].matchAll(new RegExp(`__${M}__`, "g"))].map((m) => m[1]);
+  }
   const pos = new Set([...code.matchAll(new RegExp(`${alias}\\s*===?\\s*__${M}__`, "g"))].map((m) => m[1]));
   if (new RegExp(`switch\\s*\\(\\s*${alias}\\s*\\)`).test(code)) for (const m of code.matchAll(new RegExp(`case\\s+__${M}__\\s*:`, "g"))) pos.add(m[1]);
   return pos.size ? [...pos] : ["ALL"];
@@ -164,6 +177,29 @@ function resolveSpec(g, dir, from, spec) {
       if (/\.[cm]?[jt]sx?$/.test(f) && textOf(g, f) != null) return f;
     }
   return null;
+}
+
+/**
+ * An object literal's top-level entries, from its text between the braces: each key as written
+ * (`"DELETE": f`, `GET,` shorthand, `async PATCH(…) {}`), and whether it spreads another object.
+ */
+function topLevelKeys(raw) {
+  const parts = [];
+  let depth = 0, cur = "", quote = null;
+  for (let i = 0; i < raw.length; i++) {
+    const c = raw[i];
+    if (quote) { cur += c; if (c === quote && raw[i - 1] !== "\\") quote = null; continue; }
+    if (c === '"' || c === "'" || c === "`") { quote = c; cur += c; continue; }
+    if ("([{".includes(c)) depth++;
+    else if (")]}".includes(c)) depth--;
+    if (c === "," && depth === 0) { parts.push(cur); cur = ""; } else cur += c;
+  }
+  parts.push(cur);
+  const entries = parts.map((x) => x.replace(/^\s*(?:\/\/[^\n]*\n\s*)*/, "").trim()).filter(Boolean);
+  return {
+    spread: entries.some((x) => x.startsWith("...")),
+    keys: entries.map((x) => x.match(/^(?:async\s+)?["']?([\w$]+)["']?\s*(?:[:(]|$)/)?.[1]).filter(Boolean),
+  };
 }
 
 /** The lines a statement spans, from its first character to the `;` or line end that closes it. */
@@ -210,8 +246,10 @@ function nextRoutes(g) {
   for (const dir of appDirs(g)) {
     const base = basePathOf(g, dir);
     const prefix = dir ? `${dir}/` : "";
+    const nested = appDirs(g).filter((d) => d !== dir && (dir === "" || d.startsWith(`${dir}/`)));
     for (const f of g.files ?? []) {
       if (!f.startsWith(prefix) || ignored(f) || !SRC.test(f)) continue;
+      if (nested.some((d) => f.startsWith(`${d}/`))) continue; // a nested app's file is that app's
       const rel = f.slice(prefix.length);
       const api = rel.match(/^(?:src\/)?pages\/(api(?:\/.*)?)\.[cm]?[jt]sx?$/);
       if (api) {
@@ -219,11 +257,36 @@ function nextRoutes(g) {
         if (segs.at(-1) === "index") segs.pop();
         if (segs.some((s) => s.startsWith("_"))) continue;
         const url = (base + appPath(segs)).replace(/(.)\/$/, "$1") || "/";
-        // `export { default } from "@/ee/…"`: the handler is in the file it re-exports.
+        // `export { default } from "@/ee/…"` / `export { handler as default } from "…"`: the
+        // handler is in the file it re-exports.
         let file = f;
-        const re = (textOf(g, f) ?? "").match(/\bexport\s*\{\s*default\s*\}\s*from\s*["']([^"']+)["']/);
-        if (re) file = resolveSpec(g, dir, f, re[1]) ?? f;
-        let h = pagesHandler(textOf(g, file) ?? "");
+        const own = textOf(g, f) ?? "";
+        const re = own.match(/\bexport\s*\{\s*(?:default|([\w$]+)\s+as\s+default)\s*\}\s*from\s*["']([^"']+)["']/);
+        if (re) file = resolveSpec(g, dir, f, re[2]) ?? f;
+        let h = null;
+        if (re?.[1] && file !== f) {
+          const ext = functionExtent(textOf(g, file) ?? "", re[1]);
+          if (ext) h = { start: ext[0], end: ext[1], body: (textOf(g, file) ?? "").split("\n").slice(ext[0] - 1, ext[1]).join("\n") };
+        }
+        // A verb map (`export default defaultHandler({ GET: …, POST: … })`) answers its verbs.
+        const ownCode = codeOnly(own);
+        const vm = ownCode.match(/\bexport\s+default\s+[\w$.]+\s*\(\s*\{/);
+        if (!re && vm) {
+          const obj = ownCode.slice(vm.index + vm[0].length - 1);
+          let depth = 0, end = 0;
+          for (; end < obj.length; end++) { if (obj[end] === "{") depth++; else if (obj[end] === "}" && --depth === 0) break; }
+          // Keys as written (quoted "DELETE", shorthand GET, method shorthand async PATCH(…)); a
+          // spread (...base) may bring more verbs, so it doesn't narrow.
+          const raw = own.slice(vm.index + vm[0].length - 1).slice(1, end);
+          const { keys, spread } = topLevelKeys(raw);
+          const verbs = spread ? [] : keys.filter((k) => HTTP.includes(k));
+          if (verbs.length) {
+            const ext = statementLines(own, ownCode, vm.index);
+            for (const method of [...new Set(verbs)]) routes.push({ id: `${method} ${url}`, method, path: url, file: f, start: ext.start, end: ext.end, guards: [] });
+            continue;
+          }
+        }
+        h ??= pagesHandler(textOf(g, file) ?? "");
         if (!h && re) { const line = (textOf(g, f) ?? "").slice(0, re.index).split("\n").length; h = { start: line, end: line, body: "" }; } // re-exports a file that isn't there
         if (h) for (const method of pagesMethods(h.body)) routes.push({ id: `${method} ${url}`, method, path: url, file, start: h.start, end: h.end, guards: [] });
         continue;
@@ -245,7 +308,11 @@ function nextRoutes(g) {
       const p = appPath(m[1] ? m[1].split("/") : []);
       if (p == null) continue;
       const url = (base + p).replace(/(.)\/$/, "$1") || "/";
-      for (const h of handlers(textOf(g, f) ?? "")) routes.push({ id: `${h.method} ${url}`, method: h.method, path: url, file: f, start: h.start, end: h.end, guards: [] });
+      // `export * from "../other/route"` / `export { GET } from "…"`: the handlers are there.
+      let file = f;
+      const reAll = (textOf(g, f) ?? "").match(/\bexport\s*(?:\*|\{[^}]*\})\s*from\s*["']([^"']+)["']/);
+      if (reAll && !handlers(textOf(g, f) ?? "").length) file = resolveSpec(g, dir, f, reAll[1]) ?? f;
+      for (const h of handlers(textOf(g, file) ?? "")) routes.push({ id: `${h.method} ${url}`, method: h.method, path: url, file, start: h.start, end: h.end, guards: [] });
     }
   }
   return { routes };
