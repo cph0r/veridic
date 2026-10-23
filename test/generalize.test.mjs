@@ -1283,3 +1283,74 @@ test("FR-011: --run passes the environment .veridic.json's testEnv gives (e.g. D
   assert.equal(without, "failing");
   assert.equal(withEnv, "passing");
 });
+
+// An integration test drives the server over HTTP through a harness: test -> harness -> app ->
+// routes -> the cited code, deeper than imports are followed. The URL it calls says what it runs.
+async function httpRepo() {
+  const { execFileSync } = await import("node:child_process");
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "veridic-http-"));
+  const files = {
+    "src/consent.js": "export function approve(id, user) {\n  if (!user.owner) throw new Error('forbidden');\n  return { id, approved: true };\n}\n",
+    "src/other.js": "export const other = () => 1;\n",
+    "src/routes.js": 'import { approve } from "./consent.js";\nexport function mount(router) {\n  router.post("/oauth/requests/:id/approve", (req, res) => res.json(approve(req.params.id, req.user)));\n}\n',
+    "src/app.js": 'import { mount } from "./routes.js";\nexport const app = { mount };\n',
+    "test/harness.js": 'import { app } from "../src/app.js";\nexport const start = () => ({ base: "http://localhost/api", app });\n',
+    "specs/oauth/spec.md": "- **FR-001**: Only an owner can approve a request. [evidence: src/consent.js:1-4]\n- **FR-002**: Other is one. [evidence: src/other.js:1]\n",
+    "test/oauth.test.js": 'import { start } from "./harness.js";\nconst h = start();\nit("FR-001: only an owner can approve", async () => {\n  const r = await fetch(`${h.base}/oauth/requests/${7}/approve`, { method: "POST" });\n  expect(r.status).toBe(403);\n});\nit("FR-002: other", async () => {\n  const r = await fetch(`${h.base}/oauth/requests/${7}/approve`, { method: "POST" });\n  expect(r.status).toBe(200);\n});\n',
+  };
+  for (const [f, t] of Object.entries(files)) fs.mkdirSync(path.join(repo, path.dirname(f)), { recursive: true }), fs.writeFileSync(path.join(repo, f), t);
+  execFileSync("git", ["init", "-q"], { cwd: repo });
+  return repo;
+}
+
+test("FR-003: a test that calls a route's URL reaches the code behind that route's handler", async () => {
+  const { testCoverage } = await import("../core/tests.mjs");
+  const repo = await httpRepo();
+  const routes = [{ id: "POST /api/oauth/requests/:id/approve", path: "/api/oauth/requests/:id/approve", file: "src/routes.js" }];
+  const spec = path.join(repo, "specs/oauth/spec.md");
+  const st = Object.fromEntries(testCoverage(repo, fs.readFileSync(spec, "utf8"), { specPath: spec, routes }).requirements.map((r) => [r.id, r.status]));
+  fs.rmSync(repo, { recursive: true, force: true });
+  assert.equal(st["FR-001"], "covered", "the URL leads to consent.js");
+  assert.notEqual(st["FR-002"], "covered", "the same URL doesn't lead to other.js");
+});
+
+test("FR-003: a plain id that two specs share, on a test running both rules' code, counts for neither until the title names its spec", async () => {
+  const { testCoverage } = await import("../core/tests.mjs");
+  const repo = await httpRepo();
+  fs.writeFileSync(path.join(repo, "src/apps.js"), "export const appOf = (id) => ({ id });\n");
+  fs.writeFileSync(path.join(repo, "src/routes.js"), 'import { approve } from "./consent.js";\nimport { appOf } from "./apps.js";\nexport function mount(router) {\n  router.post("/oauth/requests/:id/approve", (req, res) => res.json({ ...approve(req.params.id, req.user), app: appOf(1) }));\n}\n');
+  fs.mkdirSync(path.join(repo, "specs/apps"));
+  fs.writeFileSync(path.join(repo, "specs/apps/spec.md"), "- **FR-001**: An app is found by id. [evidence: src/apps.js:1]\n");
+  const routes = [{ path: "/api/oauth/requests/:id/approve", file: "src/routes.js" }];
+  const status = () => Object.fromEntries(["oauth", "apps"].map((k) => { const spec = path.join(repo, `specs/${k}/spec.md`); return [k, testCoverage(repo, fs.readFileSync(spec, "utf8"), { specPath: spec, routes }).requirements.find((r) => r.id === "FR-001")]; }));
+  const plain = status();
+  const t = path.join(repo, "test/oauth.test.js");
+  fs.writeFileSync(t, fs.readFileSync(t, "utf8").replace('it("FR-001: only', 'it("FR-001 (oauth): only'));
+  const named = status();
+  fs.rmSync(repo, { recursive: true, force: true });
+  assert.equal(plain.oauth.status, "ambiguous");
+  assert.equal(plain.apps.status, "ambiguous");
+  assert.deepEqual(plain.oauth.ambiguous_tests, ["test/oauth.test.js:3"]);
+  assert.equal(named.oauth.status, "covered");
+  assert.equal(named.apps.status, "none");
+});
+
+test("FR-003: a plain shared id belongs to the spec whose code sits next to the test, when only one does", async () => {
+  const { testCoverage } = await import("../core/tests.mjs");
+  const { execFileSync } = await import("node:child_process");
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "veridic-near-"));
+  const files = {
+    "src/lib/tenant.js": "export const scope = (id) => id;\n",
+    "src/oauth/rules.js": 'import { scope } from "../lib/tenant.js";\nexport const tools = (w) => (scope(w) ? ["read"] : []);\n',
+    "src/oauth/rules.test.js": 'import { tools } from "./rules.js";\nit("INV-2: tools are only for the workspace", () => { expect(tools("w")).toEqual(["read"]); });\n',
+    "specs/oauth/spec.md": "- **INV-2**: Tools are scoped. [evidence: src/oauth/rules.js:2]\n",
+    "specs/apps/spec.md": "- **INV-2**: Every query is scoped. [evidence: src/lib/tenant.js:1]\n",
+  };
+  for (const [f, t] of Object.entries(files)) fs.mkdirSync(path.join(repo, path.dirname(f)), { recursive: true }), fs.writeFileSync(path.join(repo, f), t);
+  execFileSync("git", ["init", "-q"], { cwd: repo });
+  const st = (k) => { const spec = path.join(repo, `specs/${k}/spec.md`); return testCoverage(repo, fs.readFileSync(spec, "utf8"), { specPath: spec, routes: [] }).requirements[0].status; };
+  const oauth = st("oauth"), apps = st("apps");
+  fs.rmSync(repo, { recursive: true, force: true });
+  assert.equal(oauth, "covered", "the test sits next to oauth's code");
+  assert.equal(apps, "none", "apps' INV-2 is only reached through a shared library");
+});

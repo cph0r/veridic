@@ -12,8 +12,8 @@ import { testCoverage, testsIn, specQual } from "./tests.mjs";
 import { testRecipe, exampleTest } from "./recipe.mjs";
 
 // Coverage statuses, in the work list's words.
-const STATUS = { covered: "tested", passing: "tested", broken: "broken", failing: "failing", marker_stale: "failing", unasserted: "weak", tagged_only: "weak", todo: "untested", none: "untested" };
-const REASON = { marker_stale: "its expected-failure test now fails: the code satisfies the rule, so make it a normal test" };
+const STATUS = { covered: "tested", passing: "tested", broken: "broken", failing: "failing", marker_stale: "failing", unasserted: "weak", tagged_only: "weak", ambiguous: "weak", todo: "untested", none: "untested" };
+const REASON = { marker_stale: "its expected-failure test now fails: the code satisfies the rule, so make it a normal test", ambiguous: "a test names this id, but it also runs another spec's rule with the same id: write the id with its spec, e.g. `FR-008 (auth-2)`" };
 const RULE = /^\s*(?:-\s*\*\*|#{1,6}\s+)((?:FR|SC|NFR|AC|INV)-\d+[a-z]?)\b/;
 
 const read = (repo, f) => {

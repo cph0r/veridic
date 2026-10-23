@@ -19,7 +19,7 @@ var veridicModel = (D) => {
   // ---- a rule's test status, and its state on the page ----
   const REQ = {
     passing: ["Tested, passing", "good"], covered: ["Proven by a test", "good"], failing: ["Its test is failing", "bad"], unasserted: ["Its test checks nothing", "warn"],
-    tagged_only: ["Its test misses the code", "warn"], todo: ["Its test is a todo", "none"], none: ["Not tested yet", "none"],
+    tagged_only: ["Its test misses the code", "warn"], ambiguous: ["Its test doesn't say which spec", "warn"], todo: ["Its test is a todo", "none"], none: ["Not tested yet", "none"],
     broken: ["Broken, proven", "bad"], // an expected-failure test shows the code breaks the rule
     marker_stale: ["Fixed: make its test a normal one", "warn"], // the expected-failure test now fails
   };

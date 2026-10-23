@@ -17,6 +17,8 @@ import os from "node:os";
 import path from "node:path";
 import { parseSpec, makeResolver } from "./citations.mjs";
 import { basisOf, basisComment } from "./basis.mjs";
+import { openGraph } from "./graph.mjs";
+import { routeInventory } from "./routes.mjs";
 
 /** The name a qualified title uses for a spec file: its folder (specs/voice-conversation/spec.md -> voice-conversation). */
 export const specQual = (specPath) => String(specPath ?? "").match(/(?:^|\/)([^/]+)\/[^/]*spec\.md$/)?.[1] ?? null;
@@ -425,6 +427,42 @@ function byPackage(repo, testFiles) {
   return out;
 }
 
+/** The app's routes ({ path, file }), from the code index; none when there's no index. Cached per repo. */
+const routeCache = new Map();
+function appRoutes(repo) {
+  if (!routeCache.has(repo)) {
+    let rs = [];
+    try {
+      rs = routeInventory(openGraph(repo)).routes.map((r) => ({ path: r.path, file: r.file }));
+    } catch {}
+    routeCache.set(repo, rs);
+  }
+  return routeCache.get(repo);
+}
+
+/**
+ * The handler files of the routes a test calls by URL. A URL in a string or template, with
+ * `${…}` as any value and any origin or base before it, matches the end of a route's path
+ * (a test may leave out a mount prefix like /api), when it names at least two literal segments.
+ */
+export function urlHandlers(text, routes) {
+  if (!routes?.length || !text) return [];
+  const urls = [];
+  for (const m of text.matchAll(/["'`]([^"'`\n]*\/[^"'`\n]*)["'`]/g)) {
+    const u = m[1].replace(/\$\{[^}]*\}/g, ":").replace(/^[a-z]+:\/\/[^/]+/i, "").replace(/[?#].*$/, "");
+    const segs = u.split("/").filter(Boolean);
+    if (segs[0] === ":" && !u.startsWith("/")) segs.shift(); // `${base}/x`: the base, not a segment
+    if (segs.filter((x) => x !== ":").length >= 2) urls.push(segs);
+  }
+  const out = new Set();
+  for (const r of routes) {
+    const rs = String(r.path).split("/").filter(Boolean);
+    const hit = urls.some((u) => u.length <= rs.length && u.every((x, i) => { const y = rs[rs.length - u.length + i]; return x === ":" || y.startsWith(":") || y === "*" || x === y; }));
+    if (hit && r.file) out.add(r.file);
+  }
+  return [...out];
+}
+
 /** The environment a project's tests need (`.veridic.json` "testEnv", e.g. { "DB_TESTS": "1" }), over this process's. */
 function testEnv(repo, base = process.env) {
   let extra = {};
@@ -502,7 +540,7 @@ export function runByFramework(repo, testFiles, files) {
 /**
  * @param opts { specPath (to honor `veridic-spec:` bindings), run: boolean, bases }
  * @returns {{ summary, requirements: [{ id, tests: [...], status }], errors? }}
- *   status: passing | failing | covered (not run) | unasserted (named tests check nothing) | tagged_only (test doesn't reach the cited code) | todo | none
+ *   status: passing | failing | covered (not run) | unasserted (named tests check nothing) | tagged_only (test doesn't reach the cited code) | ambiguous (a plain id another spec shares, on a test running both rules' code) | todo | none
  */
 export function testCoverage(repo, spec, opts = {}) {
   const files = execFileSync("git", ["ls-files", "--cached", "--others", "--exclude-standard"], { cwd: repo, encoding: "utf8", maxBuffer: 64 << 20 }).split("\n").filter(Boolean);
@@ -543,15 +581,57 @@ export function testCoverage(repo, spec, opts = {}) {
   const forModule = specQual(specRel) ?? opts.module ?? null;
   const checks = (t) => t.strength === "weak" || t.strength === "strong";
   const reachCache = new Map();
+  // What a test runs: what it imports, and, for a test that drives the server over HTTP, the
+  // code behind each route whose URL it calls (a harness hides that from the imports).
+  const routes = opts.routes ?? appRoutes(repo);
   const reaches = (testFile, targets) => {
-    if (!reachCache.has(testFile)) reachCache.set(testFile, reach(repo, testFile, fileSet));
+    if (!reachCache.has(testFile)) {
+      const set = reach(repo, testFile, fileSet);
+      for (const h of urlHandlers(safeRead(repo, testFile), routes)) for (const f of [h, ...reach(repo, h, fileSet)]) set.add(f);
+      reachCache.set(testFile, set);
+    }
     return [...targets].some((t) => reachCache.get(testFile).has(t));
   };
   // Specs often reuse ids (every spec has an FR-001). A plain tag for an id another spec also
   // has, on a test that doesn't run this rule's code, is the other spec's rule: it doesn't
   // count here, not even as tagged_only (the same test --link uses to qualify a title).
-  const shared = new Set(files.filter((f) => /(^|\/)spec\.md$/.test(f) && f !== specRel).flatMap((f) => [...safeRead(repo, f).matchAll(/\*\*((?:FR|SC|NFR|AC|INV)-\d+[a-z]?)\*\*/g)].map((m) => m[1])));
-  const tagged = findTaggedTests(repo, files).filter((t) => cited.has(t.id) && (t.todo || t.qual || t.spec || !shared.has(t.id) || reaches(t.file, cited.get(t.id))) && (!t.qual || !forModule || t.qual === forModule) && (!t.spec || !specRel || t.spec === specRel || path.resolve(repo, t.spec) === path.resolve(opts.specPath)));
+  // Other specs' rules by id, with the files each cites: `- **FR-008**: … [evidence: src/a.ts:3]`.
+  const otherCode = new Map();
+  for (const f of files.filter((f) => /(^|\/)spec\.md$/.test(f) && f !== specRel))
+    for (const line of safeRead(repo, f).split("\n")) {
+      const id = line.match(/\*\*((?:FR|SC|NFR|AC|INV)-\d+[a-z]?)\*\*/)?.[1];
+      if (!id) continue;
+      if (!otherCode.has(id)) otherCode.set(id, []);
+      otherCode.get(id).push(new Set([...line.matchAll(/\[evidence:\s*([^\]:\s]+):/g)].map((m) => m[1])));
+    }
+  // A plain tag on a test that runs this rule's code and another spec's rule of the same id:
+  // which one it means isn't said, so it counts for neither (the title should name its spec).
+  // A test usually sits next to the code it tests: a folder (less a __tests__/test folder) that
+  // holds one of the rule's cited files.
+  const home = (f) => path.posix.dirname(f).replace(/\/(?:__tests__|tests?)$/, "");
+  const near = (testFile, code) => [...code].some((c) => path.posix.dirname(c) === home(testFile));
+  // Which spec a plain id means, when other specs have it too: the one whose rule code sits next
+  // to the test, if only one does; "here", "elsewhere" or null (can't tell).
+  const sideOf = (t) => {
+    const reached = (otherCode.get(t.id) ?? []).filter((c) => c.size && reaches(t.file, c));
+    if (!reached.length) return "here";
+    const mine = near(t.file, cited.get(t.id)), theirs = reached.some((c) => near(t.file, c));
+    return mine && !theirs ? "here" : theirs && !mine ? "elsewhere" : null;
+  };
+  const ambiguousTag = (t) => !t.todo && !t.qual && !t.spec && sideOf(t) === null;
+  const ambiguous = new Map();
+  const tagged = findTaggedTests(repo, files).filter((t) => {
+    if (!cited.has(t.id)) return false;
+    if (!(t.todo || t.qual || t.spec || !otherCode.has(t.id) || reaches(t.file, cited.get(t.id)))) return false;
+    if ((t.qual && forModule && t.qual !== forModule) || (t.spec && specRel && t.spec !== specRel && path.resolve(repo, t.spec) !== path.resolve(opts.specPath))) return false;
+    if (!t.todo && !t.qual && !t.spec && reaches(t.file, cited.get(t.id)) && sideOf(t) === "elsewhere") return false;
+    if (reaches(t.file, cited.get(t.id)) && ambiguousTag(t)) {
+      if (!ambiguous.has(t.id)) ambiguous.set(t.id, []);
+      ambiguous.get(t.id).push(`${t.file}:${t.line}`);
+      return false;
+    }
+    return true;
+  });
 
   const named = [...new Set(tagged.filter((t) => !t.todo).map((t) => t.file))];
   const run = opts.run ? (opts.runner ? opts.runner(repo, named) : runByFramework(repo, named, files)) : null;
@@ -574,6 +654,7 @@ export function testCoverage(repo, spec, opts = {}) {
     else if (real.length) status = run ? (real.some((t) => t.result === "failed") ? "failing" : real.some((t) => t.result === "passed") ? "passing" : "covered") : "covered";
     else if (tests.some((t) => !t.todo && t.reaches_cited_code)) status = "unasserted";
     else if (tests.some((t) => !t.todo)) status = "tagged_only";
+    else if (ambiguous.has(id)) status = "ambiguous";
     else if (tests.length) status = "todo";
     // Tests that reach the cited code without being named for this requirement:
     // candidates for "covered" once someone checks they assert the behavior.
@@ -584,7 +665,7 @@ export function testCoverage(repo, spec, opts = {}) {
       const vt = tagged.filter((t) => t.id === id && t.vc === vc && !t.todo && checks(t) && reaches(t.file, cited.get(id)));
       return { id: vc, covered: vt.length > 0, tests: vt.map((t) => ({ at: `${t.file}:${t.line}`, title: t.title, ...(run ? { result: run.results.get(`${t.file}\0${t.title}`) ?? "not run" } : {}) })) };
     });
-    return { id, status, ...(proven != null ? { proven } : {}), tests, related_tests, text: texts.get(id), cites: cites.get(id), ...(verification.length ? { verification, vc_covered: verification.filter((v) => v.covered).length } : {}) };
+    return { id, status, ...(proven != null ? { proven } : {}), tests, ...(ambiguous.has(id) ? { ambiguous_tests: ambiguous.get(id) } : {}), related_tests, text: texts.get(id), cites: cites.get(id), ...(verification.length ? { verification, vc_covered: verification.filter((v) => v.covered).length } : {}) };
   });
 
   const count = (s) => requirements.filter((r) => r.status === s).length;
