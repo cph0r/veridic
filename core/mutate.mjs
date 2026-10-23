@@ -16,7 +16,6 @@ import os from "node:os";
 import path from "node:path";
 import { parseSpec, makeResolver } from "./citations.mjs";
 import { checkClaims, lineHas } from "./claims.mjs";
-import { enclosingSymbol } from "./anchors.mjs";
 import { staleness } from "./staleness.mjs";
 
 // A top-level config constant: `(export) const NAME(: T) = <value>` at column 0.

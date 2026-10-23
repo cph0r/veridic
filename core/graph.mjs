@@ -215,9 +215,6 @@ export function literalSpans(src, from = 0, to = src.length) {
   return out;
 }
 
-/** String literal values (without quotes) in src[from..to), comments excluded. */
-export const stringLiterals = (src, from, to) => literalSpans(src, from, to).map((l) => l.value);
-
 /** Source with comments and strings blanked to spaces (same offsets, newlines kept). */
 export function codeOnly(src) {
   const out = src.split("");

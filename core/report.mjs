@@ -1,8 +1,6 @@
-// The report: everything Veridic knows about a repo, gathered once and rendered as
-// one self-contained HTML page (no server, no network, no LLM). Tabs: overview,
-// specs (requirements with their cited code, tests and freshness), routes (what
-// each really does and who can call it), findings (each with a suggested fix),
-// tests (what they check), and the change in progress (claim, strays, untested).
+// The report: what Veridic knows about a repo's parts and their specs, gathered once
+// (also the data behind `veridic parts`, `coverage` and `prepare`) and rendered as one
+// self-contained HTML page (no server, no network, no LLM) that shows the specs.
 
 import { execFileSync } from "node:child_process";
 import fs from "node:fs";
@@ -16,7 +14,6 @@ import { checkCitations, repoFiles } from "./citations.mjs";
 import { screenGroups } from "./screens.mjs";
 import { specCoverage } from "./coverage.mjs";
 import { staleness } from "./staleness.mjs";
-import { doneWithoutSpec, loadClaim } from "./seam.mjs";
 import { findModules } from "./modules.mjs";
 import { linkUi } from "./ui.mjs";
 import { findTables, routeData, dataByModule } from "./data.mjs";
@@ -24,25 +21,6 @@ import { modularity, duplication } from "./structure.mjs";
 import { testsReaching } from "./tests.mjs";
 
 const MAX_SNIPPET = 40; // lines of cited code shown per citation
-
-// What to do about each kind of finding. Deterministic: the same finding always
-// gets the same advice; the evidence lines say where.
-export const FIXES = {
-  "get-that-writes": "Make it a POST/PUT/DELETE, or move the write out of the GET. Crawlers, prefetchers and AI agents treat GET as safe to call.",
-  "money-not-scoped": "Load the order/payment with the caller's id in the query (e.g. where: { id, userId: req.user.id }) before moving money.",
-  "user-id-from-url": "Use the signed-in user's id (req.user.id) instead of the one in the URL, or reject when they differ.",
-  "identity-from-request-body": "Take who the action is for from the session, not the request body; ignore or reject a body field that names another user.",
-  "id-param-without-caller-scope": "Scope the lookup to the caller (where: { id, ownerId: caller }) or add an ownership guard before acting on the id.",
-  "id-param-scoped-by-client-values": "The ids that scope this come from the client; derive them from the session instead.",
-  "policy-mismatch": "The guard on this route disagrees with the intended access policy: change the guard, or update the policy if the code is right.",
-  unasserted: "This test runs code but checks nothing, so it passes even when the code is broken. Add an assertion on what its title promises.",
-  empty: "This test has no body. Write it, or remove it.",
-  weak: "Only loose checks (toBeDefined, toBeTruthy, called at all). Assert the actual value or arguments.",
-  stray: "This change edits code another route runs. Revert it, or claim that route too (veridic claim) if it belongs to the task.",
-  untested: "No asserting test reaching this code names the route or the changed function. Add one before calling it done.",
-  stale: "The cited code changed since the spec was written. Re-read it and update the requirement (veridic stale --fix moves citations that only shifted).",
-  unresolved: "This citation doesn't resolve to code. Fix the path or line range.",
-};
 
 // Each kind of finding in plain words: a title anyone can read, and why it matters.
 export const KINDS = {
@@ -58,9 +36,6 @@ export const KINDS = {
   "weak test": { title: "Test only checks loosely", why: "Checks like toBeDefined or toHaveBeenCalled() pass for almost any value." },
   "stale requirement": { title: "Spec out of date with the code", why: "The code this requirement cites changed after the spec was written." },
   "citation doesn't resolve": { title: "Spec points at code that isn't there", why: "The cited file or lines don't exist, so the requirement can't be checked." },
-  "stray edit": { title: "Edit outside the task", why: "The change touches code another route runs, which the task didn't claim." },
-  untested: { title: "Changed code without a test", why: "No asserting test that reaches the change names the route or the changed function." },
-  "a changed test asserts nothing": { title: "New or changed test checks nothing", why: "The test added with this change asserts nothing, so it can't catch a regression." },
 };
 
 const readLines = (repo, file) => {
@@ -219,20 +194,18 @@ export async function collectReport(repo, { specs: specFiles } = {}) {
     const manifest = effectManifest(g, inv);
     const r = readiness(manifest);
     out.routes = manifest.map((t) => ({ id: t.tool, method: t.method, path: t.path, effect: t.effect, moves_money: t.moves_money, external: t.external, notifies: t.notifies, access: t.requires.access, scoped: t.requires.scoped_to_caller, handler: t.handler, evidence: t.evidence.map((e) => ({ kind: e.kind, at: e.at, via: e.via ?? null })), flags: t.access_flags }));
-    out.readiness = r.summary;
-    out.findings = r.issues.map((i) => ({ area: "API", severity: i.severity, kind: i.kind, where: i.tool, text: i.text, evidence: i.evidence, fix: FIXES[i.kind] ?? null }));
+    out.findings = r.issues.map((i) => ({ area: "API", severity: i.severity, kind: i.kind, where: i.tool, text: i.text, evidence: i.evidence }));
   } catch (e) {
     note("routes", e);
     out.routes = [];
     out.findings = [];
   }
 
-  // Tests: strength across the repo.
+  // Tests that check nothing: findings for the part whose code they're about.
   try {
     const a = auditTests(repo);
-    out.tests = { summary: a.summary, flagged: a.flagged };
-    for (const k of ["empty", "unasserted"]) for (const t of a.flagged[k] ?? []) out.findings.push({ area: "Tests", severity: "medium", kind: k === "empty" ? "empty test" : "test asserts nothing", where: t.at, text: t.title, evidence: [t.at], fix: FIXES[k] });
-    for (const t of (a.flagged.weak ?? []).slice(0, 200)) out.findings.push({ area: "Tests", severity: "low", kind: "weak test", where: t.at, text: t.title, evidence: [t.at], fix: FIXES.weak });
+    for (const k of ["empty", "unasserted"]) for (const t of a.flagged[k] ?? []) out.findings.push({ area: "Tests", severity: "medium", kind: k === "empty" ? "empty test" : "test asserts nothing", where: t.at, text: t.title, evidence: [t.at] });
+    for (const t of (a.flagged.weak ?? []).slice(0, 200)) out.findings.push({ area: "Tests", severity: "low", kind: "weak test", where: t.at, text: t.title, evidence: [t.at] });
   } catch (e) {
     note("tests", e);
   }
@@ -249,8 +222,8 @@ export async function collectReport(repo, { specs: specFiles } = {}) {
           const s = specSection(repo, f, m.specs[i]);
           out.specs.push(s);
           for (const r of s.requirements) {
-            if (r.stale) out.findings.push({ area: "Spec", severity: "medium", kind: "stale requirement", where: `${s.path} ${r.id}`, text: r.text, evidence: r.cites.map((c) => c.cite), fix: FIXES.stale });
-            for (const c of r.cites.filter((c) => !c.resolves)) out.findings.push({ area: "Spec", severity: "medium", kind: "citation doesn't resolve", where: `${s.path} ${r.id}`, text: `${c.cite}: ${c.problem}`, evidence: [c.cite], fix: FIXES.unresolved });
+            if (r.stale) out.findings.push({ area: "Spec", severity: "medium", kind: "stale requirement", where: `${s.path} ${r.id}`, text: r.text, evidence: r.cites.map((c) => c.cite) });
+            for (const c of r.cites.filter((c) => !c.resolves)) out.findings.push({ area: "Spec", severity: "medium", kind: "citation doesn't resolve", where: `${s.path} ${r.id}`, text: `${c.cite}: ${c.problem}`, evidence: [c.cite] });
           }
         } catch (e) {
           note(`spec ${f}`, e);
@@ -262,7 +235,6 @@ export async function collectReport(repo, { specs: specFiles } = {}) {
         const h = r.handler.match(/^(.*):(\d+)-(\d+)$/);
         r.specs = out.specs.filter((s) => (s.doc.meta.seeds ?? "").includes(`\`${r.id}\``) || (h && s.requirements.some((q) => q.cites.some((c) => c.resolves && c.file === h[1] && c.start <= Number(h[3]) && c.end >= Number(h[2]))))).map((s) => s.path);
       }
-      out.attention = m.attention;
     } catch (e) {
       note("specs", e);
     }
@@ -284,7 +256,6 @@ export async function collectReport(repo, { specs: specFiles } = {}) {
       } catch (e) {
         note("ui", e);
       }
-      out.ui = { scanned: ui.scanned ?? 0, linked: ui.files.length, shared: ui.files.filter((f) => !f.module).map((f) => ({ file: f.file, kind: f.kind, routes: f.routes.length, modules: f.modules })), broken: ui.broken ?? [] };
       // The data: which tables each module owns and which it only uses (see data.mjs).
       let data = null;
       try {
@@ -293,7 +264,6 @@ export async function collectReport(repo, { specs: specFiles } = {}) {
           const uses = routeData(g, inv.routes, tables);
           data = dataByModule(mods, uses, tables);
           for (const r of out.routes) if (uses.get(r.id)?.length) r.tables = uses.get(r.id).map((u) => ({ table: u.table, op: u.op }));
-          out.data = { tables: tables.length, kinds: [...new Set(tables.map((t) => t.kind))], shared: data.shared, unused: data.unused, at: Object.fromEntries(tables.map((t) => [t.name, t.at])) };
         }
       } catch (e) {
         note("data", e);
@@ -327,8 +297,6 @@ export async function collectReport(repo, { specs: specFiles } = {}) {
         const tests = new Map();
         for (const f of [...m.files, ...m.code]) for (const t of reaching.get(f) ?? []) tests.set(t.file, t);
         const screens = uiOf(m.id);
-        const uiTests = new Map();
-        for (const f of screens) for (const t of reaching.get(f.file) ?? []) if (!tests.has(t.file)) uiTests.set(t.file, t);
         const asserting = [...tests.values()].filter((t) => t.asserting > 0);
         // A route counts as tested when an asserting test calls its URL, or reaches its
         // handler and names the URL's last word.
@@ -373,22 +341,12 @@ export async function collectReport(repo, { specs: specFiles } = {}) {
           },
           specs: [...new Set(rs.flatMap((r) => r.specs ?? []))],
           specified: rs.filter((r) => r.specs?.length).length,
-          tests: { files: [...tests.values()].map((t) => ({ file: t.file, tests: t.tests, asserting: t.asserting })).sort((a, b) => b.tests - a.tests), ui: [...uiTests.values()].map((t) => ({ file: t.file, tests: t.tests, asserting: t.asserting })), asserting: asserting.length, untested: untested.map((r) => r.id) },
+          tests: { files: [...tests.values()].map((t) => ({ file: t.file, tests: t.tests, asserting: t.asserting })).sort((a, b) => b.tests - a.tests), asserting: asserting.length, untested: untested.map((r) => r.id) },
           // Screens: the UI files whose calls are mostly this module's; and other screens calling it.
           data: data?.byModule.get(m.id) ?? { owns: [], uses: [] },
           screens: screens.map((f) => ({ file: f.file, kind: f.kind, routes: f.routes.filter((id) => m.routes.includes(id)), other: f.routes.filter((id) => !m.routes.includes(id)).length })),
-          calledFrom: ui.files.filter((f) => f.module !== m.id && f.routes.some((id) => m.routes.includes(id))).map((f) => ({ file: f.file, kind: f.kind, module: f.module, routes: f.routes.filter((id) => m.routes.includes(id)) })),
         });
       }
-      // Endpoints nothing in the repo calls: no screen and no test, and not the kind outside
-      // services call (webhooks, OAuth callbacks, health checks). Old features often hide here.
-      const OUTSIDE = /webhook|callback|oauth|\bhooks?\b|health|ready|live|metrics|cron|\.well-known|sitemap|robots|feed|rss|deauthori[sz]e|data-deletion|unsubscribe|ping/i;
-      const called = new Set(ui.files.flatMap((f) => f.routes));
-      const untested = new Set(out.modules.flatMap((m) => m.tests.untested));
-      out.uncalled = inv.routes.filter((r) => !called.has(r.id) && untested.has(r.id) && !OUTSIDE.test(r.path) && r.method !== "ALL").map((r) => ({ route: r.id, module: routeById.get(r.id)?.module ?? null, handler: `${r.file}:${r.start}-${r.end}` }));
-      // A broken call belongs to the module of the screen that makes it.
-      const screenModule = new Map(ui.files.map((f) => [f.file, f.module]));
-      for (const b of out.ui.broken) b.module = screenModule.get(b.file) ?? null;
       // Riskiest first: open high issues, money, deletes, then size.
       const risk = (m) => m.stats.high * 100 + m.stats.medium * 20 + m.stats.money * 10 + m.stats.destructive * 4 + m.stats.writes + (m.specified ? 0 : 5);
       out.modules.sort((a, b) => risk(b) - risk(a) || b.stats.routes - a.stats.routes);
@@ -413,21 +371,6 @@ export async function collectReport(repo, { specs: specFiles } = {}) {
       const file = [String(f.where), ...(f.evidence ?? [])].map((x) => String(x).split(":")[0].split(" ")[0]).find((x) => fileModule.has(x));
       if (file) f.module = fileModule.get(file);
     }
-
-  // The change in progress: what the working tree changes against HEAD, checked against the claim.
-  try {
-    const claims = loadClaim(repo);
-    const d = await doneWithoutSpec(repo, { claims });
-    if (d.files?.length || d.tests?.length || claims.length) {
-      out.change = { claims, done: d.done, problems: d.problems ?? [], files: d.files ?? [], seam: d.seam ?? null };
-      for (const p of d.problems ?? []) {
-        const kind = p.split(":")[0];
-        out.findings.push({ area: "Change", severity: "high", kind: kind === "stray" ? "stray edit" : kind, where: "working tree", text: p.slice(kind.length + 1).trim(), evidence: [], fix: FIXES[kind] ?? null });
-      }
-    }
-  } catch (e) {
-    if (!/not a git|unknown revision|ambiguous argument 'HEAD'/i.test(e.message)) note("change", e);
-  }
 
   const order = { high: 0, medium: 1, low: 2 };
   for (const f of out.findings) Object.assign(f, KINDS[f.kind] ?? { title: f.kind, why: "" });
