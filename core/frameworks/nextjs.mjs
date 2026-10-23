@@ -1,4 +1,4 @@
-// Next.js routes, read from files (no build): app router route handlers and pages/api. Each package whose
+// Next.js routes, read from files (no build): app router route handlers, pages/api and server actions. Each package whose
 // package.json depends on `next` is an app. A file path becomes a URL as in nextjs-routes
 // (github.com/tatethurston/nextjs-routes, MIT): (group) folders drop, [id] is :id, [...slug]
 // and [[...slug]] are *, @slot and _private folders aren't routes.
@@ -166,6 +166,45 @@ function resolveSpec(g, dir, from, spec) {
   return null;
 }
 
+/** The lines a statement spans, from its first character to the `;` or line end that closes it. */
+function statementLines(src, code, at) {
+  let depth = 0, i = at;
+  for (; i < code.length; i++) {
+    const c = code[i];
+    if ("([{".includes(c)) depth++;
+    else if (")]}".includes(c)) depth--;
+    else if (depth <= 0 && (c === ";" || (c === "\n" && i > at && /[)\]}]\s*$/.test(code.slice(at, i))))) break;
+  }
+  const line = (k) => src.slice(0, k).split("\n").length;
+  return { start: line(at), end: line(Math.min(i, code.length - 1)) };
+}
+
+/**
+ * Server actions in a file: every exported async function when the file starts with
+ * "use server", and any function whose body starts with it. [{ name, start, end }]
+ */
+function actionsIn(src) {
+  if (!/["']use server["']/.test(src)) return [];
+  const out = [];
+  const add = (name) => {
+    const ext = functionExtent(src, name);
+    if (ext && !out.some((a) => a.name === name)) out.push({ name, start: ext[0], end: ext[1] });
+  };
+  // A "use server" file: every exported function is an action, a wrapped one
+  // (`export const signIn = validatedAction(schema, async () => …)`) spanning its statement.
+  if (/^(?:\s*(?:\/\/[^\n]*|\/\*[\s\S]*?\*\/))*\s*["']use server["']/.test(src)) {
+    const code = codeOnly(src);
+    for (const m of code.matchAll(/\bexport\s+(?:async\s+)?function\s+([\w$]+)/g)) add(m[1]);
+    for (const m of code.matchAll(/\bexport\s+const\s+([\w$]+)\s*(?::[^=]+)?=\s*/g)) {
+      const direct = /^(?:async\s*)?(?:function\b|\([^)]*\)\s*(?::[^=]+)?=>|[\w$]+\s*=>)/.test(code.slice(m.index + m[0].length));
+      if (direct) add(m[1]);
+      else if (!out.some((a) => a.name === m[1])) out.push({ name: m[1], ...statementLines(src, code, m.index) });
+    }
+  }
+  for (const m of src.matchAll(/(?:\bfunction\s+([\w$]+)\s*\([^)]*\)\s*(?::[^{]+)?|\b(?:const|let)\s+([\w$]+)\s*=\s*async\s*\([^)]*\)\s*(?::[^=]+)?=>\s*)\{\s*["']use server["']/g)) add(m[1] ?? m[2]);
+  return out.sort((a, b) => a.start - b.start);
+}
+
 function nextRoutes(g) {
   const routes = [];
   for (const dir of appDirs(g)) {
@@ -190,7 +229,19 @@ function nextRoutes(g) {
         continue;
       }
       const m = rel.match(/^(?:src\/)?app\/(?:(.*)\/)?route\.[cm]?[jt]sx?$/);
-      if (!m) continue;
+      if (!m) {
+        // Server actions: routes too (a form posts to them), named after the page folder they
+        // sit in under app/, else after their file: /settings/_action/updateName.
+        const acts = actionsIn(textOf(g, f) ?? "");
+        if (!acts.length) continue;
+        const under = rel.match(/^(?:src\/)?app\/(?:(.*)\/)?[^/]+$/);
+        const folder = under ? appPath(under[1] ? under[1].split("/") : []) : null;
+        for (const a of acts) {
+          const url = folder != null ? `${folder === "/" ? "" : folder}/_action/${a.name}` : `/_action/${path.posix.basename(rel).replace(/\.[^.]+$/, "")}/${a.name}`;
+          routes.push({ id: `ACTION ${url}`, method: "ACTION", path: url, file: f, start: a.start, end: a.end, guards: [] });
+        }
+        continue;
+      }
       const p = appPath(m[1] ? m[1].split("/") : []);
       if (p == null) continue;
       const url = (base + p).replace(/(.)\/$/, "$1") || "/";

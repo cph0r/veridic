@@ -107,3 +107,57 @@ test("next: pages/api handlers given to a library, written as an arrow, or re-ex
   assert.deepEqual(by["ALL /api/jobs/gone"], ["pages/api/jobs/gone.ts", 2, 2], "a re-export of a missing file is still a route, on its line");
   assert.equal(rs.length, 4);
 });
+
+test("next: exported functions of a 'use server' file are actions", () => {
+  const { g, done } = fakeRepo({
+    ...PKG,
+    "app/(dashboard)/settings/actions.ts": '"use server";\n\nimport { db } from "@/lib/db";\n\nexport async function updateName(form: FormData) {\n  await db.update(users).set({ name: form.get("name") });\n}\n\nexport const deleteAccount = async () => {\n  await db.delete(users);\n};\n\nasync function helper() {\n  return 1;\n}\n',
+    "lib/actions.ts": "'use server'\nexport async function sendInvite(email: string) {\n  return { ok: true };\n}\n",
+    "lib/plain.ts": "export async function notAnAction() {}\n",
+  });
+  const rs = routeInventory(g).routes.filter((r) => r.method === "ACTION");
+  done();
+  assert.deepEqual(rs.map((r) => [r.id, r.start, r.end]).sort(), [
+    ["ACTION /_action/actions/sendInvite", 2, 4],
+    ["ACTION /settings/_action/deleteAccount", 9, 11],
+    ["ACTION /settings/_action/updateName", 5, 7],
+  ]);
+});
+
+test("next: a function whose body starts with 'use server' is an action", () => {
+  const { g, done } = fakeRepo({
+    ...PKG,
+    "app/posts/page.tsx": 'export default function Page() {\n  async function create(form: FormData) {\n    "use server";\n    await db.insert(posts).values({ title: form.get("title") });\n  }\n  return <form action={create} />;\n}\n',
+  });
+  const rs = routeInventory(g).routes.filter((r) => r.method === "ACTION");
+  done();
+  assert.deepEqual(rs.map((r) => [r.id, r.start, r.end]), [["ACTION /posts/_action/create", 2, 5]]);
+});
+
+test("next: an app with only pages and actions forms parts", async () => {
+  const { findModules } = await import("../core/modules.mjs");
+  const { g, done } = fakeRepo({
+    ...PKG,
+    "app/settings/actions.ts": '"use server";\nexport async function updateName() {\n  await db.update(users).set({});\n}\nexport async function deleteAccount() {\n  await db.delete(users);\n}\n',
+    "app/settings/page.tsx": "export default function Page() { return null; }\n",
+  });
+  const inv = routeInventory(g);
+  const mods = findModules(g, inv);
+  done();
+  assert.ok(inv.routes.length === 2, "two actions");
+  assert.ok(mods.some((m) => m.routes.includes("ACTION /settings/_action/updateName")), "a part holds the actions");
+});
+
+test("next: every export of a 'use server' file is an action, wrapped ones too", () => {
+  const { g, done } = fakeRepo({
+    ...PKG,
+    "app/(login)/actions.ts": '"use server";\n\nexport const signIn = validatedAction(signInSchema, async (data, formData) => {\n  const user = await findUser(data.email);\n  return { ok: !!user };\n});\n\nexport const deleteAccount = validatedActionWithUser(\n  deleteSchema,\n  async (data, _, user) => {\n    await db.delete(users);\n  }\n);\n\nexport function signOut() {\n  return logout();\n}\n',
+  });
+  const rs = routeInventory(g).routes.filter((r) => r.method === "ACTION");
+  done();
+  assert.deepEqual(rs.map((r) => [r.id, r.start, r.end]), [
+    ["ACTION /_action/signIn", 3, 6],
+    ["ACTION /_action/deleteAccount", 8, 13],
+    ["ACTION /_action/signOut", 15, 17],
+  ]);
+});
