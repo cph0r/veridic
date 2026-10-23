@@ -229,3 +229,39 @@ test("final: a saved view from before is cleaned: unknown sorts and empty filter
   assert.equal(allSpecced.cleanView({ filter: "nospec" }).filter, "all");
   assert.equal(m.cleanView({ filter: "nospec" }).filter, "nospec");
 });
+
+// ---- the part sheet's tabs: stories with their rules, rules by state ----
+const tabsData = () => data({
+  modules: [{ id: "orders", name: "Orders", files: ["src/orders.ts"], code: [] }],
+  specs: [
+    spec("specs/orders/spec.md", [rule("FR-001", "covered", { cites: [cite("src/orders.ts")] }), rule("FR-002", "broken", { cites: [cite("src/orders.ts")] }), rule("FR-003", "none", { cites: [cite("src/orders.ts")] })],
+      { title: "Orders", stories: [{ n: 1, title: "A guest orders", scenarios: [{ given: "a", when: "b", then: "c", refs: ["FR-001", "FR-002"] }, { given: "d", when: "e", then: "f", refs: ["FR-002", "FR-009"] }] }] }),
+    spec("specs/orders-payment/spec.md", [rule("FR-001", "none", { cites: [cite("src/orders.ts")] })]),
+  ],
+});
+
+test("tabs: each story lists the rules its scenarios name, from its own spec file", () => {
+  const m = load()(tabsData());
+  const s = m.storiesOf(m.P.get("orders"));
+  assert.equal(s.length, 1);
+  assert.deepEqual([...s[0].rules.map((r) => r.id)], ["FR-001", "FR-002"], "each rule once, unknown ids (FR-009) skipped");
+  assert.equal(s[0].spec, "specs/orders/spec.md");
+});
+
+test("tabs: rules in no story, per spec file", () => {
+  const m = load()(tabsData());
+  const lone = m.rulesInNoStory(m.P.get("orders"));
+  assert.deepEqual([...lone.map((x) => x.spec + " " + x.rule.id)].sort(), ["specs/orders-payment/spec.md FR-001", "specs/orders/spec.md FR-003"]);
+});
+
+test("tabs: the rules tab filters by state and text and counts each filter", () => {
+  const m = load()(tabsData());
+  const p = m.P.get("orders");
+  const ids = (o) => [...m.partRules(p, o).map((x) => x.spec.split("/")[1] + ":" + x.rule.id)];
+  assert.equal(m.partRules(p, {}).length, 4);
+  assert.deepEqual(ids({ state: "attention" }), ["orders:FR-002"]);
+  assert.deepEqual(ids({ state: "untested" }).sort(), ["orders-payment:FR-001", "orders:FR-003"]);
+  assert.deepEqual(ids({ state: "proven" }), ["orders:FR-001"]);
+  assert.deepEqual(ids({ q: "fr-003" }), ["orders:FR-003"]);
+  assert.deepEqual({ ...m.ruleCounts(p) }, { all: 4, attention: 1, untested: 2, proven: 1 });
+});
