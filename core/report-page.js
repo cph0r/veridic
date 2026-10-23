@@ -239,7 +239,7 @@ var veridicModel = (D) => {
   $("#app").innerHTML = `<div class="wrap">
   <div class="top"><div class="brand"><span class="logo"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5 9-10"/></svg></span>Veridic</div>
     <div class="when"><span id="when"></span><button class="icon-btn" id="theme" aria-label="Switch theme"></button></div></div>
-  <section class="hero"><div class="rv"><div class="eyebrow" id="appname"></div><h1 class="verdict" id="verdict"></h1><p class="about" id="stats"></p></div><div class="rings rv" id="rings" style="animation-delay:.12s"></div></section>
+  <section class="hero"><div class="rv"><h1 class="verdict" id="appname"></h1><p class="about" id="stats"></p></div><div class="rings rv" id="rings" style="animation-delay:.12s"></div></section>
   <section id="specs-sec"><h2 class="rv" style="animation-delay:.2s">Your app <span class="hint">· one row per part; click to read its spec, a heading to sort</span></h2>
   <div class="tools rv" style="animation-delay:.22s"><input id="q" type="search" placeholder="Search parts and specs" aria-label="Search parts and specs"><div class="seg" id="filters" role="group" aria-label="Show"></div></div>
   <div class="tablewrap rv" style="animation-delay:.25s"><table class="specs"><thead><tr id="thead"></tr></thead><tbody id="tbody"></tbody></table><div class="noresults" id="noresults" hidden>No part matches.</div></div><div class="pager" id="pager"></div></section>
@@ -251,9 +251,8 @@ var veridicModel = (D) => {
 <aside class="sheet" id="panel" aria-label="Spec"><div class="grab"></div><div class="part" id="part"></div></aside>
 <div class="confetti" id="confetti"></div>`;
 
-  // ---- hero: the verdict, two gauges, the counts ----
+  // ---- hero: the app's name, the gauges, the counts ----
   $("#appname").textContent = M.title;
-  $("#verdict").innerHTML = M.verdict;
   $("#when").textContent = ago(D.generated);
   $("#stats").textContent = counts.specs ? [plural(counts.specs, "spec"), plural(counts.rules, "rule"), counts.stories ? plural(counts.stories, "user story", "user stories") : ""].filter(Boolean).join(" · ") : "";
   const colorFor = (p) => (p >= 90 ? "var(--good)" : p >= 60 ? "var(--warn)" : "var(--bad)");
