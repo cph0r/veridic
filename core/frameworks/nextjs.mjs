@@ -173,12 +173,32 @@ function pagesMethods(body) {
       body = after.slice(open, i + 1);
     }
     const st = body.search(/status\s*\(\s*(?:4\d\d|[\w.]*METHOD_NOT_ALLOWED|[\w.]*MethodNotAllowed)\b/);
-    if (st >= 0 && !/\bif\s*\(/.test(body.slice(0, st)) && /\breturn\b|\.end\s*\(/.test(body)) // the branch's own answer, not a nested check
-      return [...neg[0].matchAll(new RegExp(`__${M}__`, "g"))].map((m) => m[1]);
+    if (st >= 0 && !/\bif\s*\(/.test(body.slice(0, st)) && /\breturn\b|\.end\s*\(/.test(body)) { // the branch's own answer, not a nested check
+      // Methods handled in their own blocks before the exit get through too.
+      const before = [...code.slice(0, neg.index).matchAll(new RegExp(`${alias}\\s*===?\\s*__${M}__`, "g"))].map((m) => m[1]);
+      return [...new Set([...before, ...[...neg[0].matchAll(new RegExp(`__${M}__`, "g"))].map((m) => m[1])])];
+    }
   }
   const pos = new Set([...code.matchAll(new RegExp(`${alias}\\s*===?\\s*__${M}__`, "g"))].map((m) => m[1]));
   if (new RegExp(`switch\\s*\\(\\s*${alias}\\s*\\)`).test(code)) for (const m of code.matchAll(new RegExp(`case\\s+__${M}__\\s*:`, "g"))) pos.add(m[1]);
+  // After the last method check, a handler that goes on to serve the request (`return
+  // tusServer.handle(req, res)`) answers every method, not only the ones it singled out.
+  if (pos.size && servesTheRest(code, alias, M)) return ["ALL"];
   return pos.size ? [...pos] : ["ALL"];
+}
+
+/** Whether a handler returns something other than a rejection after its last method check. */
+function servesTheRest(code, alias, M) {
+  let end = -1;
+  for (const m of code.matchAll(new RegExp(`(?:if\\s*\\(\\s*${alias}\\s*===?\\s*__${M}__[^)]*\\)|switch\\s*\\(\\s*${alias}\\s*\\))\\s*`, "g"))) {
+    let i = m.index + m[0].length;
+    if (code[i] === "{") { let d = 0; for (; i < code.length; i++) { if (code[i] === "{") d++; else if (code[i] === "}" && --d === 0) break; } }
+    else i = code.indexOf(";", i);
+    if (i > end) end = i;
+  }
+  if (end < 0) return false;
+  const rest = code.slice(end + 1);
+  return /\breturn\b\s*[^;\s}]/.test(rest) && !/status\s*\(\s*4\d\d|status\s*:\s*4\d\d|METHOD_NOT_ALLOWED|MethodNotAllowed|Not Allowed/i.test(rest);
 }
 
 /**

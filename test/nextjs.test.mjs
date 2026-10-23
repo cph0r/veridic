@@ -685,3 +685,43 @@ test("reach: a Next.js route never runs a React component, whatever the index li
   assert.deepEqual(next.slice(1), ["helper"]);
   assert.deepEqual(express.slice(1), ["helper", "Upload"], "Express routes walk as before");
 });
+
+test("next: pages/api methods handled before an early 405 count, and a handler that serves the rest answers ALL", () => {
+  const { g, done } = fakeRepo({
+    ...PKG,
+    "pages/api/verify.ts": [
+      "export default async function handler(req, res) {",
+      '  if (req.method === "GET") {',
+      "    return res.json({ ok: true });",
+      "  }",
+      '  if (req.method !== "POST") {',
+      '    res.setHeader("Allow", ["GET", "POST"]);',
+      "    return res.status(405).end();",
+      "  }",
+      "  return res.json({});",
+      "}",
+    ].join("\n"),
+    "pages/api/tus.ts": [
+      "export default function handler(req, res) {",
+      '  if (req.method === "OPTIONS") {',
+      "    return res.status(204).end();",
+      "  }",
+      "  return tusServer.handle(req, res);",
+      "}",
+    ].join("\n"),
+    "pages/api/items.ts": [
+      "export default async function handler(req, res) {",
+      '  if (req.method === "GET") {',
+      "    return res.json([]);",
+      "  }",
+      '  if (req.method === "POST") {',
+      "    return res.status(201).json({});",
+      "  }",
+      "  return res.status(405).end();",
+      "}",
+    ].join("\n"),
+  });
+  const ids = routeInventory(g).routes.map((r) => r.id).sort();
+  done();
+  assert.deepEqual(ids, ["ALL /api/tus", "GET /api/items", "GET /api/verify", "POST /api/items", "POST /api/verify"]);
+});
