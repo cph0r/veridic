@@ -240,7 +240,7 @@ var veridicModel = (D) => {
   <div class="top"><div class="brand"><span class="logo"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5 9-10"/></svg></span>Veridic</div>
     <div class="when"><span id="when"></span><button class="icon-btn" id="theme" aria-label="Switch theme"></button></div></div>
   <section class="hero"><div class="rv"><h1 class="verdict" id="appname"></h1><p class="about" id="stats"></p></div><div class="rings rv" id="rings" style="animation-delay:.12s"></div></section>
-  <section id="specs-sec"><h2 class="rv" style="animation-delay:.2s">Your app <span class="hint">· one row per part; click to read its spec, a heading to sort</span></h2>
+  <section id="specs-sec"><h2 class="sr">Your app</h2>
   <div class="tools rv" style="animation-delay:.22s"><input id="q" type="search" placeholder="Search parts and specs" aria-label="Search parts and specs"><label class="pick"><span>Show</span><select id="filters" aria-label="Show"></select></label></div>
   <div class="tablewrap rv" style="animation-delay:.25s"><table class="specs"><thead><tr id="thead"></tr></thead><tbody id="tbody"></tbody></table><div class="noresults" id="noresults" hidden>No part matches.</div></div><div class="pager" id="pager"></div></section>
   <section id="fix-sec"><h2 class="rv" style="animation-delay:.3s">Fix first</h2><div class="cards rv" style="animation-delay:.35s" id="fix"></div></section>
@@ -256,12 +256,12 @@ var veridicModel = (D) => {
   $("#when").textContent = ago(D.generated);
   $("#stats").textContent = counts.specs ? [plural(counts.specs, "spec"), plural(counts.rules, "rule"), counts.stories ? plural(counts.stories, "user story", "user stories") : ""].filter(Boolean).join(" · ") : "";
   const colorFor = (p) => (p >= 90 ? "var(--good)" : p >= 60 ? "var(--warn)" : "var(--bad)");
-  const ring = (p, lbl, sub, color) => { const C = 2 * Math.PI * 33; return '<div class="ring"><svg viewBox="0 0 78 78"><circle class="track" cx="39" cy="39" r="33" fill="none" stroke-width="7"/><circle class="arc" cx="39" cy="39" r="33" fill="none" stroke-width="7" stroke="' + (color || colorFor(p)) + '" stroke-dasharray="' + C + '" stroke-dashoffset="' + C + '" data-to="' + C * (1 - p / 100) + '"/></svg><div class="num" data-n="' + p + '">0%</div><div class="lbl">' + lbl + '</div><div class="sub">' + sub + "</div></div>"; };
+  const ring = (p, lbl, sub, color) => { const C = 2 * Math.PI * 33; return '<div class="ring" tabindex="0"><svg viewBox="0 0 78 78"><circle class="track" cx="39" cy="39" r="33" fill="none" stroke-width="7"/><circle class="arc" cx="39" cy="39" r="33" fill="none" stroke-width="7" stroke="' + (color || colorFor(p)) + '" stroke-dasharray="' + C + '" stroke-dashoffset="' + C + '" data-to="' + C * (1 - p / 100) + '"/></svg><div class="num" data-n="' + p + '">0%</div><div class="lbl">' + lbl + '</div><div class="sub">' + sub + "</div></div>"; };
   const pct = (a, b) => (b ? Math.round((100 * a) / b) : 0);
   if (counts.rules) $("#rings").innerHTML =
-    ring(pct(counts.true, counts.rules), "Up to date", counts.true + " of " + plural(counts.rules, "rule") + " match the code") +
-    ring(pct(counts.proven, counts.rules), "Proven", counts.proven + " of " + plural(counts.rules, "rule") + (counts.broken ? " · " + counts.broken + " broken" : ""), counts.broken ? "var(--bad)" : null) +
-    (counts.behaviour ? ring(pct(counts.covered, counts.behaviour), "Covered", counts.covered + " of " + counts.behaviour + " files described by a spec") : "");
+    ring(pct(counts.true, counts.rules), "Up to date", "Rules that still match the code they point to (" + counts.true + " of " + counts.rules + ").") +
+    ring(pct(counts.proven, counts.rules), "Proven", "Rules a test proves (" + counts.proven + " of " + counts.rules + ")." + (counts.broken ? " " + plural(counts.broken, "rule") + " broken." : ""), counts.broken ? "var(--bad)" : null) +
+    (counts.behaviour ? ring(pct(counts.covered, counts.behaviour), "Covered", "Code files a spec describes (" + counts.covered + " of " + counts.behaviour + "). Tests, config and generated files don't count.") : "");
 
   // ---- every part of the app, as a row: filter by health or text, sort by any column ----
   const COLS = [
@@ -359,9 +359,10 @@ var veridicModel = (D) => {
     return [...groups].map(([h, xs]) => '<div class="blk"><div class="sub-h">' + esc(h) + '<span class="x-n">' + xs.length + "</span></div>" + xs.map((x) => ruleRow(x)).join("") + "</div>").join("");
   }
   function rulesTabHTML(p, rc) {
-    const seg = (attr, opts, cur) => opts.map(([k, label, n]) => '<button ' + attr + '="' + k + '" aria-pressed="' + (cur === k) + '">' + label + (n != null ? '<span class="n">' + n + "</span>" : "") + "</button>").join("");
-    return '<div class="rtools"><input id="rq" type="search" placeholder="Search rules" aria-label="Search rules" value="' + esc(sheet.q) + '"><div class="seg" role="group" aria-label="Show">' + seg("data-rstate", RSTATES.map(([k, l]) => [k, l, rc[k]]), sheet.rstate) +
-      '</div><div class="seg by" role="group" aria-label="Group by"><span>Group by</span>' + seg("data-rby", [["state", "State"], ["file", "File"]], sheet.by) + '</div></div><div id="rlist">' + rulesList(p) + "</div>";
+    const pick = (id, label, opts, cur) => '<label class="pick"><span>' + label + '</span><select id="' + id + '" aria-label="' + label + '">' + opts.map(([k, l]) => '<option value="' + k + '"' + (cur === k ? " selected" : "") + ">" + l + "</option>").join("") + "</select></label>";
+    return '<div class="rtools"><input id="rq" type="search" placeholder="Search rules" aria-label="Search rules" value="' + esc(sheet.q) + '"><div class="picks">' +
+      pick("rstate", "Show", RSTATES.map(([k, l]) => [k, (k === "all" ? "All rules" : l) + " (" + rc[k] + ")"]), sheet.rstate) +
+      pick("rby", "Group by", [["state", "State"], ["file", "Spec file"]], sheet.by) + '</div></div><div id="rlist">' + rulesList(p) + "</div>";
   }
   // A part's sheet: its head, the tabs, then only the open tab.
   function partHTML(p) {
@@ -421,6 +422,7 @@ var veridicModel = (D) => {
     if (tr && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); openPart(tr.dataset.part); }
   });
   $("#scrim").addEventListener("click", closeSpec);
+  document.addEventListener("change", (ev) => { const id = ev.target.id; if (id !== "rstate" && id !== "rby") return; sheet[id === "rstate" ? "rstate" : "by"] = ev.target.value; const p = M.P.get(open); if (p) $("#rlist").innerHTML = rulesList(p); });
   document.addEventListener("input", (ev) => { if (ev.target.id !== "rq") return; sheet.q = ev.target.value; const p = M.P.get(open); if (p) $("#rlist").innerHTML = rulesList(p); });
   document.addEventListener("click", (ev) => {
     const t = ev.target;
@@ -433,10 +435,6 @@ var veridicModel = (D) => {
     if (fi) { view.filter = fi.dataset.filter; view.page = 1; drawTable(); return; }
     const tb = t.closest("[data-tab]");
     if (tb) { setTab(tb.dataset.tab, tb.dataset.rstate); return; }
-    const rs = t.closest("[data-rstate]");
-    if (rs) { sheet.rstate = rs.dataset.rstate; drawSheet(); return; }
-    const rb = t.closest("[data-rby]");
-    if (rb) { sheet.by = rb.dataset.rby; drawSheet(); return; }
     const ref = t.closest("[data-ref]");
     if (ref) { ev.stopPropagation(); showRule(ref.dataset.ref, ref.dataset.in); return; }
     const pr = t.closest("[data-part]");
