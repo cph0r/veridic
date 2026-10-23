@@ -265,3 +265,21 @@ import, invisible statically, now reaches); vitest and jest use their own lcov r
 back to static reach, saying why, when the coverage tool isn't installed. Env-gated tests:
 none on launchpad. Compatibility: a spec stamped with hashes (`~3f9a1c`) can't be read by
 Veridic before 0.12 (its citations don't parse); worth a line in the release notes.
+
+**Phase 4 and acceptance (2026-10-24),** launchpad copy, 0.11.0 vs the branch:
+
+| | 0.11.0 | 0.12 branch |
+|---|---|---|
+| Routes found | 40 | 47 (6 MCP routes on a path constant, the host-served apps) |
+| "Auth 2" | yes | `oauth` (its spec under specs/auth-2 stays attached) |
+| Named tests reaching their rule's code | 576 of 614 | 604 of 614 |
+| Rules proven | 368 | 387 |
+| Statuses thrown through a namespace-imported service | missed | followed (fixture; launchpad's current OpenAPI already clean) |
+| Linking and running a spec that isn't a part | not possible | `tests --spec … --link`, `--module <folder> --run` |
+| traceability.md vs the dashboard | hand-edited rows disagreed | rewritten from what's linked; hand reviews kept apart |
+
+Express: RealWorld and Gobbles snapshots and metrics identical to main after every task; Gobbles'
+rule counts drop only by its success criteria. Every spec success item checked: stories show for
+all specs; criteria aren't counted as untested; no false out-of-date for specs edited with their
+code; `--fix` leaves a new spec's correct citations alone; tests through aliases, workspace
+packages and spawned scripts reach their code; a product spec sits above the parts.
