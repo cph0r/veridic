@@ -4,6 +4,7 @@
 // matrix (CSV) when one is given. Deterministic.
 
 import fs from "node:fs";
+import { idiomsOf } from "./frameworks/index.mjs";
 import { handlerText } from "./reach.mjs";
 import { codeOnly } from "./tests.mjs";
 import { closeParen, splitArgs } from "./chains.mjs";
@@ -106,16 +107,19 @@ export function accessMatrix(g, inv) {
     const inlineRole = ROLE_CHECK.test(text);
     // A machine API key on an /admin route is an admin credential.
     const roleGuarded = guards.some((n) => ROLE_GUARD.test(n) && !OWNER_GUARD.test(n.split(" ")[0])) || (/\/admin(\/|$)/.test(r.path) && guards.some((n) => /api[-_]?key/i.test(n)));
-    const access = roles.length || inlineRole || roleGuarded ? "role" : guards.some((n) => AUTH_GUARD.test(n) || PLAN_GUARD.test(n)) ? "auth" : "public";
+    const idiom = idiomsOf(r);
+    const access = roles.length || inlineRole || roleGuarded ? "role" : (guards.some((n) => AUTH_GUARD.test(n) || PLAN_GUARD.test(n) || idiom.authGuard?.test(n)) || (r.guards ?? []).some((x) => x.kind === "auth")) ? "auth" : "public";
     const plan = guards.some((n) => PLAN_GUARD.test(n)) || PLAN_CHECK.test(text) ? "pro" : "free";
     // Scoping lives in the handler, which may be in a controller module: read what the route names.
     // Only the handler's own code: middleware that sets req.user doesn't scope the data.
     const body = handlerText(g, r, handlerNames.get(r) ?? null);
     // Without sign-in anywhere on the route, req.user can't be the caller (it's whatever was loaded).
     const identity = access !== "public" && (CALLER_IN_HANDLER.test(body) || CALLER_IN_HANDLER.test(text)); // text: an inline handler
-    const ownerChecked = guards.some((n) => OWNER_GUARD.test(n)) || OWNER_HELPER.test(body) || OWNER_HELPER.test(text) || factoryChecked(g, r, handlerNames.get(r));
+    // A framework adapter marks a guard that checks the caller's membership of the URL's ids.
+    const ownerChecked = guards.some((n) => OWNER_GUARD.test(n)) || (r.guards ?? []).some((x) => x.scope === "caller") || OWNER_HELPER.test(body) || OWNER_HELPER.test(text) || factoryChecked(g, r, handlerNames.get(r));
     const tenantScoped = guards.some((n) => MEMBER_GUARD.test(n)) && (TENANT_USE.test(text) || TENANT_USE.test(body));
-    let scoped = CALLER.test(text) || identity || ownerChecked || tenantScoped || guards.some((n) => OWNER_GUARD.test(n)) ? "yes" : CLIENT_SCOPE.test(text) || CLIENT_SCOPE.test(body) ? "weak" : "no";
+    const callerIdiom = access !== "public" && !!idiom.caller && (idiom.caller.test(text) || idiom.caller.test(body));
+    let scoped = CALLER.test(text) || identity || ownerChecked || tenantScoped || callerIdiom || guards.some((n) => OWNER_GUARD.test(n)) ? "yes" : CLIENT_SCOPE.test(text) || CLIENT_SCOPE.test(body) ? "weak" : "no";
     const flags = [];
     // Identity or ownership supplied by the client on a write. Not when middleware put the
     // caller's own user id there (`appendUserId()`) and that is the field used.

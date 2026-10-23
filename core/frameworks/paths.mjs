@@ -41,9 +41,11 @@ export function dedupe(xs, key) {
  * character (offsets). Skips braces in parameter and return types; an arrow with an expression
  * body spans that expression. Null when it isn't declared there.
  */
-export function functionSpan(src, name) {
+export function functionSpan(src, name, { generics = false } = {}) {
   const code = codeOnly(src);
-  const m = new RegExp(`(?:function\\s*\\*?\\s*${name}\\s*\\(|\\b(?:const|let|var)\\s+${name}\\s*(?::[^=]+)?=\\s*(?:async\\s*)?(?:function\\b[^(]*)?\\(?)`).exec(code);
+  // generics: `function f<T extends A<B>>(…)` (opt-in, so Express's reading stays as it was).
+  const gen = generics ? "(?:<(?:[^<>]|<(?:[^<>]|<[^<>]*>)*>)*>)?\\s*" : "";
+  const m = new RegExp(`(?:function\\s*\\*?\\s*${name}\\s*${gen}\\(|\\b(?:const|let|var)\\s+${name}\\s*(?::[^=]+)?=\\s*(?:async\\s*)?(?:function\\b[^(]*)?\\(?)`).exec(code);
   if (!m) return null;
   // Past the parameter list (whose types may hold braces: `user: { id: string }`) and any return
   // type (`Promise<{ deleted: string }>`): the body is the first brace outside them.

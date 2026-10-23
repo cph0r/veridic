@@ -274,3 +274,239 @@ test("next: a status a called helper answers with counts as returned", async () 
   done();
   assert.ok(st.includes(403));
 });
+
+const guardsOf = (g) => Object.fromEntries(routeInventory(g).routes.map((r) => [r.id, r.guards.map((x) => x.name)]));
+const MW_REDIRECT = 'import { NextResponse } from "next/server";\nexport function middleware(req) {\n  if (!req.cookies.get("session")) return NextResponse.redirect(new URL("/login", req.url));\n  return NextResponse.next();\n}\n';
+
+test("next: middleware.ts guards the routes its matcher covers, when it can turn a request away", () => {
+  const routes = { "app/api/private/x/route.ts": H("GET"), "app/api/public/route.ts": H("GET"), "app/settings/actions.ts": '"use server";\nexport async function save() {}\n' };
+  const run = (mw) => { const { g, done } = fakeRepo({ ...PKG, ...routes, "middleware.ts": mw }); const r = guardsOf(g); done(); return r; };
+  const a = run(MW_REDIRECT + 'export const config = { matcher: ["/dashboard/:path*", "/api/private/:path*"] };\n');
+  assert.deepEqual(a["GET /api/private/x"], ["middleware"]);
+  assert.deepEqual(a["GET /api/public"], []);
+  const b = run(MW_REDIRECT + 'export const config = { matcher: "/((?!api|_next/static|_next/image|favicon.ico).*)" };\n');
+  assert.deepEqual(b["ACTION /settings/_action/save"], ["middleware"]);
+  assert.deepEqual(b["GET /api/public"], []);
+  const c = run(MW_REDIRECT);
+  assert.ok(Object.values(c).every((x) => x.includes("middleware")), "no matcher: every route");
+  const d = run('import { NextResponse } from "next/server";\nexport function middleware(req) {\n  const res = NextResponse.next();\n  res.headers.set("x-id", "1");\n  return res;\n}\n');
+  assert.ok(Object.values(d).every((x) => x.length === 0), "a middleware that only sets a header guards nothing");
+  const e = run('export { auth as middleware } from "@/auth";\nexport const config = { matcher: ["/api/private/:path*"] };\n');
+  assert.deepEqual(e["GET /api/private/x"], ["middleware"], "Auth.js's auth as middleware");
+});
+
+test("next: a sign-in check in the handler is a guard", async () => {
+  const { accessMatrix } = await import("../core/access.mjs");
+  const files = {
+    ...PKG,
+    "app/api/a/route.ts": 'import { auth } from "@/auth";\nexport async function GET() {\n  const session = await auth();\n  if (!session) return NextResponse.json({ error: "no" }, { status: 401 });\n  return NextResponse.json({});\n}\n',
+    "app/api/b/route.ts": 'export async function GET() {\n  const session = await getServerSession(authOptions);\n  if (!session) {\n    redirect("/login");\n  }\n  return Response.json({});\n}\n',
+    "app/api/c/route.ts": 'export async function GET() {\n  const { userId } = await auth();\n  if (!userId) return new Response(null, { status: 401 });\n  return Response.json({});\n}\n',
+    "app/api/d/route.ts": 'export async function GET() {\n  const { data: { user } } = await supabase.auth.getUser();\n  if (!user) return Response.json({}, { status: 401 });\n  return Response.json({});\n}\n',
+    "app/api/f/route.ts": 'export async function POST() {\n  const {\n    error,\n    data: { user }\n  } = await supabase.auth.getUser();\n  if (error || !user) {\n    console.error(error);\n    throw new Error("Could not get user session.");\n  }\n  return Response.json({});\n}\n',
+    "app/api/e/route.ts": 'export async function GET() {\n  const session = await auth();\n  return Response.json({ name: session?.user?.name });\n}\n',
+  };
+  const { g, done } = fakeRepo(files);
+  const inv = routeInventory(g);
+  const m = Object.fromEntries(accessMatrix(g, inv).map((x) => [x.route, x]));
+  const gs = guardsOf(g);
+  done();
+  assert.deepEqual(gs["GET /api/a"], ["auth()"]);
+  assert.deepEqual(gs["GET /api/b"], ["getServerSession()"]);
+  assert.deepEqual(gs["GET /api/c"], ["auth()"]);
+  assert.deepEqual(gs["GET /api/d"], ["supabase.auth.getUser()"]);
+  assert.deepEqual(gs["POST /api/f"], ["supabase.auth.getUser()"], "an exit later in the if block counts");
+  assert.deepEqual(gs["GET /api/e"], [], "reading the session without turning anyone away is no guard");
+  for (const k of ["a", "b", "c", "d"]) assert.equal(m[`GET /api/${k}`].access, "auth", k);
+  assert.equal(m["GET /api/e"].access, "public");
+});
+
+test("next: a record looked up by the session's user id is scoped", async () => {
+  const { accessMatrix } = await import("../core/access.mjs");
+  const { g, done } = fakeRepo({
+    ...PKG,
+    "app/api/posts/[id]/route.ts": 'export async function DELETE(req, { params }) {\n  const session = await auth();\n  if (!session) return new Response(null, { status: 401 });\n  await db.post.deleteMany({ where: { id: params.id, authorId: session.user.id } });\n  return new Response(null, { status: 204 });\n}\n',
+    "app/api/notes/[id]/route.ts": 'export async function DELETE(req, { params }) {\n  const session = await auth();\n  if (!session) return new Response(null, { status: 401 });\n  await db.note.delete({ where: { id: params.id } });\n  return new Response(null, { status: 204 });\n}\n',
+  });
+  const m = Object.fromEntries(accessMatrix(g, routeInventory(g)).map((x) => [x.route, x]));
+  done();
+  assert.equal(m["DELETE /api/posts/:id"].scoped, "yes");
+  assert.deepEqual(m["DELETE /api/posts/:id"].flags, []);
+  assert.ok(m["DELETE /api/notes/:id"].flags.includes("id-param-without-caller-scope"));
+});
+
+test("next: middleware that protects only some paths guards only those", () => {
+  const routes = { "app/dashboard/actions.ts": '"use server";\nexport async function save() {}\n', "app/(login)/actions.ts": '"use server";\nexport async function signIn() {}\n', "app/api/x/route.ts": H("GET") };
+  const run = (mw) => { const { g, done } = fakeRepo({ ...PKG, ...routes, "middleware.ts": mw }); const r = guardsOf(g); done(); return r; };
+  const starts = run('const protectedRoutes = "/dashboard";\nexport async function middleware(request) {\n  const { pathname } = request.nextUrl;\n  const isProtectedRoute = pathname.startsWith(protectedRoutes);\n  if (isProtectedRoute && !request.cookies.get("session")) {\n    return NextResponse.redirect(new URL("/sign-in", request.url));\n  }\n  return NextResponse.next();\n}\nexport const config = { matcher: ["/((?!api|_next/static|_next/image|favicon.ico).*)"] };\n');
+  assert.deepEqual(starts["ACTION /dashboard/_action/save"], ["middleware"]);
+  assert.deepEqual(starts["ACTION /_action/signIn"], [], "sign-in isn't behind the dashboard check");
+  const clerkProtected = run('const isProtectedRoute = createRouteMatcher(["/dashboard(.*)"]);\nexport default clerkMiddleware(async (auth, req) => {\n  if (isProtectedRoute(req)) await auth.protect();\n});\n');
+  assert.deepEqual(clerkProtected["ACTION /dashboard/_action/save"], ["middleware"]);
+  assert.deepEqual(clerkProtected["GET /api/x"], []);
+  const clerkPublic = run('const isPublicRoute = createRouteMatcher(["/", "/sign-in(.*)"]);\nexport default clerkMiddleware(async (auth, req) => {\n  if (!isPublicRoute(req)) await auth.protect();\n});\n');
+  assert.deepEqual(clerkPublic["GET /api/x"], ["middleware"]);
+  assert.deepEqual(clerkPublic["ACTION /_action/signIn"], [], "\"/\" is public");
+});
+
+test("next: a handler wrapped in a function that checks sign-in is guarded; one that only catches errors isn't", async () => {
+  const { accessMatrix } = await import("../core/access.mjs");
+  const { g, done } = fakeRepo({
+    ...PKG,
+    "tsconfig.json": JSON.stringify({ compilerOptions: { paths: { "@/*": ["./*"] } } }),
+    "utils/middleware.ts": [
+      "function withMiddleware<T extends NextRequest>(handler: Handler<T>, middleware?: Mw) {",
+      "  return async (req) => {",
+      "    if (middleware) { const r = await middleware(req); if (r instanceof Response) return r; }",
+      "    try { return await handler(req); } catch (e) {",
+      '      if (e instanceof SafeError) return NextResponse.json({ error: "Authorization required" }, { status: 401 });',
+      "      return NextResponse.json({ error: String(e) }, { status: 500 });",
+      "    }",
+      "  };",
+      "}",
+      "async function authMiddleware(req) {",
+      "  const session = await auth();",
+      '  if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });',
+      "  return req;",
+      "}",
+      "export function withError(handler) {",
+      "  return withMiddleware(handler, undefined);",
+      "}",
+      "async function validateApiKey(req) {",
+      '  const key = req.headers.get("x-api-key");',
+      '  if (!(await findKey(key))) throw new SafeError("Invalid API key");',
+      "  return key;",
+      "}",
+      "export function withApiKey(handler) {",
+      "  return withError(async (req) => {",
+      "    await validateApiKey(req);",
+      "    return handler(req);",
+      "  });",
+      "}",
+      "export function withAuth(scope: string, handler: Handler): Handler;",
+      "export function withAuth(handler: Handler): Handler;",
+      "export function withAuth(scopeOrHandler, handler?) {",
+      "  return withMiddleware(handler ?? scopeOrHandler, authMiddleware);",
+      "}",
+    ].join("\n"),
+    "app/api/user/route.ts": 'import { withAuth, withError } from "@/utils/middleware";\nexport const GET = withAuth(async (req) => {\n  return NextResponse.json({ id: req.auth.userId });\n});\nexport const POST = withError(async (req) => {\n  return NextResponse.json({});\n});\n',
+    "app/api/v1/route.ts": 'import { withApiKey } from "@/utils/middleware";\nexport const GET = withApiKey(async (req) => NextResponse.json([]));\n',
+    "app/api/ops/route.ts": 'import { withAuth } from "@/utils/middleware";\nconst inspect = withAuth(async (req) => {\n  return NextResponse.json({});\n});\nexport const GET = inspect;\nexport { inspect as POST };\n',
+  });
+  const inv = routeInventory(g);
+  const gs = Object.fromEntries(inv.routes.map((r) => [r.id, r.guards.map((x) => x.name)]));
+  const m = Object.fromEntries(accessMatrix(g, inv).map((x) => [x.route, x.access]));
+  const spans = Object.fromEntries(inv.routes.map((r) => [r.id, [r.start, r.end]]));
+  done();
+  assert.deepEqual(gs["GET /api/user"], ["withAuth"]);
+  assert.deepEqual(spans["GET /api/user"], [2, 4], "a wrapped handler spans its whole statement");
+  for (const id of ["GET /api/ops", "POST /api/ops"]) {
+    assert.deepEqual(gs[id], ["withAuth"], `${id}: an alias of a wrapped handler keeps its guard`);
+    assert.deepEqual(spans[id], [2, 4], `${id}: and its body`);
+  }
+  assert.deepEqual(gs["POST /api/user"], []);
+  assert.deepEqual(gs["GET /api/v1"], ["withApiKey"], "a credential check that throws, turned into a 401 elsewhere");
+  assert.equal(m["GET /api/user"], "auth");
+  assert.equal(m["POST /api/user"], "public");
+});
+
+test("next: actions wrapped in a sign-in check are guarded (a wrapper function, or a safe-action client)", () => {
+  const { g, done } = fakeRepo({
+    ...PKG,
+    "tsconfig.json": JSON.stringify({ compilerOptions: { paths: { "@/*": ["./*"] } } }),
+    "lib/auth/middleware.ts": 'export function validatedAction(schema, action) {\n  return async (prev, formData) => action(schema.parse(formData), formData);\n}\nexport function validatedActionWithUser<S extends z.ZodType<any, any>, T>(schema: S, action: Fn<S, T>) {\n  return async (prev, formData) => {\n    const user = await getUser();\n    if (!user) {\n      throw new Error("User is not authenticated");\n    }\n    return action(schema.parse(formData), formData, user);\n  };\n}\n',
+    "lib/safe-action.ts": 'export const actionClient = createSafeActionClient().use(async ({ next }) => {\n  const session = await auth();\n  if (!session?.user) throw new SafeError("Unauthorized");\n  return next({ ctx: { userId: session.user.id } });\n});\n',
+    "app/(login)/actions.ts": '"use server";\nimport { validatedAction, validatedActionWithUser } from "@/lib/auth/middleware";\nexport const signIn = validatedAction(signInSchema, async (data) => {\n  return { ok: true };\n});\nexport const deleteAccount = validatedActionWithUser(deleteSchema, async (data, _, user) => {\n  await db.delete(users);\n});\n',
+    "app/mail/actions.ts": '"use server";\nimport { actionClient } from "@/lib/safe-action";\nexport const archive = actionClient.metadata({ name: "archive" }).action(async ({ ctx }) => {\n  await archiveThread(ctx.userId);\n});\n',
+  });
+  const gs = guardsOf(g);
+  done();
+  assert.deepEqual(gs["ACTION /_action/signIn"], []);
+  assert.deepEqual(gs["ACTION /_action/deleteAccount"], ["validatedActionWithUser"]);
+  assert.deepEqual(gs["ACTION /mail/_action/archive"], ["actionClient"]);
+});
+
+test("next: a pages/api handler that dispatches by method takes each method's own handler and its guard", async () => {
+  const { g, done } = fakeRepo({
+    ...PKG,
+    "tsconfig.json": JSON.stringify({ compilerOptions: { paths: { "@/*": ["./*"] } } }),
+    "lib/team.ts": [
+      "export function withTeamApi(handler) {",
+      "  return async (req, res) => {",
+      "    const session = await getServerSession(req, res, authOptions);",
+      '    if (!session) return res.status(401).end("Unauthorized");',
+      "    return handler(req, res, session);",
+      "  };",
+      "}",
+    ].join("\n"),
+    "pages/api/teams/[teamId]/branding.ts": [
+      'import { withTeamApi } from "@/lib/team";',
+      "const getHandler = withTeamApi(async (req, res) => {",
+      "  res.json({});",
+      "});",
+      "async function putHandler(req, res) {",
+      "  res.json({});",
+      "}",
+      "export default async function handle(req, res) {",
+      '  if (req.method === "GET") {',
+      "    return getHandler(req, res);",
+      "  }",
+      "  switch (req.method) {",
+      '    case "PUT": return putHandler(req, res);',
+      "  }",
+      '  res.setHeader("Allow", ["GET", "PUT"]);',
+      "  return res.status(405).end();",
+      "}",
+    ].join("\n"),
+  });
+  const inv = routeInventory(g);
+  const r = Object.fromEntries(inv.routes.map((x) => [x.id, x]));
+  done();
+  assert.deepEqual(Object.keys(r).sort(), ["GET /api/teams/:teamId/branding", "PUT /api/teams/:teamId/branding"]);
+  assert.deepEqual([r["GET /api/teams/:teamId/branding"].start, r["GET /api/teams/:teamId/branding"].end], [2, 4]);
+  assert.deepEqual(r["GET /api/teams/:teamId/branding"].guards.map((x) => x.name), ["withTeamApi"]);
+  assert.deepEqual([r["PUT /api/teams/:teamId/branding"].start, r["PUT /api/teams/:teamId/branding"].end], [5, 7]);
+  assert.deepEqual(r["PUT /api/teams/:teamId/branding"].guards, []);
+});
+
+test("next: a wrapper that looks up the caller's membership of the URL's id scopes the route; one that only checks sign-in doesn't", async () => {
+  const { accessMatrix } = await import("../core/access.mjs");
+  const { g, done } = fakeRepo({
+    ...PKG,
+    "tsconfig.json": JSON.stringify({ compilerOptions: { paths: { "@/*": ["./*"] } } }),
+    "lib/team.ts": [
+      "async function resolveTeam(session, teamId) {",
+      '  if (!session?.user) return { status: 401, message: "Unauthorized" };',
+      "  const userId = session.user.id;",
+      "  const membership = await prisma.userTeam.findUnique({ where: { userId_teamId: { userId, teamId } } });",
+      '  if (!membership) return { status: 401, message: "Unauthorized" };',
+      "  return { teamId };",
+      "}",
+      "export function withTeamApi(handler) {",
+      "  return async (req, res) => {",
+      "    const session = await getServerSession(req, res, authOptions);",
+      "    const result = await resolveTeam(session, req.query.teamId);",
+      "    if (result.status) return res.status(result.status).json({ error: result.message });",
+      "    return handler({ ...result, req, res });",
+      "  };",
+      "}",
+      "export function withSession(handler) {",
+      "  return async (req, res) => {",
+      "    const session = await getServerSession(req, res, authOptions);",
+      '    if (!session) return res.status(401).end("Unauthorized");',
+      "    return handler(req, res, session);",
+      "  };",
+      "}",
+    ].join("\n"),
+    "pages/api/teams/[teamId]/brands.ts": 'import { withTeamApi } from "@/lib/team";\nexport default withTeamApi(async ({ teamId, req, res }) => {\n  await prisma.brand.delete({ where: { teamId } });\n  res.json({});\n});\n',
+    "app/api/teams/[teamId]/route.ts": 'import { withTeamApi, withSession } from "@/lib/team";\nexport const DELETE = withTeamApi(async (req) => NextResponse.json({}));\nexport const PATCH = withSession(async (req, { params }) => NextResponse.json({}));\n',
+  });
+  const inv = routeInventory(g);
+  const m = Object.fromEntries(accessMatrix(g, inv).map((x) => [x.route, x]));
+  done();
+  assert.equal(m["DELETE /api/teams/:teamId"].scoped, "yes");
+  assert.deepEqual(m["DELETE /api/teams/:teamId"].flags, []);
+  assert.equal(m["ALL /api/teams/:teamId/brands"].access, "auth", "pages: export default withX(handler) is guarded");
+  assert.deepEqual(m["ALL /api/teams/:teamId/brands"].flags, []);
+  assert.deepEqual(m["PATCH /api/teams/:teamId"].flags, ["id-param-without-caller-scope"]);
+});
