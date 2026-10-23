@@ -725,3 +725,146 @@ test("next: pages/api methods handled before an early 405 count, and a handler t
   done();
   assert.deepEqual(ids, ["ALL /api/tus", "GET /api/items", "GET /api/verify", "POST /api/items", "POST /api/verify"]);
 });
+
+test("next: a helper that checks sign-in and membership, left when it returns nothing, guards and scopes the route", async () => {
+  const { accessMatrix } = await import("../core/access.mjs");
+  const { g, done } = fakeRepo({
+    ...PKG,
+    "app/api/teams/[teamId]/saml/route.ts": [
+      "async function getAuthenticatedAdmin(teamId) {",
+      "  const session = await getServerSession(authOptions);",
+      "  if (!session) return null;",
+      "  const userId = session.user.id;",
+      "  const access = await prisma.userTeam.findUnique({ where: { userId_teamId: { userId, teamId } } });",
+      '  if (!access || access.role !== "ADMIN") return null;',
+      "  return { userId };",
+      "}",
+      "export async function DELETE(req, { params }) {",
+      "  const { teamId } = await params;",
+      "  const auth = await getAuthenticatedAdmin(teamId);",
+      "  if (!auth) {",
+      '    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });',
+      "  }",
+      "  await jackson.deleteConnections({ teamId });",
+      "  return NextResponse.json({});",
+      "}",
+      "export async function PATCH(req, { params }) {",
+      "  const { teamId } = await params;",
+      "  const cfg = await loadConfig(teamId);", // not a sign-in check
+      "  if (!cfg) return NextResponse.json({}, { status: 404 });",
+      "  return NextResponse.json({});",
+      "}",
+    ].join("\n"),
+  });
+  const inv = routeInventory(g);
+  const m = Object.fromEntries(accessMatrix(g, inv).map((x) => [x.route, x]));
+  done();
+  assert.equal(m["DELETE /api/teams/:teamId/saml"].access, "auth");
+  assert.deepEqual(m["DELETE /api/teams/:teamId/saml"].guards, ["getAuthenticatedAdmin()"]);
+  assert.deepEqual(m["DELETE /api/teams/:teamId/saml"].flags, []);
+  assert.equal(m["PATCH /api/teams/:teamId/saml"].access, "public");
+});
+
+test("next: a pages/api handler that only hands the request to another function takes that function's code", async () => {
+  const { accessMatrix } = await import("../core/access.mjs");
+  const { g, done } = fakeRepo({
+    ...PKG,
+    "tsconfig.json": JSON.stringify({ compilerOptions: { paths: { "@/*": ["./*"] } } }),
+    "ee/faqs-route.ts": [
+      "export default async function handle(req, res) {",
+      '  if (req.method === "POST") {',
+      "    const session = await getServerSession(req, res, authOptions);",
+      "    if (!session) return res.status(401).end();",
+      "    await prisma.faq.create({ data: req.body });",
+      "    return res.status(201).json({});",
+      "  }",
+      "  return res.status(405).end();",
+      "}",
+    ].join("\n"),
+    "pages/api/teams/[teamId]/faqs.ts": 'import publishFAQRoute from "@/ee/faqs-route";\nexport default async function handler(req, res) {\n  return await publishFAQRoute(req, res);\n}\n',
+  });
+  const inv = routeInventory(g);
+  const r = inv.routes;
+  const m = Object.fromEntries(accessMatrix(g, inv).map((x) => [x.route, x]));
+  done();
+  assert.deepEqual(r.map((x) => [x.id, x.file]), [["POST /api/teams/:teamId/faqs", "ee/faqs-route.ts"]]);
+  assert.equal(m["POST /api/teams/:teamId/faqs"].access, "auth");
+});
+
+test("next: a pages/api handler that checks, then hands each method on, keeps its checks and takes the method's code", async () => {
+  const { accessMatrix } = await import("../core/access.mjs");
+  const { g, done } = fakeRepo({
+    ...PKG,
+    "tsconfig.json": JSON.stringify({ compilerOptions: { paths: { "@/*": ["./*"] } } }),
+    "lib/team.ts": "export function withTeamApi(handler) {\n  return async (req, res) => {\n    const session = await getServerSession(req, res, authOptions);\n    if (!session) return res.status(401).end();\n    const m = await prisma.userTeam.findUnique({ where: { userId_teamId: { userId: session.user.id, teamId: req.query.teamId } } });\n    if (!m) return res.status(401).end();\n    return handler({ req, res, teamId: req.query.teamId });\n  };\n}\n",
+    "lib/bulk.ts": "export async function handleBulkLinkImport(req, res, opts) {\n  const session = await getServerSession(req, res, authOptions);\n  if (!session) return res.status(401).end();\n  await prisma.link.createMany({ data: [] });\n  return res.json({});\n}\n",
+    // (a) a 405 for the rest, then a wrapped local handler
+    "pages/api/teams/[teamId]/brands/[brandId]/default.ts": [
+      'import { withTeamApi } from "@/lib/team";',
+      "const postHandler = withTeamApi(async ({ req, res, teamId }) => {",
+      "  await prisma.brand.updateMany({ where: { id: req.query.brandId, teamId }, data: {} });",
+      "  return res.json({});",
+      "});",
+      "export default async function handle(req, res) {",
+      '  if (req.method !== "POST") {',
+      "    return res.status(405).end();",
+      "  }",
+      "  return postHandler(req, res);",
+      "}",
+    ].join("\n"),
+    // (b) sign-in and membership in the dispatcher, then per-method functions
+    "pages/api/teams/[teamId]/slack.ts": [
+      "export default async function handler(req, res) {", // 1
+      "  const session = await getServerSession(req, res, authOptions);",
+      "  if (!session) return res.status(401).end();",
+      "  const teamId = req.query.teamId;",
+      "  const userTeam = await prisma.userTeam.findUnique({ where: { userId_teamId: { userId: session.user.id, teamId } } });",
+      "  if (!userTeam) return res.status(403).end();",
+      "  switch (req.method) {",
+      '    case "PUT":',
+      "      return handleUpdate(req, res, teamId);",
+      "    default:",
+      "      return res.status(405).end();",
+      "  }",
+      "}", // 13
+      "async function handleUpdate(req, res, teamId) {", // 14
+      "  await prisma.integration.update({ where: { teamId }, data: req.body });",
+      "  return res.json({});",
+      "}",
+    ].join("\n"),
+    // (c) handed, with options, to a function in another file
+    "pages/api/teams/[teamId]/links/bulk.ts": 'import { handleBulkLinkImport } from "@/lib/bulk";\nexport default async function handle(req, res) {\n  const { teamId } = req.query;\n  return handleBulkLinkImport(req, res, { teamId });\n}\n',
+  });
+  const inv = routeInventory(g);
+  const r = Object.fromEntries(inv.routes.map((x) => [x.id, x]));
+  const m = Object.fromEntries(accessMatrix(g, inv).map((x) => [x.route, x]));
+  done();
+  const brand = "POST /api/teams/:teamId/brands/:brandId/default", slack = "PUT /api/teams/:teamId/slack", bulk = "ALL /api/teams/:teamId/links/bulk";
+  assert.deepEqual([r[brand].start, r[brand].end], [2, 5]);
+  assert.deepEqual(m[brand].guards, ["withTeamApi"]);
+  assert.equal(m[brand].scoped, "yes");
+  assert.deepEqual([r[slack].start, r[slack].end], [14, 17]);
+  assert.equal(m[slack].access, "auth", "the dispatcher's sign-in check still guards it");
+  assert.equal(m[slack].scoped, "yes");
+  assert.equal(r[bulk].file, "lib/bulk.ts");
+  assert.equal(m[bulk].access, "auth");
+});
+
+test("effects: closing a stream and a multi-line $(…).remove() aren't deletes", async () => {
+  const { routeEffects } = await import("../core/effects.mjs");
+  const src = [
+    "export async function GET(req) {",
+    "  if (signal?.aborted) response.data.destroy();",
+    "  $(",
+    "    [",
+    '      ".gmail_quote",',
+    "    ].join(\", \"),",
+    "  ).remove();",
+    "  await record.destroy();", // 8: a real delete (Sequelize)
+    "}",
+  ].join("\n");
+  const { g, done } = fakeRepo({ "app/api/x/route.ts": src });
+  const found = routeEffects(g, { id: "GET /api/x", file: "app/api/x/route.ts", start: 1, end: 9 });
+  done();
+  assert.deepEqual(found.filter((e) => e.kind === "destructive").map((e) => Number(e.at.split(":").pop())), [8]);
+});

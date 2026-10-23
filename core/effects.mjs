@@ -15,7 +15,7 @@ const EFFECTS = [
   ["write", /\.auth\.(?:updateUser|signUp|admin\.(?:createUser|updateUserById))\s*\(/],
   ["notifies", /\.auth\.(?:resetPasswordForEmail|signInWithOtp|resend|admin\.inviteUserByEmail)\s*\(/],
   // SQL/Drizzle, a storage layer, and the MongoDB/Mongoose, Sequelize and Prisma calls that delete.
-  ["destructive", /\.delete\s*\(\s*\w+Table\b|\bdb\.delete\(|DELETE\s+FROM\b|\bstorage\.(?:delete|remove|purge)\w*\(|(?<!\b(?:res|response|req|request|stream|socket|conn\w*|ws|reader|writer|readable|writable|upstream|passThrough)\s*)\.destroy\s*\(|status:\s*["'](?:cancelled|canceled|deleted|archived|revoked|deactivated)["']|\.(?:deleteOne|deleteMany|findOneAndDelete|findByIdAndDelete|findOneAndRemove|findByIdAndRemove|bulkDelete)\s*\(|\.\w+\.delete(?:Many)?\s*\(\s*\{\s*where\b|(?<!\$\([^()]*\))\.remove\s*\(\s*(?:\{|\)|[\w.]+\s*[,)])/], // not $(…).remove(): cheerio/jQuery editing HTML
+  ["destructive", /\.delete\s*\(\s*\w+Table\b|\bdb\.delete\(|DELETE\s+FROM\b|\bstorage\.(?:delete|remove|purge)\w*\(|(?<!\b(?:res|response|req|request|stream|socket|conn\w*|ws|reader|writer|readable|writable|upstream|passThrough|(?:res|response)\.(?:data|body))\s*)\.destroy\s*\(|status:\s*["'](?:cancelled|canceled|deleted|archived|revoked|deactivated)["']|\.(?:deleteOne|deleteMany|findOneAndDelete|findByIdAndDelete|findOneAndRemove|findByIdAndRemove|bulkDelete)\s*\(|\.\w+\.delete(?:Many)?\s*\(\s*\{\s*where\b|(?<!\$\([^()]*\))\.remove\s*\(\s*(?:\{|\)|[\w.]+\s*[,)])/], // not $(…).remove(): cheerio/jQuery editing HTML
   ["write", /\.insert\s*\(\s*\w+|\.update\s*\(\s*\w+Table\b|\bdb\.update\(|\.upsert\s*\(|INSERT\s+INTO\b|UPDATE\s+\w+\s+SET\b|\bstorage\.(?:create|update|add|set|save|record|upsert|mark|activate|increment|insert)\w*\(|(?<!\b(?:res|response|reply|ctx|headers|cookieStore|cookies\(\))\s*)\.set\(\s*\{|\.(?:insertOne|insertMany|updateOne|updateMany|replaceOne|findOneAndUpdate|findByIdAndUpdate|findOneAndReplace|bulkWrite|bulkCreate)\s*\(|(?<!\b\w*(?:pdf|Pdf|canvas|ctx|workbook|zip|image|img|sharp|png|jpe?g)\w*)\.save\s*\(\s*\)|\b(?:(?!PDF|Object\b|Promise\b|Buffer\b|Date\b|Array\b|Map\b|Set\b|Symbol\b|Reflect\b|URL\b|Image\b|Canvas\b|Document\b|Readable\b|Stream\b)[A-Z]\w*|prisma\.\w+|\w*[Mm]odels?(?:\.\w+)?|\w+(?:Repository|Repo))\.create\s*\(|\.(?:insert|update)\s*\(\s*\{|\$(?:set|push|pull|inc|addToSet|unset)\b/],
   ["moves_money", /\b(?:razorpay|phonepe|stripe|paypal|cashfree|paytm)\b[\w.]*\s*\.|\binitiatePayment\s*\(|\bcheckPaymentStatus\s*\(|(?<!\b(?:analytics|posthog|mixpanel|segment|amplitude|tracker|telemetry)\.)\b(?:refund|charge|capture)(?:Payment)?\s*\(|\bconfirm\w*Payment\s*\(|\bactivateSubscription\s*\(|\bpaidAt\s*:(?!\s*\w+Table\.)|\.(?:increment|decrement)\s*\(\s*\{\s*\w*(?:balance|credit|amount)\b|\bwallet\w*\s*\.\s*(?:increment|decrement|update|save)\s*\(/i],
   ["external", /\bfetch\s*\(|\baxios\b[\w.]*\(|\bgot\s*\(|\bnew\s+(?:Razorpay|Stripe|OpenAI|Anthropic)\b|\.chat\.completions\.create\s*\(|\bgenerateContent\s*\(/],
@@ -28,6 +28,12 @@ const COMMENT = /^\s*(?:\/\/|\*|\/\*)/;
 // A query builder's delete (`supabase.from("posts").delete().eq(…)`): only in a chain that
 // starts at `.from(`, which may sit on an earlier line of the same statement.
 const CHAIN_DELETE = /\.delete\s*\(\s*(?:\{[^}]*\}\s*)?\)/;
+// `$(\n  selectors,\n).remove()`: cheerio/jQuery editing HTML, opened on an earlier line.
+function domCall(lines, n) {
+  const indent = lines[n - 1].match(/^\s*/)[0];
+  for (let i = n - 2; i >= 0 && i >= n - 15; i--) if (lines[i].startsWith(indent) && !/^\s/.test(lines[i].slice(indent.length))) return /^\s*\$\(\s*$/.test(lines[i]);
+  return false;
+}
 function inFromChain(lines, n) {
   let chain = lines[n - 1].slice(0, lines[n - 1].search(CHAIN_DELETE));
   for (let i = n - 1; i > 0 && i > n - 8 && /^\s*\./.test(lines[i]) ; i--) chain = `${lines[i - 1]}\n${chain}`;
@@ -44,6 +50,7 @@ export function routeEffects(g, route) {
       const line = lines[n - 1];
       if (!line || COMMENT.test(line)) continue;
       const chainDelete = CHAIN_DELETE.test(line) && inFromChain(lines, n);
+      if (/^\s*\)\s*\.remove\s*\(/.test(line) && domCall(lines, n)) continue;
       for (const [kind, re] of EFFECTS) {
         if (!re.test(line) && !(kind === "destructive" && chainDelete)) continue;
         const key = `${kind}@${r.file}:${n}`;

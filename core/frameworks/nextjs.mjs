@@ -403,16 +403,34 @@ function signInGuards(text) {
   for (const [re, name] of SIGN_IN)
     for (const m of text.matchAll(re)) {
       const vars = m[1].startsWith("{") ? [...m[1].matchAll(/[\w$]+/g)].map((x) => x[0]).filter((v) => /^(?:session|user|userId)$/.test(v)) : [m[1]];
-      const after = text.slice(m.index + m[0].length);
-      // An if on the missing value whose block (or single statement) leaves: return, throw, redirect, notFound.
-      const early = vars.some((v) => [...after.matchAll(new RegExp(`\\bif\\s*\\([^)]*!\\s*${v}\\b[^)]*\\)\\s*`, "g"))].some((m) => {
-        const rest = after.slice(m.index + m[0].length);
-        let block = rest.split(/;|\n/)[0];
-        if (rest.startsWith("{")) { let d = 0, i = 0; for (; i < rest.length; i++) { if (rest[i] === "{") d++; else if (rest[i] === "}" && --d === 0) break; } block = rest.slice(0, i + 1); }
-        return /\breturn\b|\bthrow\b|\bredirect\s*\(|\bnotFound\s*\(|\bunauthorized\s*\(/.test(block);
-      }));
-      if (early && !out.some((o) => o.name === name)) out.push({ name, line: text.slice(0, m.index).split("\n").length });
+      if (exitsIfMissing(text.slice(m.index + m[0].length), vars) && !out.some((o) => o.name === name)) out.push({ name, line: text.slice(0, m.index).split("\n").length });
     }
+  return out;
+}
+
+/** Whether, after a value is fetched, an if on it being missing leaves: return, throw, redirect, notFound. */
+function exitsIfMissing(after, vars) {
+  return vars.some((v) => [...after.matchAll(new RegExp(`\\bif\\s*\\([^)]*!\\s*${v.replace(/\$/g, "\\$")}\\b[^)]*\\)\\s*`, "g"))].some((m) => {
+    const rest = after.slice(m.index + m[0].length);
+    let block = rest.split(/;|\n/)[0];
+    if (rest.startsWith("{")) { let d = 0, i = 0; for (; i < rest.length; i++) { if (rest[i] === "{") d++; else if (rest[i] === "}" && --d === 0) break; } block = rest.slice(0, i + 1); }
+    return /\breturn\b|\bthrow\b|\bredirect\s*\(|\bnotFound\s*\(|\bunauthorized\s*\(/.test(block);
+  }));
+}
+
+/**
+ * Sign-in checks through the app's own helpers: `const auth = await getAuthenticatedAdmin(teamId)`
+ * followed by an exit when it's missing, where the helper (followed 3 deep) checks sign-in.
+ * Scoping too, when the helper looks up the caller's membership of the URL's ids.
+ */
+function helperGuards(g, dir, file, text, params) {
+  const out = [];
+  for (const m of text.matchAll(/\b(?:const|let)\s+([\w$]+)\s*=\s*(?:await\s+)?([A-Za-z_$][\w$]*)\s*\(/g)) {
+    const fn = m[2];
+    if (/^(?:auth|getServerSession|currentUser|require|fetch|String|Number|Boolean|parseInt)$/.test(fn) || out.some((o) => o.name === `${fn}()`)) continue;
+    if (!exitsIfMissing(text.slice(m.index + m[0].length), [m[1]]) || !checksSignIn(g, dir, file, fn)) continue;
+    out.push({ name: `${fn}()`, line: text.slice(0, m.index).split("\n").length, kind: "auth", ...(scopesCaller(g, dir, file, fn, params) ? { scope: "caller" } : {}) });
+  }
   return out;
 }
 
@@ -526,6 +544,28 @@ function wrapperGuard(g, dir, file, name, line, urlPath) {
   return [{ name, at: `${file}:${line}`, kind: "auth", ...(scopesCaller(g, dir, file, name, params) ? { scope: "caller" } : {}) }];
 }
 
+/** The function a pages handler ends by handing the request to: `return (await) name(req, res, …)` as its last statement. */
+function handedOn(body) {
+  return codeOnly(body).match(/\breturn\s+(?:await\s+)?([A-Za-z_$][\w$]*)\s*\(\s*req\s*,\s*res\b[^;]*?\)\s*;?\s*\}\s*;?\s*$/)?.[1] ?? null;
+}
+
+/** Where a pages handler's delegate lives: `{ file, h }` with its lines and body, local, a default import or a named one. */
+function delegate(g, dir, file, name) {
+  const src = textOf(g, file) ?? "";
+  const lines = (t, ext) => ({ start: ext[0], end: ext[1], body: t.split("\n").slice(ext[0] - 1, ext[1]).join("\n") });
+  const here = functionExtent(src, name);
+  if (here) return { file, h: lines(src, here) };
+  const def = src.match(new RegExp(`\\bimport\\s+${name.replace(/\$/g, "\\$")}\\s*(?:,\\s*\\{[^}]*\\})?\\s*from\\s*["']([^"']+)["']`));
+  const named = [...src.matchAll(/\bimport\s+(?:[\w$]+\s*,\s*)?\{([^}]*)\}\s*from\s*["']([^"']+)["']/g)].find((m) => m[1].split(",").some((x) => x.trim().split(/\s+as\s+/).pop() === name));
+  const target = def ? resolveSpec(g, dir, file, def[1]) : named ? resolveSpec(g, dir, file, named[2]) : null;
+  if (!target) return null;
+  const t = textOf(g, target) ?? "";
+  if (def) { const h = pagesHandler(t); return h ? { file: target, h } : null; }
+  const local = named[1].split(",").map((x) => x.trim().split(/\s+as\s+/)).find((x) => (x[1] ?? x[0]) === name)?.[0] ?? name;
+  const ext = functionExtent(t, local);
+  return ext ? { file: target, h: lines(t, ext) } : null;
+}
+
 /** Guards on each route: its app's middleware for the URLs it covers, and the handler's sign-in checks. */
 function addGuards(g, routes) {
   const dirs = appDirs(g);
@@ -539,8 +579,13 @@ function addGuards(g, routes) {
       if (url != null ? mw.covers(url) : mw.covers("/") && mw.covers("/__any__")) r.guards.push({ name: "middleware", at: mw.at });
     }
     const lines = (textOf(g, r.file) ?? "").split("\n");
-    for (const [a, b] of [...(r.context ? [r.context] : []), [r.start, r.end]])
-      for (const s of signInGuards(lines.slice(a - 1, b).join("\n"))) r.guards.push({ name: s.name, at: `${r.file}:${a + s.line - 1}` });
+    const params = [...r.path.matchAll(/:(\w+)/g)].map((m) => m[1]);
+    for (const [a, b] of [...(r.context ? [r.context] : []), [r.start, r.end]]) {
+      const text = lines.slice(a - 1, b).join("\n");
+      for (const s of signInGuards(text)) r.guards.push({ name: s.name, at: `${r.file}:${a + s.line - 1}` });
+      for (const h of helperGuards(g, appOf(r.file), r.file, text, params))
+        if (!r.guards.some((x) => x.name === h.name)) r.guards.push({ name: h.name, at: `${r.file}:${a + h.line - 1}`, kind: h.kind, ...(h.scope ? { scope: h.scope } : {}) });
+    }
   }
   return routes;
 }
@@ -592,12 +637,28 @@ function nextRoutes(g) {
         }
         h ??= pagesHandler(textOf(g, file) ?? "");
         if (!h && re) { const line = (textOf(g, f) ?? "").slice(0, re.index).split("\n").length; h = { start: line, end: line, body: "" }; } // re-exports a file that isn't there
+        // A handler that only hands the request on (`return await publishFAQRoute(req, res)`):
+        // the route's code is that function, here or in the file it's imported from.
+        const del = h?.body && codeOnly(h.body).match(/\)\s*(?::[^{=]+)?(?:=>\s*)?\{\s*(?:return\s+)?(?:await\s+)?([A-Za-z_$][\w$]*)\s*\(\s*req\s*,\s*res\s*\)\s*;?\s*\}\s*;?\s*$/);
+        if (del && !h.wrapper) {
+          const d = delegate(g, dir, file, del[1]);
+          if (d) ({ file, h } = d);
+        }
         if (h) {
-          const to = pagesDispatch(h.body), blocks = pagesBlocks(h.body), text = textOf(g, file) ?? "";
+          const to = pagesDispatch(h.body), blocks = pagesBlocks(h.body), text = textOf(g, file) ?? "", last = handedOn(h.body);
           for (const method of pagesMethods(h.body)) {
-            const own = to[method] && localHandler(text, to[method]);
+            // The function this method is handed to: its own (`case "PUT": return handleUpdate(…)`),
+            // or the one the handler ends by handing every request to (`return postHandler(req, res)`).
+            const name = to[method] ?? last;
+            let own = name && localHandler(text, name), ownFile = file;
+            if (!own && name) {
+              const d = delegate(g, dir, file, name);
+              if (d) (own = { extent: [d.h.start, d.h.end], wrapper: d.h.wrapper }), (ownFile = d.file);
+            }
             if (own) {
-              routes.push({ id: `${method} ${url}`, method, path: url, file, start: own.extent[0], end: own.extent[1], guards: wrapperGuard(g, dir, file, own.wrapper, own.extent[0], url) });
+              // In the same file, the handler's own checks (sign-in, membership) run first: context.
+              const context = ownFile === file && (own.extent[1] < h.start || own.extent[0] > h.end) ? { context: [h.start, h.end] } : {};
+              routes.push({ id: `${method} ${url}`, method, path: url, file: ownFile, start: own.extent[0], end: own.extent[1], ...context, guards: wrapperGuard(g, dir, ownFile, own.wrapper, own.extent[0], url) });
               continue;
             }
             // A method's own block; what the handler does before any block (sign-in, the
