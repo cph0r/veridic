@@ -134,3 +134,14 @@ test("report page: the specs table filters by health and text, and sorts by any 
   const orders = m.rows({}).find((r) => r.path === "specs/orders/spec.md");
   assert.deepEqual({ rules: orders.rules.length, proven: orders.proven.length, broken: orders.broken.length, outdated: orders.outdated, untested: orders.untested.length, files: orders.files, health: orders.health }, { rules: 4, proven: 1, broken: 1, outdated: 1, untested: 2, files: 1, health: "Broken" });
 });
+
+test("report page: the specs table pages its rows", () => {
+  const m = load()(data());
+  const list = Array.from({ length: 23 }, (_, i) => ({ path: `specs/s${i}/spec.md` }));
+  const p = m.page(list, { page: 3, size: 10 });
+  assert.deepEqual({ from: p.from, to: p.to, total: p.total, page: p.page, pages: p.pages, n: p.items.length }, { from: 21, to: 23, total: 23, page: 3, pages: 3, n: 3 });
+  assert.equal(m.page(list, { page: 9, size: 10 }).page, 3, "a page past the end shows the last");
+  assert.equal(m.page(list, { page: 0, size: 10 }).page, 1);
+  assert.equal(m.page(list, { page: 2, size: 0 }).items.length, 23, "size 0 shows all");
+  assert.deepEqual({ ...m.page([], { page: 1, size: 10 }) }.pages, 1);
+});

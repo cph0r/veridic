@@ -218,3 +218,15 @@ table.specs { width: 100%; border-collapse: collapse; font-size: 14px; }
 .pbar b { display: block; height: 100%; background: var(--good); border-radius: 9px; }
 .noresults { padding: 22px; text-align: center; color: var(--ink3); font-size: 14px; }
 @media (max-width: 600px) { .specs .c-name { min-width: 180px; max-width: 200px; } .specs .snm { font-size: 13.5px; } }
+
+/* the table's pages */
+.pager { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; justify-content: flex-end; margin-top: 12px; font-size: 13px; color: var(--ink2); }
+.pager:empty { display: none; }
+.pinfo { margin-right: auto; color: var(--ink3); font-variant-numeric: tabular-nums; }
+.pnav { display: inline-flex; gap: 4px; align-items: center; }
+.pnav button { min-width: 30px; height: 30px; padding: 0 8px; border-radius: 9px; color: var(--ink2); font-variant-numeric: tabular-nums; }
+.pnav button:hover:not([disabled]) { background: var(--line); color: var(--ink); }
+.pnav button[aria-current="page"] { background: var(--ink); color: var(--card); }
+.pnav button[disabled] { opacity: .35; cursor: default; }
+.pgap { padding: 0 4px; color: var(--ink3); }
+.psize select { font: inherit; color: var(--ink); background: var(--card); border: 1px solid var(--line2); border-radius: 8px; padding: 4px 6px; margin-left: 6px; }

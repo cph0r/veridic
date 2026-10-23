@@ -136,7 +136,14 @@ var veridicModel = (D) => {
     : 'Every rule is true to the code <em class="c-good">and proven.</em>';
   const app = D.app || {};
 
-  return { rows, specs, S, counts, fix, later, verdict, title: app.title || D.name, stateOf, statusOf, ruleText, RANK, plural, esc, cap, REQ };
+  // One page of rows: size 0 shows all; a page past either end shows the nearest one.
+  const page = (list, { page: p = 1, size = 10 } = {}) => {
+    const total = list.length, pages = size > 0 ? Math.max(1, Math.ceil(total / size)) : 1;
+    const at = Math.min(Math.max(1, p | 0 || 1), pages);
+    const items = size > 0 ? list.slice((at - 1) * size, at * size) : list;
+    return { items, page: at, pages, total, from: total ? (size > 0 ? (at - 1) * size + 1 : 1) : 0, to: size > 0 ? Math.min(at * size, total) : total };
+  };
+  return { rows, page, specs, S, counts, fix, later, verdict, title: app.title || D.name, stateOf, statusOf, ruleText, RANK, plural, esc, cap, REQ };
 };
 
 (() => {
@@ -164,7 +171,7 @@ var veridicModel = (D) => {
   <section class="hero"><div class="rv"><div class="eyebrow" id="appname"></div><h1 class="verdict" id="verdict"></h1><p class="about" id="stats"></p></div><div class="rings rv" id="rings" style="animation-delay:.12s"></div></section>
   <section id="specs-sec"><h2 class="rv" style="animation-delay:.2s">Your specs <span class="hint">· click a row to read it, a heading to sort</span></h2>
   <div class="tools rv" style="animation-delay:.22s"><input id="q" type="search" placeholder="Search specs" aria-label="Search specs"><div class="seg" id="filters" role="group" aria-label="Show"></div></div>
-  <div class="tablewrap rv" style="animation-delay:.25s"><table class="specs"><thead><tr id="thead"></tr></thead><tbody id="tbody"></tbody></table><div class="noresults" id="noresults" hidden>No spec matches.</div></div></section>
+  <div class="tablewrap rv" style="animation-delay:.25s"><table class="specs"><thead><tr id="thead"></tr></thead><tbody id="tbody"></tbody></table><div class="noresults" id="noresults" hidden>No spec matches.</div></div><div class="pager" id="pager"></div></section>
   <section id="fix-sec"><h2 class="rv" style="animation-delay:.3s">Fix first</h2><div class="cards rv" style="animation-delay:.35s" id="fix"></div></section>
   <section id="later-sec"><h2 class="rv" style="animation-delay:.35s">When you have time</h2><div class="cards rv" style="animation-delay:.4s" id="later"></div></section>
   <footer class="foot" id="foot"></footer>
@@ -192,7 +199,7 @@ var veridicModel = (D) => {
     ["broken", "Broken", "num"], ["outdated", "Out of date", "num"], ["untested", "Not tested", "num"], ["stories", "Stories", "num"], ["files", "Files", "num"],
   ];
   const FILTER = [["all", "All"], ["fix", "Needs fixing"], ["stale", "Out of date"], ["untested", "Not tested"], ["proven", "Proven"]];
-  let view = { q: "", filter: "all", sort: null, dir: "desc" };
+  let view = { q: "", filter: "all", sort: null, dir: "desc", page: 1, size: 10 };
   try { view = { ...view, ...JSON.parse(store.get("table:" + D.name) || "{}") }; } catch {}
   const num = (n, cls) => (n ? '<span class="' + (cls || "") + '">' + n + "</span>" : '<span class="zero">–</span>');
   const rowHTML = (s) => {
@@ -207,13 +214,22 @@ var veridicModel = (D) => {
     store.set("table:" + D.name, JSON.stringify(view));
     $("#thead").innerHTML = COLS.map(([k, label, kind]) => '<th class="' + kind + '" aria-sort="' + (view.sort === k ? (view.dir === "asc" ? "ascending" : "descending") : "none") + '"><button data-sort="' + k + '">' + label + '<span class="arrow">' + (view.sort === k ? (view.dir === "asc" ? "↑" : "↓") : "") + "</span></button></th>").join("");
     $("#filters").innerHTML = FILTER.map(([k, label]) => '<button data-filter="' + k + '" aria-pressed="' + (view.filter === k) + '">' + label + '<span class="n">' + M.rows({ filter: k }).length + "</span></button>").join("");
-    const list = M.rows(view);
-    $("#tbody").innerHTML = list.map(rowHTML).join("");
-    $("#noresults").hidden = list.length > 0;
+    const pg = M.page(M.rows(view), view);
+    view.page = pg.page;
+    $("#tbody").innerHTML = pg.items.map(rowHTML).join("");
+    $("#noresults").hidden = pg.total > 0;
+    // Pages: "1–10 of 30", previous/next, numbers (the first, the last and two around this one), rows per page.
+    const nums = [];
+    for (let i = 1; i <= pg.pages; i++) if (i === 1 || i === pg.pages || Math.abs(i - pg.page) <= 1) nums.push(i); else if (nums[nums.length - 1] !== "…") nums.push("…");
+    $("#pager").innerHTML = pg.total <= 10 && view.size === 10 ? "" :
+      '<span class="pinfo">' + pg.from + "–" + pg.to + " of " + pg.total + '</span><span class="pnav"><button data-page="' + (pg.page - 1) + '" aria-label="Previous page"' + (pg.page <= 1 ? " disabled" : "") + ">‹</button>" +
+      nums.map((n) => (n === "…" ? '<span class="pgap">…</span>' : '<button data-page="' + n + '"' + (n === pg.page ? ' aria-current="page"' : "") + ">" + n + "</button>")).join("") +
+      '<button data-page="' + (pg.page + 1) + '" aria-label="Next page"' + (pg.page >= pg.pages ? " disabled" : "") + '>›</button></span><label class="psize">Rows <select id="psize">' + [10, 25, 50, 0].map((n) => '<option value="' + n + '"' + (n === view.size ? " selected" : "") + ">" + (n || "All") + "</option>").join("") + "</select></label>";
   }
   if (specs.length) {
     $("#q").value = view.q;
-    $("#q").addEventListener("input", () => { view.q = $("#q").value; drawTable(); });
+    $("#q").addEventListener("input", () => { view.q = $("#q").value; view.page = 1; drawTable(); });
+    $("#pager").addEventListener("change", (ev) => { if (ev.target.id === "psize") { view.size = +ev.target.value; view.page = 1; drawTable(); } });
     drawTable();
   }
   else { $("#specs-sec").remove(); $("#foot").insertAdjacentHTML("beforebegin", '<div class="allgood">This repo has no specs yet. Ask Claude to <b>write a spec</b> for a part of your app (<code>veridic modules</code> lists the parts), then run <code>veridic report</code> again.</div>'); }
@@ -286,9 +302,11 @@ var veridicModel = (D) => {
     const t = ev.target;
     const so = t.closest("[data-sort]");
     // First click: names A to Z, numbers high to low; the next click reverses.
-    if (so) { const k = so.dataset.sort, first = k === "name" ? "asc" : "desc"; view = { ...view, dir: view.sort === k ? (view.dir === "asc" ? "desc" : "asc") : first, sort: k }; drawTable(); return; }
+    if (so) { const k = so.dataset.sort, first = k === "name" ? "asc" : "desc"; view = { ...view, dir: view.sort === k ? (view.dir === "asc" ? "desc" : "asc") : first, sort: k, page: 1 }; drawTable(); return; }
+    const pb = t.closest("[data-page]");
+    if (pb && !pb.disabled) { view.page = +pb.dataset.page; drawTable(); document.getElementById("specs-sec").scrollIntoView({ block: "start", behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" }); return; }
     const fi = t.closest("[data-filter]");
-    if (fi) { view.filter = fi.dataset.filter; drawTable(); return; }
+    if (fi) { view.filter = fi.dataset.filter; view.page = 1; drawTable(); return; }
     const ref = t.closest("[data-ref]");
     if (ref) { ev.stopPropagation(); showRule(ref.dataset.ref); return; }
     const sp = t.closest("[data-spec]");
