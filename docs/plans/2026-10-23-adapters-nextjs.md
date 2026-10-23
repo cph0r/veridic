@@ -181,3 +181,30 @@ multi-line `export { handler as GET }`; wrapped actions (`validatedAction(…)`)
 from "@/…"` and `export { handler as default } from`; `export * from` another route; verb maps
 (quoted, shorthand, spread); `const { method, query } = req`; early exits that only count when
 they reject; nested apps in a monorepo.
+
+**Phase 3 (2026-10-24).** Guards, scoping, statuses and effects on the samples (`agent-ready`):
+
+| Sample | routes | public / auth / role | read / write / destructive | money | high / medium |
+|---|---|---|---|---|---|
+| saas-starter | 14 | 7 / 7 / 0 | 2 / 12 / 0 | 6 | 1 / 0 |
+| nextjs-subscription-payments | 14 | 12 / 2 / 0 | 5 / 8 / 1 | 3 | 0 / 0 |
+| taxonomy | 9 | 5 / 4 / 0 | 5 / 4 / 0 | 2 | 1 / 0 |
+| papermark | 379 | 111 / 247 / 21 | 211 / 146 / 22 | 3 | 2 / 18 |
+| inbox-zero | 605 | 313 / 271 / 21 | 436 / 111 / 58 | 8 | 2 / 46 |
+
+saas-starter and nextjs-subscription-payments hand-checked route by route. Disagreements found
+and fixed (each with a test first): cookie writes (`cookieStore.set({…})`) counted as data
+writes on every Supabase route; Supabase Auth calls (updateUser, signUp, reset emails) missed;
+`.from(…).delete()` chains missed; `withTeam` (hands the action the caller's team) not counted
+as scoping, giving two false high "money not scoped". On the bigger apps: `analytics.capture()`
+counted as a payment capture (papermark 54 → 3 routes moving money); pages/api handlers that
+branch by method gave every method the whole handler (GETs that write 41 → 6); method
+dispatchers and wrapped/aliased handlers lost their guards; membership checks in wrappers
+(`withTeamApi`) and the account on the request (`request.auth`) not seen as scoping; the code
+index's name matches walked API routes into React components.
+Disagreements left, by design or for later: "moves money" on any Stripe call, reads like
+`stripe.subscriptions.retrieve` too (shared with Express); nextjs-subscription-payments'
+`updateName`/`updateEmail` read as public (Supabase's `updateUser` acts on the session user
+without an explicit check); inbox-zero's 405-only `POST/PATCH /api/v1/rules/:id` flagged.
+True findings kept: GET crons and Stripe success pages that write (inbox-zero, saas-starter,
+taxonomy). Express: snapshots and metrics identical to main on RealWorld, Gobbles and launchpad.

@@ -195,6 +195,36 @@ function pagesDispatch(body) {
   return out;
 }
 
+/**
+ * Each method's own code in a pages/api handler, as lines of its body (1-based): the block of
+ * `if (req.method === "GET") { … }`, or a `case "PUT":` up to the next case or the switch's end.
+ */
+function pagesBlocks(body) {
+  const code = codeOnly(body.replace(/["']([A-Z]+)["']/g, (m, x) => `__${x}__`)); // lines don't move
+  const alias = /\{[^=;]*\bmethod\b[^=;]*\}\s*=\s*req\b/.test(code) ? "(?:req\\.method|\\bmethod)" : "req\\.method";
+  const lineAt = (i) => code.slice(0, i).split("\n").length;
+  const close = (open) => { let d = 0; for (let i = open; i < code.length; i++) { if (code[i] === "{") d++; else if (code[i] === "}" && --d === 0) return i; } return -1; };
+  const out = {};
+  for (const m of code.matchAll(new RegExp(`if\\s*\\(\\s*${alias}\\s*===?\\s*__([A-Z]+)__\\s*\\)\\s*\\{`, "g"))) {
+    const end = close(m.index + m[0].length - 1);
+    if (end > 0) out[m[1]] ??= [lineAt(m.index), lineAt(end)];
+  }
+  for (const sw of code.matchAll(new RegExp(`switch\\s*\\(\\s*${alias}\\s*\\)\\s*\\{`, "g"))) {
+    const open = sw.index + sw[0].length - 1, end = close(open);
+    if (end < 0) continue;
+    const inner = code.slice(open, end);
+    const cases = [...inner.matchAll(/\b(?:case\s+__([A-Z]+)__|default)\s*:/g)];
+    cases.forEach((c, i) => {
+      if (!c[1]) return;
+      // Fall-through cases (`case "GET": case "HEAD":`) share the next case's code.
+      let j = i; while (j + 1 < cases.length && /^\s*$/.test(inner.slice(cases[j].index + cases[j][0].length, cases[j + 1].index))) j++;
+      const stop = j + 1 < cases.length ? lineAt(open + cases[j + 1].index) - 1 : lineAt(end) - 1;
+      out[c[1]] ??= [lineAt(open + c.index), Math.max(stop, lineAt(open + c.index))];
+    });
+  }
+  return out;
+}
+
 /** The file a module specifier names, from `from` in app `dir`: relative, or a tsconfig/jsconfig path alias (`@/x`). */
 function resolveSpec(g, dir, from, spec) {
   const bases = [];
@@ -442,23 +472,28 @@ function checksSignIn(g, dir, file, name, depth = 3, seen = new Set()) {
 
 /** A user id: the caller's, as code that looks one up names it. */
 const USER_ID = /\buserId\b|\buser_id\b|\buser\??\.id\b/;
+const USER_COLUMN = /\b\w+\.user_?[iI]d\b|\buser_id\b/;
 const LOOKUP = /\b(?:where|findUnique|findFirst|findMany|eq|match)\b/;
 
 /**
  * Whether wrapper `name` (followed into what it calls, 3 deep) looks up a record by the
  * caller's user id together with one of the URL's ids: a membership check
- * (`userTeam.findUnique({ where: { userId_teamId: { userId, teamId } } })`) scopes the route.
+ * (`userTeam.findUnique({ where: { userId_teamId: { userId, teamId } } })`) scopes the route;
+ * so does one that loads the caller's own record from another table (`getTeamForUser()`).
  */
 function scopesCaller(g, dir, file, name, params, depth = 3, seen = new Set()) {
-  if (!params.length) return false;
   const key = `${file}#${name}`;
   if (seen.has(key)) return false;
   seen.add(key);
   const def = definitionOf(g, dir, file, name);
   if (!def) return false;
   const code = codeOnly(def.body);
-  for (const st of code.split(";"))
-    if (LOOKUP.test(st) && USER_ID.test(st.replace(/\buserId_\w+/g, "")) && params.some((p) => new RegExp(`\\b${p}\\b`).test(st))) return true;
+  for (const st of code.split(";")) {
+    if (!LOOKUP.test(st)) continue;
+    // With ids in the URL: a lookup pairing the caller with one of them. Without: the caller's own
+    // record from another table, keyed by its user-id column (the wrapper hands it to the handler).
+    if (params.length ? USER_ID.test(st.replace(/\buserId_\w+/g, "")) && params.some((p) => new RegExp(`\\b${p}\\b`).test(st)) : USER_COLUMN.test(st)) return true;
+  }
   if (depth <= 1) return false;
   const names = new Set([...code.matchAll(/\b([A-Za-z_$][\w$]*)\s*\(/g)].map((m) => m[1]).filter((n) => n !== name && !/^(?:if|for|while|switch|return|function|catch|typeof)$/.test(n)));
   return [...names].some((n) => scopesCaller(g, dir, def.file, n, params, depth - 1, seen));
@@ -483,8 +518,9 @@ function addGuards(g, routes) {
       const url = r.method === "ACTION" ? (/^\/_action\/[^/]+\/[^/]+$/.test(r.path) ? null : r.path.replace(/\/_action\/[^/]+$/, "") || "/") : r.path;
       if (url != null ? mw.covers(url) : mw.covers("/") && mw.covers("/__any__")) r.guards.push({ name: "middleware", at: mw.at });
     }
-    const text = (textOf(g, r.file) ?? "").split("\n").slice(r.start - 1, r.end).join("\n");
-    for (const s of signInGuards(text)) r.guards.push({ name: s.name, at: `${r.file}:${r.start + s.line - 1}` });
+    const lines = (textOf(g, r.file) ?? "").split("\n");
+    for (const [a, b] of [...(r.context ? [r.context] : []), [r.start, r.end]])
+      for (const s of signInGuards(lines.slice(a - 1, b).join("\n"))) r.guards.push({ name: s.name, at: `${r.file}:${a + s.line - 1}` });
   }
   return routes;
 }
@@ -537,11 +573,19 @@ function nextRoutes(g) {
         h ??= pagesHandler(textOf(g, file) ?? "");
         if (!h && re) { const line = (textOf(g, f) ?? "").slice(0, re.index).split("\n").length; h = { start: line, end: line, body: "" }; } // re-exports a file that isn't there
         if (h) {
-          const to = pagesDispatch(h.body), text = textOf(g, file) ?? "";
+          const to = pagesDispatch(h.body), blocks = pagesBlocks(h.body), text = textOf(g, file) ?? "";
           for (const method of pagesMethods(h.body)) {
             const own = to[method] && localHandler(text, to[method]);
-            const guards = own ? wrapperGuard(g, dir, file, own.wrapper, own.extent[0], url) : wrapperGuard(g, dir, file, h.wrapper, h.start, url);
-            routes.push({ id: `${method} ${url}`, method, path: url, file, start: own?.extent[0] ?? h.start, end: own?.extent[1] ?? h.end, guards });
+            if (own) {
+              routes.push({ id: `${method} ${url}`, method, path: url, file, start: own.extent[0], end: own.extent[1], guards: wrapperGuard(g, dir, file, own.wrapper, own.extent[0], url) });
+              continue;
+            }
+            // A method's own block; what the handler does before any block (sign-in, the
+            // caller's id) is its context, read for guards and scoping.
+            const block = blocks[method]?.map((n) => h.start + n - 1);
+            const first = Math.min(...Object.values(blocks).map(([a]) => h.start + a - 1));
+            const context = block && first > h.start ? { context: [h.start, first - 1] } : {};
+            routes.push({ id: `${method} ${url}`, method, path: url, file, start: block?.[0] ?? h.start, end: block?.[1] ?? h.end, ...context, guards: wrapperGuard(g, dir, file, h.wrapper, h.start, url) });
           }
         }
         continue;
@@ -587,7 +631,8 @@ export const idioms = {
   bodyAlias: /(?:const|let|var)\s+(\w+)\s*(?::[^=]+)?=\s*\(?\s*(?:req\.body\b|await\s+(?:req|request)\s*\.\s*json\s*\(\s*\))/,
   // Fields read straight from a parsed body or a form: `const { name } = await req.json()`, `form.get("email")`.
   // The signed-in caller's identity, used in a query, scopes a record to them.
-  caller: /\bsession\??\.user\??\.id\b|\buser\??\.id\b/,
+  // The caller's id: the session's user, or the account a sign-in wrapper put on the request.
+  caller: /\bsession\??\.user\??\.id\b|\buser\??\.id\b|\b(?:req|request)\.(?:auth|apiAuth)\b/,
   // Guards that require sign-in, by name.
   authGuard: /^(?:middleware|auth\(\)|getServerSession\(\)|currentUser\(\)|supabase\.auth\.getUser\(\))$/,
   bodyFields: [/\{([^}]*)\}\s*(?::[^=]+)?=\s*await\s+(?:req|request)\s*\.\s*json\s*\(/, /\.get\(\s*["']([\w-]+)["']\s*\)/g],

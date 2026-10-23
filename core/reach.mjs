@@ -217,6 +217,8 @@ function walk(g, route, depth) {
         const fnLike = t.kind === "function" || t.kind === "method" || ((t.kind === "constant" || t.kind === "variable") && t.end > t.start && holdsFunction(g, t));
         if (!SYMBOL_KINDS.has(t.kind) || !fnLike || isTestFile(t.file) || t.file.includes("node_modules") || seen.has(t.id)) continue;
         if (t.file === r.file && t.start >= r.start && t.end <= r.end) continue; // nested in the range already scanned
+        // A Next.js route runs on the server: a component (`Upload` in a .tsx file) is a name match, not a call.
+        if (route.framework === "nextjs" && /\.[jt]sx$/.test(t.file) && /^[A-Z]/.test(t.name)) continue;
         seen.add(t.id);
         const n = { file: t.file, start: t.start, end: t.end, name: t.name, depth: d };
         out.push(n);

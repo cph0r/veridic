@@ -327,12 +327,15 @@ test("next: a record looked up by the session's user id is scoped", async () => 
     ...PKG,
     "app/api/posts/[id]/route.ts": 'export async function DELETE(req, { params }) {\n  const session = await auth();\n  if (!session) return new Response(null, { status: 401 });\n  await db.post.deleteMany({ where: { id: params.id, authorId: session.user.id } });\n  return new Response(null, { status: 204 });\n}\n',
     "app/api/notes/[id]/route.ts": 'export async function DELETE(req, { params }) {\n  const session = await auth();\n  if (!session) return new Response(null, { status: 401 });\n  await db.note.delete({ where: { id: params.id } });\n  return new Response(null, { status: 204 });\n}\n',
+    // The caller's account, as a wrapper puts it on the request (inbox-zero's request.auth / request.apiAuth).
+    "app/api/rules/[id]/route.ts": 'export async function DELETE(request, { params }) {\n  const session = await auth();\n  if (!session) return new Response(null, { status: 401 });\n  const { emailAccountId } = request.apiAuth;\n  await db.rule.deleteMany({ where: { id: params.id, emailAccountId } });\n  return new Response(null, { status: 204 });\n}\n',
   });
   const m = Object.fromEntries(accessMatrix(g, routeInventory(g)).map((x) => [x.route, x]));
   done();
   assert.equal(m["DELETE /api/posts/:id"].scoped, "yes");
   assert.deepEqual(m["DELETE /api/posts/:id"].flags, []);
   assert.ok(m["DELETE /api/notes/:id"].flags.includes("id-param-without-caller-scope"));
+  assert.equal(m["DELETE /api/rules/:id"].scoped, "yes");
 });
 
 test("next: middleware that protects only some paths guards only those", () => {
@@ -525,16 +528,160 @@ test("effects: Supabase writes and deletes", async () => {
     '  const { data } = await supabase.from("posts").select("*");',
     "  const copy = list.insert([x]);", // no .from(: not Supabase
     "  map.delete(key);", // nor this
+    "  cookieStore.set({ name, value, ...options });", // a cookie, not data
+    "  cookies().set({ name, value });",
     "  await supabase",
     '    .from("posts")',
-    "    .delete()", // 14
+    "    .delete()", // 16
     '    .eq("id", id);',
     "}",
   ].join("\n");
   const { g, done } = fakeRepo({ "app/api/posts/route.ts": src });
-  const found = routeEffects(g, { id: "POST /api/posts", file: "app/api/posts/route.ts", start: 1, end: 16 });
+  const found = routeEffects(g, { id: "POST /api/posts", file: "app/api/posts/route.ts", start: 1, end: 18 });
   done();
   const at = (kind) => found.filter((e) => e.kind === kind).map((e) => Number(e.at.split(":").pop()));
   assert.deepEqual(at("write"), [2, 5, 7]);
-  assert.deepEqual(at("destructive"), [8, 14]);
+  assert.deepEqual(at("destructive"), [8, 16]);
+});
+
+test("effects: Supabase account changes and emails", async () => {
+  const { routeEffects } = await import("../core/effects.mjs");
+  const src = [
+    "export async function updateName(formData) {",
+    "  await supabase.auth.updateUser({ data: { full_name } });", // 2 write
+    "  await supabase.auth.signUp({ email, password });", // 3 write
+    "  await supabase.auth.resetPasswordForEmail(email);", // 4 notifies
+    "  await supabase.auth.signInWithOtp({ email });", // 5 notifies
+    "  await supabaseAdmin.auth.admin.deleteUser(id);", // 6 destructive
+    "  await supabase.auth.getUser();",
+    "  await supabase.auth.signInWithPassword({ email, password });",
+    "}",
+  ].join("\n");
+  const { g, done } = fakeRepo({ "utils/auth.ts": src });
+  const found = routeEffects(g, { id: "ACTION /_action/auth/updateName", file: "utils/auth.ts", start: 1, end: 9 });
+  done();
+  const at = (kind) => found.filter((e) => e.kind === kind).map((e) => Number(e.at.split(":").pop()));
+  assert.deepEqual(at("write"), [2, 3]);
+  assert.deepEqual(at("notifies"), [4, 5]);
+  assert.deepEqual(at("destructive"), [6]);
+});
+
+test("next: a wrapper that hands the action the caller's own record scopes it", async () => {
+  const { accessMatrix } = await import("../core/access.mjs");
+  const { g, done } = fakeRepo({
+    ...PKG,
+    "tsconfig.json": JSON.stringify({ compilerOptions: { paths: { "@/*": ["./*"] } } }),
+    "lib/queries.ts": [
+      "export async function getTeamForUser() {",
+      "  const user = await getUser();",
+      "  if (!user) return null;",
+      "  return db.query.teamMembers.findFirst({ where: eq(teamMembers.userId, user.id) });",
+      "}",
+    ].join("\n"),
+    "lib/middleware.ts": [
+      'import { getTeamForUser } from "@/lib/queries";',
+      "export function withTeam(action) {",
+      "  return async (formData) => {",
+      "    const user = await getUser();",
+      '    if (!user) redirect("/sign-in");',
+      "    const team = await getTeamForUser();",
+      "    return action(formData, team);",
+      "  };",
+      "}",
+      "export function withUser(action) {",
+      "  return async (formData) => {",
+      "    const user = await getUser();",
+      '    if (!user) redirect("/sign-in");',
+      "    return action(formData, user);",
+      "  };",
+      "}",
+    ].join("\n"),
+    "lib/actions.ts": [
+      '"use server";',
+      'import { withTeam, withUser } from "@/lib/middleware";',
+      "export const checkoutAction = withTeam(async (formData, team) => {",
+      '  await createCheckoutSession({ team, priceId: formData.get("priceId") });',
+      "});",
+      "export const refundAction = withUser(async (formData) => {",
+      '  await stripe.refunds.create({ charge: formData.get("chargeId") });',
+      "});",
+    ].join("\n"),
+  });
+  const inv = routeInventory(g);
+  const m = Object.fromEntries(accessMatrix(g, inv).map((x) => [x.route, x]));
+  done();
+  assert.equal(m["ACTION /_action/actions/checkoutAction"].scoped, "yes");
+  assert.equal(m["ACTION /_action/actions/refundAction"].scoped, "no", "signing in alone doesn't scope the ids the action is given");
+});
+
+test("next: a pages/api handler's method blocks are each method's own code", async () => {
+  const { g, done } = fakeRepo({
+    ...PKG,
+    "pages/api/domains.ts": [
+      "export default async function handle(req, res) {", // 1
+      "  const session = await getServerSession(req, res, authOptions);",
+      '  if (!session) return res.status(401).end("Unauthorized");',
+      "  const userId = session.user.id;",
+      '  if (req.method === "GET") {', // 5
+      "    const all = await prisma.domain.findMany();",
+      "    return res.json(all);",
+      '  } else if (req.method === "POST") {', // 5
+      "    await prisma.domain.create({ data: req.body });",
+      "    return res.status(201).json({});",
+      "  }", // 8
+      "  switch (req.method) {",
+      '    case "DELETE":', // 10
+      "      await prisma.domain.deleteMany({});",
+      "      return res.status(204).end();",
+      '    case "PUT":', // 13
+      "      return res.json({});",
+      "  }", // 15
+      "  return res.status(405).end();",
+      "}",
+    ].join("\n"),
+  });
+  const { accessMatrix } = await import("../core/access.mjs");
+  const inv = routeInventory(g);
+  const span = Object.fromEntries(inv.routes.map((r) => [r.method, [r.start, r.end]]));
+  const m = Object.fromEntries(accessMatrix(g, inv).map((x) => [x.route.split(" ")[0], x]));
+  done();
+  assert.deepEqual(span, { GET: [5, 8], POST: [8, 11], DELETE: [13, 15], PUT: [16, 17] });
+  for (const k of ["GET", "POST", "DELETE", "PUT"]) {
+    assert.equal(m[k].access, "auth", `${k}: the sign-in check above the blocks still guards it`);
+    assert.deepEqual(m[k].guards, ["getServerSession()"]);
+  }
+});
+
+test("effects: an analytics capture isn't a payment capture", async () => {
+  const { routeEffects } = await import("../core/effects.mjs");
+  const src = [
+    "export async function POST(req) {",
+    '  analytics.capture("Document Added", { id });',
+    '  posthog.capture({ event: "x" });',
+    "  await capture(paymentId);", // 4: a payment capture
+    "  await razorpay.payments.capture(id, amount);", // 5
+    "}",
+  ].join("\n");
+  const { g, done } = fakeRepo({ "app/api/x/route.ts": src });
+  const found = routeEffects(g, { id: "POST /api/x", file: "app/api/x/route.ts", start: 1, end: 6 });
+  done();
+  assert.deepEqual(found.filter((e) => e.kind === "moves_money").map((e) => Number(e.at.split(":").pop())), [4, 5]);
+});
+
+test("reach: a Next.js route never runs a React component, whatever the index links by name", async () => {
+  const { reached } = await import("../core/reach.mjs");
+  const files = {
+    "pages/api/teams.ts": "export default async function handle(req, res) {\n  await helper();\n  return res.json({});\n}\n",
+    "lib/helper.ts": "export function helper() {\n  return 1;\n}\n",
+    "components/upload.tsx": "export function Upload() {\n  return <div />;\n}\n",
+  };
+  const { g, done } = fakeRepo(files);
+  const helper = { id: "h", name: "helper", kind: "function", file: "lib/helper.ts", start: 1, end: 3 };
+  const upload = { id: "u", name: "Upload", kind: "function", file: "components/upload.tsx", start: 1, end: 3 };
+  g.usesInRange = (f) => (f === "pages/api/teams.ts" ? [{ target: helper }, { target: upload }] : []);
+  const names = (framework) => reached(g, { id: `GET /api/teams ${framework}`, file: "pages/api/teams.ts", start: 1, end: 4, framework }).map((r) => r.name);
+  const next = names("nextjs"), express = names("express");
+  done();
+  assert.deepEqual(next.slice(1), ["helper"]);
+  assert.deepEqual(express.slice(1), ["helper", "Upload"], "Express routes walk as before");
 });

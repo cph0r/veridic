@@ -101,7 +101,8 @@ function splitList(n) {
 
 export function accessMatrix(g, inv) {
   return inv.routes.map((r) => {
-    const text = (g.lines(r.file) ?? []).slice(r.start - 1, r.end).join("\n");
+    // An adapter may give a route context: lines its handler runs before the route's own code.
+    const text = [...(r.context ? [r.context] : []), [r.start, r.end]].map(([a, b]) => (g.lines(r.file) ?? []).slice(a - 1, b).join("\n")).join("\n");
     const guards = [...new Set([...(r.guards ?? []).map((x) => x.name ?? x), ...middlewareOf(g, r)].flatMap(splitList))].filter((n) => !LIMITER.test(n));
     const roles = guards.filter((n) => ROLE_GUARD.test(n));
     const inlineRole = ROLE_CHECK.test(text);
