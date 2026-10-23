@@ -1,6 +1,6 @@
 ---
 description: Turn a part's rules into tests Veridic counts (link existing tests, write the rest); or, given a spec, which rules have real tests
-argument-hint: "<part id> [more ids] [--yes] | <spec.md> [run | scaffold <test path>]"
+argument-hint: "[--link-only] <part id> [more ids] [--yes] | <spec.md> [run | scaffold <test path>]"
 allowed-tools: Bash(veridic:*), Agent, Read
 ---
 
@@ -10,6 +10,12 @@ Arguments: `$ARGUMENTS`.
 
 Any part `veridic parts` lists works: a server part (`orders`) or a group of screens (`guest-app`).
 
+**`--link-only`:** prove rules with the tests the app already has, and write
+none. With no part ids, do every part `veridic parts` lists whose work list has
+link candidates. Steps are the same, except that the plan lists only rules to
+link, each agent is told "link only: steps 1, 2 and 5", and a part whose rules
+have no candidates is skipped.
+
 1. **Plan.** For each part, run `veridic tests --module <id>` and read it: its
    totals, its test recipe, and per rule the status, link candidates and test
    file. If a part has no spec of its own, say so and stop for that part
@@ -18,13 +24,15 @@ Any part `veridic parts` lists works: a server part (`orders`) or a group of scr
    tested from a package that has one, or left untested with that reason.
 2. **Ask.** Show a short plan per part: rules to link (existing tests that
    may already check them), rules to write, riskiest first. Say that only test
-   files change, and that one agent works per part. Wait for a yes, unless
+   files change (with `--link-only`, only test titles), and that one agent
+   works per part. Wait for a yes, unless
    the arguments include `--yes` (an unattended run).
 3. **Write.** For each part, run the `veridic-test-writer` agent with the
    part id, in the foreground, at most four at a time, and wait for every one
-   to finish. A part with only links to make (nothing to write) needs no
-   agent: read the candidates yourself and apply them with one
-   `veridic tests --module <id> --link ID=file:line …`.
+   to finish (with `--link-only`, tell it: link only, steps 1, 2 and 5). A
+   part with only a few links to make (nothing to write) needs no agent: read
+   the candidates yourself, judge them as the agent's step 2 says, and apply
+   them with one `veridic tests --module <id> --link ID=file:line …`.
 4. **Report.** Run `veridic tests --module <id> --run` for each part and show
    the totals line, before and after. List any rule now `broken`: the code
    breaks it today, proven by an expected-failure test. Those are bugs to fix,

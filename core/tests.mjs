@@ -658,3 +658,31 @@ const safeRead = (repo, f) => {
     return "";
   }
 };
+
+/**
+ * Rules no test is named for, whose cited code an existing test already runs: tests that may
+ * prove them once someone checks and links them (`veridic tests --module <id> --link`). Cheap
+ * enough for `init`: each test file's imports are followed once.
+ * @param data  the report's data (`specs[].requirements[]` with status and cites)
+ * @param files the repo's files (relative paths)
+ * @returns { rules, bySpec: { [specPath]: n } }
+ */
+export function linkable(repo, data, files) {
+  const fileSet = new Set(files);
+  const run = new Set();
+  for (const f of files) if (TEST_FILE.test(f) && !f.includes("node_modules/")) for (const g of reach(repo, f, fileSet)) run.add(g);
+  const bySpec = {};
+  let rules = 0;
+  for (const s of data.specs ?? []) {
+    const n = (s.requirements ?? []).filter((r) => r.requirement !== false && r.status === "none" && (r.cites ?? []).some((c) => run.has(c.file))).length;
+    if (n) bySpec[s.path] = n, rules += n;
+  }
+  return { rules, bySpec };
+}
+
+/** linkable()'s per-spec counts, by part (`homes`: spec path -> part id): [[id, n]], most first. Specs in no part are left out. */
+export function linkableParts(bySpec, homes) {
+  const n = new Map();
+  for (const [spec, k] of Object.entries(bySpec)) { const id = homes.get(spec); if (id) n.set(id, (n.get(id) ?? 0) + k); }
+  return [...n].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]));
+}

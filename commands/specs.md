@@ -24,7 +24,9 @@ frontend, its screens grouped by who uses them (`guest-app`, `admin-app`, …). 
 2. **Ask.** Show the plan as a short table (part, kind, why it is where it is,
    files not described yet) and the coverage now ("Covered: N%"). Say that each
    part is one agent writing or extending one spec, that this uses Claude Code
-   usage, and that nothing in the app's code changes. Unless the user named the
+   usage, and that nothing in the app's code changes. Say too that afterwards
+   the tests the app already has are linked to the new rules they really
+   prove: only test titles change, and no new tests are written. Unless the user named the
    parts, ask how many to do now (suggest the first four, or all of them if
    there are four or fewer) and wait for the answer.
 3. **Write, one agent per part,** at most four at a time. Never give two agents
@@ -57,7 +59,13 @@ frontend, its screens grouped by who uses them (`guest-app`, `admin-app`, …). 
    after, and what's left: each part or folder still not described, with the
    reason its agent gave. If parts from step 1 remain and the user agreed to
    all of them, continue with the next four; else stop, and say which are left.
-5. **Report.** Show `veridic modules --md`. Then list the specs a person
+5. **Link the tests you already have.** For each part a spec was written or
+   extended for, run `veridic tests --module <id>`. For the parts with link
+   candidates, run the `veridic-test-writer` agent with the part id and "link
+   only: steps 1, 2 and 5", at most four at a time, in the foreground, and
+   wait for every one. Report rules proven before and after, per part. The
+   yes from step 2 covers this; skip it if the user said not to touch tests.
+6. **Report.** Show `veridic modules --md`. Then list the specs a person
    should read before trusting them: parts that move money, have high issues,
    or handle sign-in and roles. These specs were recovered from the code as it
    is, so someone has to confirm that each MUST is what the app should do.

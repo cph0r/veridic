@@ -1197,3 +1197,26 @@ test("FR-003: a plain tag for an id another spec has counts only if the test run
   fs.rmSync(repo, { recursive: true, force: true });
   assert.equal(r.requirements.find((q) => q.id === "FR-001").status, "none");
 });
+
+test("init: counts untested rules that an existing test already runs the code of (link candidates), per spec", async () => {
+  const { linkable } = await import("../core/tests.mjs");
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "veridic-linkable-"));
+  const files = {
+    "src/pay.js": "export const pay = () => true;\n",
+    "src/list.js": "export const list = () => [];\n",
+    "src/pay.test.js": 'import { pay } from "./pay";\nit("pays", () => { expect(pay()).toBe(true); });\n',
+  };
+  for (const [f, t] of Object.entries(files)) fs.mkdirSync(path.join(repo, path.dirname(f)), { recursive: true }), fs.writeFileSync(path.join(repo, f), t);
+  const r = (id, status, file) => ({ id, requirement: true, status, cites: [{ cite: file + ":1", file }] });
+  const data = { specs: [{ path: "specs/orders/spec.md", requirements: [r("FR-001", "none", "src/pay.js"), r("FR-002", "covered", "src/pay.js"), r("FR-003", "none", "src/list.js"), { ...r("FR-004", "none", "src/pay.js"), requirement: false }] }] };
+  const out = linkable(repo, data, Object.keys(files));
+  fs.rmSync(repo, { recursive: true, force: true });
+  assert.equal(out.rules, 1, "FR-001 only: FR-002 is tested, no test runs list.js, FR-004 is not a rule");
+  assert.deepEqual(out.bySpec, { "specs/orders/spec.md": 1 });
+});
+
+test("init: the parts to offer linking for, most linkable rules first, each once", async () => {
+  const { linkableParts } = await import("../core/tests.mjs");
+  const homes = new Map([["specs/voice/spec.md", "voice"], ["specs/voice-conversation/spec.md", "voice"], ["specs/orders/spec.md", "orders"], ["specs/misc/spec.md", null]]);
+  assert.deepEqual(linkableParts({ "specs/orders/spec.md": 5, "specs/voice/spec.md": 3, "specs/voice-conversation/spec.md": 4, "specs/misc/spec.md": 9 }, homes), [["voice", 7], ["orders", 5]]);
+});

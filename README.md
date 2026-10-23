@@ -40,7 +40,7 @@ veridic init              # builds the code index; checks your routes are found
 veridic init --enforce    # optional: Claude can't finish while Veridic says NOT DONE
 ```
 
-`init` also splits your app into its parts, found from the code: server parts (orders, menu, auth…) with their timers and WebSocket handlers, and your frontend's screens grouped by who uses them (guest, admin…). If they have no specs yet, it offers to start Claude Code on `/veridic:specs`, which writes specs until the whole app is covered, riskiest parts first, and asks before starting.
+`init` also splits your app into its parts, found from the code: server parts (orders, menu, auth…) with their timers and WebSocket handlers, and your frontend's screens grouped by who uses them (guest, admin…). If they have no specs yet, it offers to start Claude Code on `/veridic:specs`, which writes specs until the whole app is covered, riskiest parts first, and asks before starting. Then it links the tests you already have to the rules they really prove, so those rules count as proven without writing a test. If your parts already have specs, `init` counts the rules your existing tests could prove and offers that step on its own (`/veridic:tests --link-only`).
 
 That's all. From now on Claude uses Veridic on its own when it changes, reviews or documents your code.
 

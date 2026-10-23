@@ -4,7 +4,8 @@ description: Turns one module's written rules into tests Veridic counts, followi
 tools: Read, Write, Edit, Glob, Grep, Bash
 ---
 
-You turn one module's rules into tests. You are given a module id.
+You turn one module's rules into tests. You are given a module id, and
+sometimes "link only": then do steps 1, 2 and 5, and write no test.
 
 **Only test files change.** A test file is one the recipe's layout puts tests
 in (`*.test.*`, `*.spec.*`, `__tests__/`, the test folder). Never edit anything
@@ -29,10 +30,19 @@ in the repo root; commands chained with `cd` or `&&` may be refused). Never
    the rules still to do, so you rarely need to open a source file. Read the
    example test it names once. Work riskiest first, as listed.
 2. **Link before you write.** Read the candidate tests (one Read per file).
-   Keep the ones that really check what the rule says, then name them all in
-   **one** command: `veridic tests --module <id> --link FR-007=src/a.test.ts:12,40 INV-2=src/b.test.ts:8`.
-   Veridic puts the id in each title (with `(<module>)` where the id is
-   ambiguous) and changes nothing else. Never edit titles by hand.
+   A candidate only runs the rule's code; link it only if its assertions check
+   what the rule states: the same condition and the same outcome. Calling the
+   same function is not enough: a test that vegetarian mode drops meat dishes
+   does not prove a rule about allergies, and a test of the happy path does
+   not prove "never X". A test may prove several rules, and a rule may have
+   several tests. When unsure, don't link: an unlinked rule gets a new test,
+   while a wrong link reports a rule as proven when it isn't. Then name them
+   all in **one** command: `veridic tests --module <id> --link FR-007=src/a.test.ts:12,40 INV-2=src/b.test.ts:8`.
+   Where two of the part's spec files use the same id, the work list says
+   so; name the file: `FR-007@orders-payment=src/a.test.ts:12`. Veridic puts
+   the id in each title (with the spec's name where the id is shared) and
+   changes nothing else. Never edit titles by hand. A test in a table
+   (`it.each`) can't be linked; say so.
 3. **Write the missing tests** in the file the work list names, in the style of
    the example test, using (never editing) the shared helpers it points to
    (for instance the repo's database mock). One test per rule, or per check (`VC1`…) when the rule

@@ -91,8 +91,10 @@ status, the tests that may already check it, the test file to use, the cited
 code of rules still to do, and the repo's test recipe (framework, run command,
 helpers, an example test). Link the tests that really check a rule in one call:
 `veridic tests --module <id> --link FR-002=src/a.test.ts:12,40 INV-1=…` puts
-the id in each title, nothing else. `/veridic:tests <id>` does the whole job with the
-`veridic-test-writer` agent. A rule the code breaks today gets an
+the id in each title, nothing else (where two of the part's spec files share an
+id, name the file: `FR-002@orders-payment=…`). Link a test only if it checks what
+the rule states, not just runs its code. `/veridic:tests <id>` does the whole job with the
+`veridic-test-writer` agent; `/veridic:tests --link-only` only links existing tests. A rule the code breaks today gets an
 expected-failure test (`it.fails`, `test.failing`): it shows as broken, proven.
 
 ## Implementing a rule: is it done?
