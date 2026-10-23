@@ -7,10 +7,11 @@
 // --module <id> --link ID=file:line[,line] …: name those existing tests for those rules, in one call.
 
 import fs from "node:fs";
-import { testCoverage, traceabilityTable, auditTests } from "../../core/tests.mjs";
+import path from "node:path";
+import { testCoverage, traceabilityTable, auditTests, reviewedSection } from "../../core/tests.mjs";
 import { workList, workListMarkdown } from "../../core/worklist.mjs";
 import { testMutation } from "../../core/testmut.mjs";
-import { linkForModule, linkMarkdown } from "../../core/link.mjs";
+import { linkForModule, linkForSpec, linkMarkdown } from "../../core/link.mjs";
 import { parseArgs, emit, fail, run, writeAll } from "./_cli.mjs";
 
 const usage = "tests.mjs --repo <path> (--module <id> [--run] [--json] [--mutate N] | --module <id> --link ID=file:line[,line] … | --spec <spec.md> [--run] [--table] [--base <dir>] | --audit)";
@@ -23,7 +24,23 @@ run(async () => {
     writeAll(linkMarkdown(r));
     process.exit(r.skipped.length ? 1 : 0);
   }
+  // A spec that isn't a part's: link its tests, then rewrite its traceability.md from what's linked.
+  if (a.link && a.spec && a.repo) {
+    const r = linkForSpec(a.repo, a.spec, a._);
+    const trace = path.join(path.dirname(a.spec), "traceability.md");
+    const cov = testCoverage(a.repo, fs.readFileSync(a.spec, "utf8"), { specPath: a.spec });
+    fs.writeFileSync(trace, traceabilityTable(cov, { reviewed: reviewedSection(fs.existsSync(trace) ? fs.readFileSync(trace, "utf8") : "") }));
+    if (a.json) emit({ repo: a.repo, ...r, traceability: trace }, r.skipped.length ? 1 : 0);
+    writeAll(linkMarkdown(r).replace(/Next: veridic tests --module \S+/, `Next: veridic tests --spec ${a.spec}`));
+    process.exit(r.skipped.length ? 1 : 0);
+  }
+  // --module <id> for a spec folder that isn't a part (specs/server/spec.md): the spec's tests.
+  const specOfFolder = a.module && a.repo && !a.spec ? path.join(a.repo, "specs", a.module, "spec.md") : null;
   if (a.module && a.repo) {
+    const wl = await workList(a.repo, a.module, { run: !!a.run });
+    if (wl.error && specOfFolder && fs.existsSync(specOfFolder)) a.spec = specOfFolder;
+  }
+  if (a.module && a.repo && !a.spec) {
     const wl = await workList(a.repo, a.module, { run: !!a.run });
     // --mutate N: change the cited code of N tested rules; count those whose tests notice.
     if (!wl.error && a.mutate) wl.mutation = testMutation(a.repo, wl.rules, Number(a.mutate));
@@ -40,7 +57,8 @@ run(async () => {
   if (!a.repo || !specPath) fail("need --repo and --spec", usage);
   const r = testCoverage(a.repo, fs.readFileSync(specPath, "utf8"), { specPath, run: !!a.run, bases: a.base ? [a.base] : [] });
   if (a.table) {
-    writeAll(traceabilityTable(r));
+    const trace = path.join(path.dirname(specPath), "traceability.md");
+    writeAll(traceabilityTable(r, { reviewed: reviewedSection(fs.existsSync(trace) ? fs.readFileSync(trace, "utf8") : "") }));
     process.exit((r.summary.failing ?? 0) ? 1 : 0);
   }
   emit({ repo: a.repo, spec: specPath, ...r }, (r.summary.failing ?? 0) + (r.errors?.length ?? 0));

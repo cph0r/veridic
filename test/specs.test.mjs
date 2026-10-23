@@ -100,3 +100,25 @@ test("init: --card is accepted", () => {
   // Parsing stops at the first unknown option: with --card accepted, that's --bogus-flag.
   assert.match(out.stdout + out.stderr, /unknown option --bogus-flag/);
 });
+
+test("tests --spec --link: a spec that isn't a part; traceability rewritten, hand-reviewed rows kept apart", () => {
+  const r = tempRepo({
+    "specs/server/spec.md": "- **FR-001**: a is one [evidence: src/a.mjs:1]\n- **FR-002**: b [evidence: src/a.mjs:2]\n",
+    "specs/other/spec.md": "- **FR-001**: elsewhere [evidence: src/a.mjs:1]\n",
+    "specs/server/traceability.md": "| FR | old |\n|---|---|\n| FR-001 | covered |\n\n## Reviewed by hand\n\n| FR | Why |\n|---|---|\n| FR-002 | checked in staging |\n",
+    "src/a.mjs": "export const a = 1;\nexport const b = 2;\n",
+    "test/a.test.mjs": 'import { test } from "node:test";\nimport assert from "node:assert";\nimport { a } from "../src/a.mjs";\ntest("a is one", () => { assert.equal(a, 1); });\n',
+    "package.json": JSON.stringify({ name: "x", type: "module" }),
+  });
+  const out = spawnSync(process.execPath, [path.resolve("skill/scripts/tests.mjs"), "--repo", r.repo, "--spec", path.join(r.repo, "specs/server/spec.md"), "--link", "FR-001=test/a.test.mjs:4"], { encoding: "utf8" });
+  const t = r.read("test/a.test.mjs"), trace = r.read("specs/server/traceability.md");
+  const run = spawnSync(process.execPath, [path.resolve("skill/scripts/tests.mjs"), "--repo", r.repo, "--module", "server", "--run", "--json"], { encoding: "utf8" });
+  r.done();
+  assert.equal(out.status, 0, out.stdout + out.stderr);
+  assert.match(t, /test\("FR-001 \(server\): a is one"/, "FR-001 is in two specs: written qualified");
+  assert.match(trace, /\| FR-001 \|.*\| covered \|/);
+  assert.match(trace, /## Reviewed by hand\n\n\| FR \| Why \|\n\|---\|---\|\n\| FR-002 \| checked in staging \|/);
+  assert.match(trace, /\*\*Totals:\*\* 2 requirements: 1 covered/);
+  const j = JSON.parse(run.stdout);
+  assert.equal(j.requirements.find((x) => x.id === "FR-001").status, "passing", run.stdout.slice(0, 300));
+});

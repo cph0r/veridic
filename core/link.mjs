@@ -98,6 +98,22 @@ export async function linkForModule(repo, moduleId, args, opts = {}) {
   return { module: moduleId, linked: r.linked, skipped: [...bad, ...r.skipped] };
 }
 
+/**
+ * `ID=file:line[,line…]` arguments for a spec that may be no part's (a spec for code in no
+ * part, `specs/server/spec.md`): written "FR-001 (server)" for an id another spec also has.
+ */
+export function linkForSpec(repo, specPath, args) {
+  const folder = path.basename(path.dirname(path.resolve(specPath)));
+  const links = [], bad = [];
+  for (const a of args) {
+    const m = a.match(/^([A-Z]+-\d+[a-z]?)=(.+):([\d,]+)$/);
+    if (!m) { bad.push({ id: a, at: null, reason: "expected ID=file:line" }); continue; }
+    for (const ln of m[3].split(",").filter(Boolean)) links.push({ id: m[1], at: `${m[2]}:${ln}` });
+  }
+  const r = linkTests(repo, links, { module: folder, qualify: sharedRuleIds(repo) });
+  return { spec: specPath, module: folder, linked: r.linked, skipped: [...bad, ...r.skipped] };
+}
+
 export function linkMarkdown(r) {
   const L = [`Linked ${r.linked.length} test${r.linked.length === 1 ? "" : "s"}`];
   for (const l of r.linked) L.push(`- ${l.id}: \`${l.at}\` ${l.title}`);

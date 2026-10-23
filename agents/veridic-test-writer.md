@@ -38,6 +38,10 @@ in the repo root; commands chained with `cd` or `&&` may be refused). Never
    several tests. When unsure, don't link: an unlinked rule gets a new test,
    while a wrong link reports a rule as proven when it isn't. Then name them
    all in **one** command: `veridic tests --module <id> --link FR-007=src/a.test.ts:12,40 INV-2=src/b.test.ts:8`.
+   For a spec that is no part's (`specs/server/spec.md`), use `veridic tests --spec <spec.md> --link …`:
+   it also rewrites that spec's `traceability.md` from what is linked. Never mark a row covered in
+   `traceability.md` by hand; a rule you checked yourself goes in a `## Reviewed by hand` section
+   at its end (rule, and how you checked it), which Veridic keeps but doesn't count.
    Where two of the part's spec files use the same id, the work list says
    so; name the file: `FR-007@orders-payment=src/a.test.ts:12`. Veridic puts
    the id in each title (with the spec's name where the id is shared) and
