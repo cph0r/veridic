@@ -313,3 +313,20 @@ table.specs { width: 100%; border-collapse: collapse; font-size: 14px; }
 .ptab .rst { color: var(--ink2); font-size: 11.5px; white-space: nowrap; }
 @media (max-width: 600px) { .ptab .c-dots { display: none; } }
 .ring .arc { transition: none; }
+/* The summary, with the view switcher on its right: journeys, promises or parts, one at a time. */
+.product .intro { display: flex; gap: 24px; align-items: flex-start; justify-content: space-between; margin-bottom: 22px; }
+.product .intro .psum { margin: 0; }
+.views { display: inline-flex; flex: none; border: 1px solid var(--line2); border-radius: 3px; overflow: hidden; }
+.views button { font: 12px var(--mono); letter-spacing: .1em; text-transform: uppercase; color: var(--ink2); background: transparent; border: 0; padding: 8px 14px; cursor: pointer; }
+.views button + button { border-left: 1px solid var(--line2); }
+.views button[aria-selected="true"] { color: var(--ink); background: var(--panel-head); }
+.views .n { margin-left: 6px; color: var(--ink2); }
+.ptab .prow.sel > td { background: var(--panel-hover); }
+.pitem-sub { display: flex; gap: 12px; align-items: baseline; margin-top: 6px; }
+.pitem { margin-top: 8px; }
+.pitem .psent { color: var(--ink2); margin: 4px 0 10px; line-height: 1.5; }
+.pitem p.why { margin: 0 0 12px; }
+.pitem .psteps li { padding: 8px 0; border-bottom: 1px solid var(--line); }
+.pitem .rlist { margin-top: 4px; }
+@media (max-width: 700px) { .product .intro { flex-direction: column; } }
+#key[hidden], #specs-sec[hidden], #v-journeys[hidden], #v-promises[hidden] { display: none !important; }

@@ -255,31 +255,52 @@ var veridicModel = (D) => {
   const promiseWord = (g) => (g.state === "proven" ? ["good", "Holds"] : g.state == null ? ["none", "A rule it names is missing"] : [DOT[g.state], cap(WORD[g.state])]);
   // "Versions never change: every version is kept…": a short title, the rest muted.
   const titled = (text) => { const m = String(text).match(/^(.{2,60}?)(?::\s+|\s+[—–]\s+)(.+)$/); return m && m[1].split(/\s+/).length <= 7 ? [m[1], m[2]] : [String(text), ""]; };
-  function productHTML() {
+  // The product spec as three pieces: the one-line summary, the journeys table, the promises
+  // table (rows open the side sheet: productItemHTML).
+  function productParts() {
     const pr = D.product;
-    if (!pr || (!pr.journeys.length && !pr.guarantees.length)) return "";
-    // Two tables in the parts table's style; a row opens a detail row under it.
+    if (!pr || (!pr.journeys.length && !pr.guarantees.length)) return null;
     const table = (head, body) => '<div class="tablewrap ptw"><table class="specs ptab"><thead><tr>' + head + "</tr></thead><tbody>" + body + "</tbody></table></div>";
-    const row = (id, cells, detail) => '<tr class="prow" data-pt="' + esc(id) + '" tabindex="0" aria-expanded="false">' + cells + '</tr><tr class="pdetail" hidden><td colspan="4">' + detail + "</td></tr>";
-    const ruleList = (refs) => rulesHTML(refs).replace(/^<details class="rl"><summary>Rules \(\d+\)<\/summary>/, '<div class="rlist">').replace(/<\/details>$/, "</div>");
+    const row = (id, cells) => '<tr class="prow" data-pt="' + esc(id) + '" tabindex="0">' + cells + "</tr>";
     const journeys = pr.journeys.map((j) => {
       const [tone, word] = journeyWord(j);
-      const steps = "<ol>" + j.steps.map((st) => { const w = st.state === "proven" ? "" : why(st.refs); return "<li>" + dot(st.state) + '<div class="stx"><span>' + esc(st.text) + "</span>" + (w ? '<span class="why">' + esc(w) + "</span>" : "") + rulesHTML(st.refs) + "</div></li>"; }).join("") + "</ol>";
-      return row(j.id, '<td><span class="ptl">' + esc(j.title) + '</span></td><td class="c-dots"><span class="dots">' + j.steps.map((st) => dot(st.state)).join("") + '</span></td><td><span class="pst ' + tone + '">' + esc(word) + '</span></td><td class="c-id"><span class="pid">' + esc(j.id) + "</span></td>", steps);
+      return row(j.id, '<td><span class="ptl">' + esc(j.title) + '</span></td><td class="c-dots"><span class="dots">' + j.steps.map((st) => dot(st.state)).join("") + '</span></td><td><span class="pst ' + tone + '">' + esc(word) + '</span></td><td class="c-id"><span class="pid">' + esc(j.id) + "</span></td>");
     }).join("");
     const promise = (g) => {
       const [tone, word] = promiseWord(g), [t, rest] = titled(g.text), w = g.state === "proven" ? "" : why(g.refs);
-      return row(g.id, '<td><span class="ptl">' + esc(t) + "</span>" + (rest ? '<span class="pmu">' + esc(rest) + "</span>" : "") + (w ? '<span class="why">' + esc(w) + "</span>" : "") + '</td><td><span class="pst ' + tone + '">' + esc(word) + '</span></td><td class="num">' + g.refs.length + ' ›</td><td class="c-id"><span class="pid">' + esc(g.id) + "</span></td>", ruleList(g.refs));
+      return row(g.id, '<td><span class="ptl">' + esc(t) + "</span>" + (rest ? '<span class="pmu">' + esc(rest) + "</span>" : "") + (w ? '<span class="why">' + esc(w) + "</span>" : "") + '</td><td><span class="pst ' + tone + '">' + esc(word) + '</span></td><td class="num">' + g.refs.length + ' ›</td><td class="c-id"><span class="pid">' + esc(g.id) + "</span></td>");
     };
     const look = pr.guarantees.filter((g) => g.state !== "proven"), hold = pr.guarantees.filter((g) => g.state === "proven");
     const grp = (label) => '<tr class="pgrp"><td colspan="4">' + label + "</td></tr>";
     const promises = (look.length ? grp("Needs a look") + look.map(promise).join("") : "") + (hold.length ? grp("Holds") + hold.map(promise).join("") : "");
-    return (pr.summary ? '<p class="psum">' + esc(pr.summary) + "</p>" : "") +
-      (journeys ? table('<th class="text">Journeys</th><th class="text c-dots">Steps</th><th class="text">Status</th><th class="c-id"></th>', journeys) : "") +
-      (promises ? table('<th class="text">Promises</th><th class="text">Status</th><th class="num">Rules</th><th class="c-id"></th>', promises) : "");
+    return {
+      summary: pr.summary || "",
+      journeys: journeys ? table('<th class="text">Journeys</th><th class="text c-dots">Steps</th><th class="text">Status</th><th class="c-id"></th>', journeys) : "",
+      promises: promises ? table('<th class="text">Promises</th><th class="text">Status</th><th class="num">Rules</th><th class="c-id"></th>', promises) : "",
+      counts: { journeys: pr.journeys.length, promises: pr.guarantees.length },
+    };
+  }
+  function productHTML() {
+    const pp = productParts();
+    return pp ? (pp.summary ? '<p class="psum">' + esc(pp.summary) + "</p>" : "") + pp.journeys + pp.promises : "";
+  }
+  // A journey or promise in the side sheet: its steps (or its sentence), why what isn't proven
+  // isn't, and every rule it names, each opening that rule in its part.
+  function productItemHTML(id) {
+    const pr = D.product;
+    const j = pr && pr.journeys.find((x) => x.id === id), g = !j && pr && pr.guarantees.find((x) => x.id === id);
+    if (!j && !g) return "";
+    const [tone, word] = j ? journeyWord(j) : promiseWord(g);
+    const [t, rest] = j ? [j.title, ""] : titled(g.text);
+    const head = '<div class="part-head"><div><h3' + (t.length > 40 ? ' class="long"' : "") + ">" + esc(t) + '</h3><div class="pitem-sub"><span class="pst ' + tone + '">' + esc(word) + '</span><span class="pid">' + esc(id) + '</span></div></div><button class="close" aria-label="Close">✕</button></div>';
+    const list = (refs) => rulesHTML(refs).replace(/^<details class="rl"><summary>Rules \(\d+\)<\/summary>/, '<div class="rlist">').replace(/<\/details>$/, "</div>");
+    let body;
+    if (j) body = '<div class="sub-h">' + plural(j.steps.length, "step") + '</div><ol class="psteps">' + j.steps.map((st) => { const w = st.state === "proven" ? "" : why(st.refs); return "<li>" + dot(st.state) + '<div class="stx"><span>' + esc(st.text) + "</span>" + (w ? '<span class="why">' + esc(w) + "</span>" : "") + list(st.refs) + "</div></li>"; }).join("") + "</ol>";
+    else { const w = g.state === "proven" ? "" : why(g.refs); body = (rest ? '<p class="psent">' + esc(rest) + "</p>" : "") + (w ? '<p class="why">' + esc(w) + "</p>" : "") + '<div class="sub-h">' + plural(g.refs.length, "rule") + " that make it true</div>" + list(g.refs); }
+    return head + '<div class="ptab pitem">' + body + "</div>";
   }
 
-  return { productHTML, storiesOf, rulesInNoStory, partRules, ruleCounts, rows, page, parts, partOf, P, ruleHome, cleanView, specs, S, counts, fix, later, verdict, title: app.title || D.name, stateOf, statusOf, ruleText, RANK, plural, esc, cap, REQ };
+  return { productHTML, productParts, productItemHTML, storiesOf, rulesInNoStory, partRules, ruleCounts, rows, page, parts, partOf, P, ruleHome, cleanView, specs, S, counts, fix, later, verdict, title: app.title || D.name, stateOf, statusOf, ruleText, RANK, plural, esc, cap, REQ };
 };
 
 (() => {
@@ -300,20 +321,41 @@ var veridicModel = (D) => {
   // ---- the shell ----
   $("#app").innerHTML = `<div class="wrap">
   <section class="hero"><div class="rv"><h1 class="verdict" id="appname"></h1></div><div class="rings rv" id="rings" style="animation-delay:.12s"></div></section>
-  <section id="product" class="product rv" hidden></section>
+  <section id="product" class="product rv" hidden><div class="intro"><p class="psum" id="psum"></p><div class="views" role="tablist" aria-label="Show"><button role="tab" data-view="journeys">Journeys<span class="n" id="n-journeys"></span></button><button role="tab" data-view="promises">Promises<span class="n" id="n-promises"></span></button><button role="tab" data-view="parts">Parts<span class="n" id="n-parts"></span></button></div></div><div id="v-journeys"></div><div id="v-promises"></div></section>
   <section id="specs-sec"><h2 class="sr">Your app</h2>
   <div class="tools rv" style="animation-delay:.22s"><input id="q" type="search" placeholder="Search parts and specs" aria-label="Search parts and specs"><label class="pick"><span>Show</span><select id="filters" aria-label="Show"></select></label></div>
   <div class="tablewrap rv" style="animation-delay:.25s"><table class="specs"><thead><tr id="thead"></tr></thead><tbody id="tbody"></tbody></table><div class="noresults" id="noresults" hidden>No part matches.</div></div><div class="pager" id="pager"></div></section>
-  <div class="key rv" aria-label="Key"><span class="key-h">Key</span><span><i class="sw good"></i>Proven by a test</span><span><i class="sw bad"></i>Broken</span><span><i class="sw warn"></i>Out of date</span><span><i class="sw weak"></i>Weak test</span><span><i class="sw none"></i>Not tested</span><span><b class="rev">Δ</b>Changed in the code since written</span></div>
+  <div class="key rv" id="key" aria-label="Key"><span class="key-h">Key</span><span><i class="sw good"></i>Proven by a test</span><span><i class="sw bad"></i>Broken</span><span><i class="sw warn"></i>Out of date</span><span><i class="sw weak"></i>Weak test</span><span><i class="sw none"></i>Not tested</span><span><b class="rev">Δ</b>Changed in the code since written</span></div>
   <footer class="foot" id="foot"></footer>
 </div>
 <div class="scrim" id="scrim"></div>
 <aside class="sheet" id="panel" aria-label="Spec"><div class="grab"></div><div class="part" id="part"></div></aside>
 <div class="confetti" id="confetti"></div>`;
 
-  // ---- the product spec, when there is one ----
-  const productBody = M.productHTML();
-  if (productBody) { $("#product").innerHTML = productBody; $("#product").hidden = false; }
+  // ---- the product spec, when there is one: its summary, and one of journeys, promises and
+  // parts at a time (the switcher on the summary's right; the choice is remembered) ----
+  const pp = M.productParts();
+  const setView = (v) => {
+    if (!pp) return;
+    if (!["journeys", "promises", "parts"].includes(v) || (v !== "parts" && !pp[v])) v = pp.journeys ? "journeys" : pp.promises ? "promises" : "parts";
+    document.querySelectorAll("[data-view]").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.view === v)));
+    $("#v-journeys").hidden = v !== "journeys";
+    $("#v-promises").hidden = v !== "promises";
+    $("#specs-sec").hidden = v !== "parts";
+    $("#key").hidden = v !== "parts";
+    store.set("view:" + D.name, v);
+  };
+  if (pp) {
+    $("#psum").textContent = pp.summary;
+    $("#v-journeys").innerHTML = pp.journeys;
+    $("#v-promises").innerHTML = pp.promises;
+    $("#n-journeys").textContent = pp.counts.journeys;
+    $("#n-promises").textContent = pp.counts.promises;
+    $("#n-parts").textContent = M.parts.length;
+    document.querySelectorAll('[data-view="journeys"]').forEach((b) => (b.hidden = !pp.journeys));
+    document.querySelectorAll('[data-view="promises"]').forEach((b) => (b.hidden = !pp.promises));
+    $("#product").hidden = false;
+  }
 
   // ---- hero: the app's name and the gauges ----
   $("#appname").textContent = M.title;
@@ -474,6 +516,20 @@ var veridicModel = (D) => {
     try { history.replaceState(null, "", "#" + encodeURIComponent(id)); } catch {}
     if (rule) showRule(rule, inSpec);
   }
+  // A journey or promise, in the same side sheet a part opens in.
+  function openItem(id) {
+    const html = M.productItemHTML(id); if (!html) return;
+    const panel = $("#panel");
+    if (open === "pt:" + id && panel.classList.contains("open")) { closeSpec(); return; }
+    document.querySelectorAll("#tbody tr.sel").forEach((c) => c.classList.remove("sel"));
+    document.querySelectorAll(".prow").forEach((c) => c.classList.toggle("sel", c.dataset.pt === id));
+    open = "pt:" + id;
+    $("#part").innerHTML = html;
+    panel.scrollTop = 0;
+    panel.classList.add("open");
+    document.body.classList.add("sheet-open");
+    try { history.replaceState(null, "", "#" + encodeURIComponent(id)); } catch {}
+  }
   // A spec path (from a card or an old link) opens the part it belongs to.
   const openSpec = (path, rule) => openPart(M.ruleHome(rule, path).part, rule, path, true);
   // open a rule in the Rules tab: show every rule, open it, bring it into view
@@ -488,7 +544,7 @@ var veridicModel = (D) => {
     open = null;
     $("#panel").classList.remove("open");
     document.body.classList.remove("sheet-open");
-    document.querySelectorAll("#tbody tr.sel").forEach((c) => c.classList.remove("sel"));
+    document.querySelectorAll("#tbody tr.sel, .prow.sel").forEach((c) => c.classList.remove("sel"));
     try { history.replaceState(null, "", location.pathname + location.search); } catch {}
   }
   document.addEventListener("keydown", (ev) => {
@@ -512,8 +568,10 @@ var veridicModel = (D) => {
     if (fi) { view.filter = fi.dataset.filter; view.page = 1; drawTable(); return; }
     const tb = t.closest("[data-tab]");
     if (tb) { setTab(tb.dataset.tab, tb.dataset.rstate); return; }
+    const vw = t.closest("[data-view]");
+    if (vw) { setView(vw.dataset.view); return; }
     const pt = t.closest("[data-pt]");
-    if (pt && !t.closest("button")) { const open = pt.getAttribute("aria-expanded") !== "true"; pt.setAttribute("aria-expanded", String(open)); pt.nextElementSibling.hidden = !open; return; }
+    if (pt) { openItem(pt.dataset.pt); return; }
     const ref = t.closest("[data-ref]");
     if (ref) { ev.stopPropagation(); showRule(ref.dataset.ref, ref.dataset.in); return; }
     const pr = t.closest("[data-part]");
@@ -540,5 +598,6 @@ var veridicModel = (D) => {
     c.innerHTML = [...Array(60)].map(() => '<i style="left:' + Math.random() * 100 + "vw;background:" + cl[(Math.random() * cl.length) | 0] + ";animation-delay:" + Math.random() * 0.8 + "s;transform:rotate(" + Math.random() * 360 + 'deg)"></i>').join("");
     setTimeout(() => (c.innerHTML = ""), 4000);
   }
-  if (location.hash.length > 1) { const h = decodeURIComponent(location.hash.slice(1)); if (M.P.has(h)) openPart(h); else openSpec(h); }
+  if (pp) setView(store.get("view:" + D.name));
+  if (location.hash.length > 1) { const h = decodeURIComponent(location.hash.slice(1)); if (M.P.has(h)) openPart(h); else if (M.productItemHTML(h)) { setView(h.startsWith("J") ? "journeys" : "promises"); openItem(h); } else openSpec(h); }
 })();
