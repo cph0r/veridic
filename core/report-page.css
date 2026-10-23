@@ -68,7 +68,9 @@ a { color: inherit; }
 .ring .num { position: relative; margin-top: -63px; height: 53px; font-size: 20px; font-weight: 600; letter-spacing: -.02em; }
 .ring .lbl { font-size: 13px; font-weight: 600; }
 /* a gauge's description: a bubble under it, on hover or focus */
+.hero { position: relative; z-index: 3; } /* the gauge bubbles sit above the table and its tools */
 .ring { position: relative; outline: none; }
+.ring:hover, .ring:focus-visible { z-index: 1; }
 .ring .sub { position: absolute; z-index: 5; top: calc(100% + 8px); left: 50%; width: 210px; transform: translate(-50%, -4px); background: var(--ink); color: var(--card); font-size: 12.5px; line-height: 1.4; padding: 9px 12px; border-radius: 10px; box-shadow: var(--shadow); opacity: 0; pointer-events: none; transition: opacity .15s, transform .15s; }
 .ring .sub::before { content: ""; position: absolute; top: -5px; left: 50%; margin-left: -5px; border: 5px solid transparent; border-top: 0; border-bottom-color: var(--ink); }
 .ring:hover .sub, .ring:focus-visible .sub { opacity: 1; transform: translate(-50%, 0); }
