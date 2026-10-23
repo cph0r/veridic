@@ -21,6 +21,15 @@ const EFFECTS = [
 ];
 const COMMENT = /^\s*(?:\/\/|\*|\/\*)/;
 
+// A query builder's delete (`supabase.from("posts").delete().eq(…)`): only in a chain that
+// starts at `.from(`, which may sit on an earlier line of the same statement.
+const CHAIN_DELETE = /\.delete\s*\(\s*(?:\{[^}]*\}\s*)?\)/;
+function inFromChain(lines, n) {
+  let chain = lines[n - 1].slice(0, lines[n - 1].search(CHAIN_DELETE));
+  for (let i = n - 1; i > 0 && i > n - 8 && /^\s*\./.test(lines[i]) ; i--) chain = `${lines[i - 1]}\n${chain}`;
+  return /\.from\s*\(/.test(chain);
+}
+
 /** Effects found along a route's call tree, each with where it happens and how far from the handler. */
 export function routeEffects(g, route) {
   const found = [];
@@ -30,8 +39,9 @@ export function routeEffects(g, route) {
     for (let n = r.start; n <= Math.min(r.end, lines.length); n++) {
       const line = lines[n - 1];
       if (!line || COMMENT.test(line)) continue;
+      const chainDelete = CHAIN_DELETE.test(line) && inFromChain(lines, n);
       for (const [kind, re] of EFFECTS) {
-        if (!re.test(line)) continue;
+        if (!re.test(line) && !(kind === "destructive" && chainDelete)) continue;
         const key = `${kind}@${r.file}:${n}`;
         if (seen.has(key)) continue;
         seen.add(key);

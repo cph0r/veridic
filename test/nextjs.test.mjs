@@ -510,3 +510,31 @@ test("next: a wrapper that looks up the caller's membership of the URL's id scop
   assert.deepEqual(m["ALL /api/teams/:teamId/brands"].flags, []);
   assert.deepEqual(m["PATCH /api/teams/:teamId"].flags, ["id-param-without-caller-scope"]);
 });
+
+test("effects: Supabase writes and deletes", async () => {
+  const { routeEffects } = await import("../core/effects.mjs");
+  const src = [
+    "export async function POST(req) {",
+    '  await supabase.from("posts").insert({ title });', // 2
+    "  await supabase",
+    '    .from("posts")',
+    "    .update({ title })", // 5
+    '    .eq("id", id);',
+    '  await supabase.from("tags").upsert([{ name }]);', // 7
+    '  await supabase.from("posts").delete().eq("id", id);', // 8
+    '  const { data } = await supabase.from("posts").select("*");',
+    "  const copy = list.insert([x]);", // no .from(: not Supabase
+    "  map.delete(key);", // nor this
+    "  await supabase",
+    '    .from("posts")',
+    "    .delete()", // 14
+    '    .eq("id", id);',
+    "}",
+  ].join("\n");
+  const { g, done } = fakeRepo({ "app/api/posts/route.ts": src });
+  const found = routeEffects(g, { id: "POST /api/posts", file: "app/api/posts/route.ts", start: 1, end: 16 });
+  done();
+  const at = (kind) => found.filter((e) => e.kind === kind).map((e) => Number(e.at.split(":").pop()));
+  assert.deepEqual(at("write"), [2, 5, 7]);
+  assert.deepEqual(at("destructive"), [8, 14]);
+});
