@@ -1440,3 +1440,51 @@ test("contract: statuses thrown from helpers, through a callback and an error su
   done();
   assert.deepEqual(st, [403, 404]);
 });
+
+test("routes: a path given as a constant, an array, or a mapped imported array", () => {
+  const { g, done } = fakeRepo({
+    "src/app.ts": 'import express from "express";\nimport router from "./routes";\nconst app = express();\napp.use("/api", router);\napp.listen(3000);\n',
+    "src/rules.ts": 'export const MCP_PATHS = ["/api/apps/mcp", "/api/build/mcp"] as const;\nexport const HEALTH = "/healthz";\n',
+    "src/routes.ts": [
+      'import { Router } from "express";',
+      'import { MCP_PATHS, HEALTH } from "./rules";',
+      "const router = Router();",
+      'const ROUTES = MCP_PATHS.map((p) => p.replace(/^\\/api/, ""));',
+      "router.post(ROUTES, async (req, res) => { res.json({}); });",
+      "router.get(HEALTH, (req, res) => res.json({ ok: true }));",
+      "export default router;",
+    ].join("\n"),
+  });
+  const got = ids(g);
+  done();
+  assert.ok(got.includes("POST /api/apps/mcp") && got.includes("POST /api/build/mcp"), got.join(", "));
+  assert.ok(got.includes("GET /api/healthz"), got.join(", "));
+});
+
+test("routes: middleware that serves apps by the Host header is a route", () => {
+  const { g, done } = fakeRepo({
+    "src/app.ts": 'import express from "express";\nimport { appsHostHandler } from "./apps-host/host.routes";\nconst app = express();\napp.use(appsHostHandler);\napp.get("/api/me", (req, res) => res.json({}));\napp.listen(3000);\n',
+    "src/apps-host/host.routes.ts": 'export const appsHostHandler = (req, res, next) => {\n  const name = req.hostname.split(".")[0];\n  if (!name) return next();\n  res.send(pageFor(name));\n};\n',
+  });
+  const r = routeInventory(g).routes.find((x) => x.file === "src/apps-host/host.routes.ts");
+  done();
+  assert.equal(r?.id, "ALL /*");
+  assert.equal(r?.host, true);
+});
+
+test("modules: a part whose name another part has is named after its folder", async () => {
+  const { findModules } = await import("../core/modules.mjs");
+  const r = (method, p, file, line) => ({ id: `${method} ${p}`, method, path: p, file, start: line, end: line });
+  const routes = [
+    ...["code", "verify", "logout", "me", "google", "callback"].map((w, i) => r("POST", `/api/auth/${w}`, "src/modules/auth/auth.routes.ts", i + 1)),
+    r("GET", "/api/oauth/requests/:id", "src/modules/oauth/oauth.routes.ts", 4),
+    r("POST", "/api/oauth/requests/:id/approve", "src/modules/oauth/oauth.routes.ts", 1), r("GET", "/api/oauth/requests", "src/modules/oauth/oauth.routes.ts", 2), r("POST", "/api/oauth/requests/:id/deny", "src/modules/oauth/oauth.routes.ts", 3),
+  ];
+  const files = Object.fromEntries([...new Set(routes.map((x) => x.file))].map((f) => [f, "x\n".repeat(40)]));
+  const { g, done } = fakeRepo(files);
+  const ms = findModules(g, { routes });
+  done();
+  const names = ms.map((m) => [m.id, m.name]).sort();
+  assert.ok(!names.some(([id]) => /-2$/.test(id)), JSON.stringify(names));
+  assert.ok(names.some(([id, name]) => id === "oauth" && name === "Oauth"), JSON.stringify(names));
+});

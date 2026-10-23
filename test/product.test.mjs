@@ -89,3 +89,8 @@ test("report: the product spec's journeys and guarantees carry the states of the
   const s = ps(pp("## Guarantees\n\n- **G-001**: x [rules: apps:FR-001]\n"), () => "proven");
   assert.equal(s.guarantees[0].state, "proven");
 });
+
+test("parts: a spec in a folder named after a part's old id stays with that part", () => {
+  const data = { modules: [{ id: "auth", files: [] }, { id: "oauth", was: "auth-2", files: [] }], specs: [{ path: "specs/auth-2/spec.md", requirements: [] }] };
+  assert.equal(specHomes(data).get("specs/auth-2/spec.md"), "oauth");
+});

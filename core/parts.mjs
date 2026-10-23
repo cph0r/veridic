@@ -9,7 +9,7 @@ const rulesOf = (s) => (s.requirements ?? []).filter((r) => r.requirement !== fa
 /** spec path -> part id, or null when the spec belongs to no part. */
 export function specHomes(data) {
   const parts = [
-    ...(data.modules ?? []).map((m) => ({ id: m.id, files: new Set([...(m.files ?? []), ...(m.code ?? [])]) })),
+    ...(data.modules ?? []).map((m) => ({ id: m.id, was: m.was ?? null, files: new Set([...(m.files ?? []), ...(m.code ?? [])]) })),
     ...(data.screens ?? []).map((g) => ({ id: g.id, files: new Set(g.files ?? []) })),
   ];
   const homes = new Map();
@@ -20,7 +20,8 @@ export function specHomes(data) {
     let best = null;
     for (const p of parts) { const n = cited.filter((f) => p.files.has(f)).length; if (n && (!best || n > best[1])) best = [p.id, n]; }
     const dir = String(s.path).split("/").slice(-2)[0];
-    const exact = parts.find((p) => dir === p.id);
+    // Named after the part, or after the id it had before a rename (auth-2 -> oauth).
+    const exact = parts.find((p) => dir === p.id) ?? parts.find((p) => p.was && dir === p.was);
     const prefix = parts.filter((p) => dir.startsWith(p.id + "-")).sort((a, b) => b.id.length - a.id.length)[0];
     homes.set(s.path, exact ? exact.id : best ? best[0] : prefix ? prefix.id : null);
   }

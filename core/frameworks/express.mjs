@@ -20,6 +20,33 @@ const routePathOf = (raw) => {
 const METHODS = new Set(["get", "post", "put", "patch", "delete", "head", "options", "all"]);
 
 function expressRoutes(g, { entry } = {}) {
+  // A relative import's file, among the files the index knows.
+  const resolveRel = (from, spec) => {
+    if (!spec.startsWith(".")) return null;
+    const base = path.posix.normalize(path.posix.join(path.posix.dirname(from), spec)).replace(/\.[cm]?js$/, "");
+    return [base, ...[".ts", ".tsx", ".js", ".mjs", ".cjs", "/index.ts", "/index.js"].map((e) => base + e)].find((x) => g.text(x) != null) ?? null;
+  };
+  // The paths a constant holds: "…", ["…", "…"] (as const), or OTHER.map((p) => p.replace(/re/, "s")),
+  // in this file or imported from another.
+  const constPaths = (file, name, depth = 0) => {
+    if (depth > 3) return null;
+    const src = g.text(file) ?? "";
+    const m = src.match(new RegExp(`\\b(?:export\\s+)?const\\s+${name.replace(/\$/g, "\\$")}\\s*(?::[^=]+)?=\\s*([^;\\n]+)`));
+    if (!m) {
+      const im = [...src.matchAll(/import\s*\{([^}]*)\}\s*from\s*["']([^"']+)["']/g)].find((x) => x[1].split(",").some((p) => p.trim().split(/\s+as\s+/).pop() === name));
+      const target = im && resolveRel(file, im[2]);
+      if (!target) return null;
+      const local = im[1].split(",").map((p) => p.trim().split(/\s+as\s+/)).find((p) => (p[1] ?? p[0]) === name)?.[0] ?? name;
+      return constPaths(target, local, depth + 1);
+    }
+    const v = m[1].trim().replace(/\s+as\s+const\s*$/, "").replace(/;$/, "");
+    const one = stringValue(v);
+    if (one != null) return [one];
+    if (/^\[[\s\S]*\]$/.test(v)) { const xs = [...v.matchAll(/["'`]([^"'`]*)["'`]/g)].map((x) => x[1]); return xs.length ? xs : null; }
+    const mm = v.match(/^([\w$]+)\.map\(\s*\(?\s*(\w+)\s*\)?\s*=>\s*\2\.replace\(\s*\/((?:\\\/|[^/])+)\/(\w*)\s*,\s*["'`]([^"'`]*)["'`]\s*\)\s*\)$/);
+    if (mm) return constPaths(file, mm[1], depth + 1)?.map((p) => p.replace(new RegExp(mm[3], mm[4]), mm[5])) ?? null;
+    return null;
+  };
   const exists = (rel) => fs.existsSync(path.join(g.repo, rel)) && fs.statSync(path.join(g.repo, rel)).isFile();
   const withExt = (base) => {
     base = base.replace(/\.[cm]?js$/, "");
@@ -412,17 +439,24 @@ function expressRoutes(g, { entry } = {}) {
       ch.calls.forEach((c, i) => {
         if (c.name === "route") return void (routePath = routePathOf(c.args[0]?.raw ?? ""));
         if (!METHODS.has(c.name)) return;
-        const p = routePathOf(c.args[0]?.raw ?? "") ?? routePath;
-        if (!p || !/^[/*]|^:[\w$]+\//.test(p)) return; // `app.get("env")` reads a setting; `${base}/x` is a path
-        const name = `${c.name.toUpperCase()} ${p}`;
-        if (known.has(`${f}|${name}`)) return;
-        known.add(`${f}|${name}`);
-        const start = i === 0 ? ch.line : c.line;
-        // A chain can put several methods on one line (`.post(add).get(list)`): keep
-        // this call's own arguments, so its handlers aren't confused with its neighbours'.
-        const n = { id: `veridic:route:${f}:${start}:${name}`, kind: "route", name, file: f, start, end: c.endLine, receiver: ch.root, extent: [start, c.endLine], handlerText: c.args.map((x) => x.raw).join(", ") };
-        routeNodes.push(n);
-        g.nodes.set(n.id, n);
+        const raw = (c.args[0]?.raw ?? "").trim();
+        // A path held in a constant: a string, an array (`router.post(ROUTES, …)`), maybe imported.
+        const paths = [routePathOf(raw) ?? routePath ?? null];
+        if (!paths[0] && /^[A-Za-z_$][\w$]*$/.test(raw)) paths.splice(0, 1, ...(constPaths(f, raw) ?? [null]));
+        for (const p of paths) {
+          if (!p || !/^[/*]|^:[\w$]+\//.test(p)) continue; // `app.get("env")` reads a setting; `${base}/x` is a path
+          const name = `${c.name.toUpperCase()} ${p}`;
+          if (known.has(`${f}|${name}`)) continue;
+          known.add(`${f}|${name}`);
+          const start = i === 0 ? ch.line : c.line;
+          // A chain can put several methods on one line (`.post(add).get(list)`): keep
+          // this call's own arguments, so its handlers aren't confused with its neighbours'.
+          const args = c.args.map((x) => x.raw);
+          if (paths.length && !routePathOf(raw) && args.length) args[0] = JSON.stringify(p); // a path constant isn't middleware
+          const n = { id: `veridic:route:${f}:${start}:${name}`, kind: "route", name, file: f, start, end: c.endLine, receiver: ch.root, extent: [start, c.endLine], handlerText: args.join(", ") };
+          routeNodes.push(n);
+          g.nodes.set(n.id, n);
+        }
       });
     }
   }
@@ -539,6 +573,30 @@ function expressRoutes(g, { entry } = {}) {
       guards: dedupe(guards, (x) => x.name),
       ...(n.handlerText ? { handlerText: n.handlerText } : {}),
     });
+  }
+  // Middleware the app uses that serves its own pages by the Host header (apps on their own
+  // subdomains): `app.use(appsHostHandler)`, where the handler reads req.hostname and answers.
+  for (const f of sourceFiles) {
+    if (!/\.[cm]?[jt]s$/.test(f) || f.includes("node_modules/") || /\.(test|spec)\./.test(f)) continue;
+    const src = g.text(f) ?? "";
+    for (const v of appVars(f))
+      for (const u of src.matchAll(new RegExp(`\\b${v}\\.use\\(\\s*([A-Za-z_$][\\w$]*)\\s*\\)`, "g"))) {
+        const name = u[1];
+        const im = [...src.matchAll(/import\s*\{([^}]*)\}\s*from\s*["']([^"']+)["']/g)].find((x) => x[1].split(",").some((p) => p.trim().split(/\s+as\s+/).pop() === name));
+        const file = im ? resolveRel(f, im[2]) : f;
+        const text = file && g.text(file);
+        if (!text) continue;
+        // Only a function: `const h = (req, res, next) => …` or `function h(req, res, next)`, not a Router.
+        const d = new RegExp(`\\bfunction\\s+${name}\\s*\\(|\\b(?:const|let|var)\\s+${name}\\s*(?::[^=]+)?=\\s*(?:async\\s*)?(?:function\\b|\\([^)]*\\)\\s*=>|[\\w$]+\\s*=>)`).exec(text);
+        if (!d) continue;
+        const open = text.indexOf("{", d.index);
+        let depth = 0, i = open;
+        for (; i < text.length; i++) { if (text[i] === "{") depth++; else if (text[i] === "}" && --depth === 0) break; }
+        const body = text.slice(d.index, i + 1);
+        if (!/\breq\.(?:hostname|subdomains)\b|\breq\.headers\.host\b|headers\[\s*["']host["']\s*\]/.test(body) || !/\bres\.(?:send|end|json|sendFile|redirect|status|write|setHeader)\s*\(|\b[\w$]+\(\s*res\s*,/.test(body)) continue;
+        const line = (k) => text.slice(0, k).split("\n").length;
+        routes.push({ id: "ALL /*", method: "ALL", path: "/*", file, start: line(d.index), end: line(i), guards: [], host: true });
+      }
   }
   // A helper mounted twice at one prefix gives the same route twice: keep one.
   const once = new Set();

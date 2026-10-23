@@ -23,6 +23,7 @@ import { sides } from "./layout.mjs";
 const AUTH = new Set("auth authentication login logout signin signup register session oauth sso token password passport".split(" "));
 const TECH = new Set("callback webhook event status log request response handler util helper hook middleware".split(" "));
 const GENERIC = new Set("endpoint endpoints server rest ws src routes route controllers controller api app lib index public admin owner internal private crud helpers utils service services module modules artifacts config handlers handler".split(" "));
+const WORDS_GENERIC = GENERIC; // the module-level set (findModules shadows GENERIC further down)
 const SCOPE = /^(?:api|v\d+|rest|public|admin|owner|internal|private)$/;
 const TEST = /(^|\/)(__tests__|tests?|e2e)\/|\.(test|spec)\.[cm]?[jt]sx?$/;
 
@@ -156,7 +157,18 @@ export function findModules(g, inv) {
     let id = slug(m.name);
     const n = (seen.get(id) ?? 0) + 1;
     seen.set(id, n);
-    if (n > 1) (id = `${id}-${n}`), (m.name = `${m.name} ${n}`);
+    if (n > 1) {
+      // Two parts with one name: the later is named after the folder its routes live in (oauth,
+      // not "Auth 2"), else the folder's path; `was` keeps the old id so its spec stays attached.
+      const dirs = new Map();
+      for (const r of m.routes) { const parts = String(r.file ?? "").split("/").slice(0, -1).filter((x) => !WORDS_GENERIC.has(x)); const k = parts.slice(-2).join("/"); if (k) dirs.set(k, (dirs.get(k) ?? 0) + 1); }
+      const dir = [...dirs].sort((a, b) => b[1] - a[1])[0]?.[0] ?? "";
+      const old = `${id}-${n}`;
+      const leaf = dir.split("/").pop(), pathId = slug(dir.replace(/\//g, "-"));
+      const pick = [[slug(leaf ?? ""), leaf], [pathId, dir.replace(/\//g, " ")]].find(([x]) => x && !seen.has(x));
+      if (pick) { (id = pick[0]), (m.name = title(pick[1])), seen.set(id, 1), (m.was = old); }
+      else (id = old), (m.name = `${m.name} ${n}`);
+    }
     m.id = id;
   }
 
@@ -237,5 +249,5 @@ export function findModules(g, inv) {
   }
   out.push(...fresh.values());
   for (const m of out) m.usedBy = out.filter((x) => x.uses.some((u) => u.module === m.id)).map((x) => ({ module: x.id, via: x.uses.find((u) => u.module === m.id).via }));
-  return out.map((m) => ({ id: m.id, name: m.name, pinned: m.pinned, routes: m.routes.map((r) => r.id), entries: m.entries, files: m.files, code: [...new Set(m.code)].sort(), shared: m.shared, uses: m.uses, usedBy: m.usedBy }));
+  return out.map((m) => ({ id: m.id, name: m.name, ...(m.was ? { was: m.was } : {}), pinned: m.pinned, routes: m.routes.map((r) => r.id), entries: m.entries, files: m.files, code: [...new Set(m.code)].sort(), shared: m.shared, uses: m.uses, usedBy: m.usedBy }));
 }
