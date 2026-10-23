@@ -234,4 +234,16 @@ the old one.
 
 ## Results
 
-(filled in at each checkpoint)
+**Phase 1 (2026-10-24),** on a fresh frozen launchpad copy (11 specs):
+
+| | 0.11.0 | 0.12 branch |
+|---|---|---|
+| Specs whose stories show | 2 of 11 | 11 of 11 (2-7 stories each) |
+| Story headings Veridic can't read | not reported | 0 |
+| Success criteria counted as untested rules (`tests --module`) | yes | no; listed apart (auth-2: 4, contact-submissions: 3) |
+| `stale --fix` on a new, uncommitted spec whose citations are right | moved them (3-4 -> 5-6, wrong) | left them alone |
+| Specs edited alongside their code (earlier copy): rules out of date | 5 (false) | 0 (claims hold 100%) |
+| A cited line really changed | caught | caught (FR-005) |
+| Stamped specs, two lines inserted above the code | 55 citations moved | 55 moved, fixable by their text |
+
+Express: snapshots and metrics identical; Gobbles' rule counts drop only by its success criteria.
