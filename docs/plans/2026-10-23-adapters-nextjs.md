@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+**Status:** deferred (2026-10-23), not started. Express is enough for cloudcrane today. To resume: re-pin the sample repos in Task 4 to current commits, re-check the research in the spec (Noir, next-openapi-gen), and start at Task 1.
+
 **Goal:** Veridic reads Next.js apps (routes, guards, statuses, effects, tests) as it reads Express, with Express moved behind one adapter interface unchanged.
 
 **Architecture:** `routeInventory(g)` stays the single entry point and merges the routes of every framework adapter in `core/frameworks/` whose `detect(g)` is true. Express's discovery moves to `core/frameworks/express.mjs` byte-for-byte; `core/frameworks/nextjs.mjs` reads routes from files. Shared analysis (effects, access, contract, tests) reads framework idioms from the route's adapter.
