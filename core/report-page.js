@@ -241,7 +241,7 @@ var veridicModel = (D) => {
     <div class="when"><span id="when"></span><button class="icon-btn" id="theme" aria-label="Switch theme"></button></div></div>
   <section class="hero"><div class="rv"><h1 class="verdict" id="appname"></h1><p class="about" id="stats"></p></div><div class="rings rv" id="rings" style="animation-delay:.12s"></div></section>
   <section id="specs-sec"><h2 class="rv" style="animation-delay:.2s">Your app <span class="hint">· one row per part; click to read its spec, a heading to sort</span></h2>
-  <div class="tools rv" style="animation-delay:.22s"><input id="q" type="search" placeholder="Search parts and specs" aria-label="Search parts and specs"><div class="seg" id="filters" role="group" aria-label="Show"></div></div>
+  <div class="tools rv" style="animation-delay:.22s"><input id="q" type="search" placeholder="Search parts and specs" aria-label="Search parts and specs"><label class="pick"><span>Show</span><select id="filters" aria-label="Show"></select></label></div>
   <div class="tablewrap rv" style="animation-delay:.25s"><table class="specs"><thead><tr id="thead"></tr></thead><tbody id="tbody"></tbody></table><div class="noresults" id="noresults" hidden>No part matches.</div></div><div class="pager" id="pager"></div></section>
   <section id="fix-sec"><h2 class="rv" style="animation-delay:.3s">Fix first</h2><div class="cards rv" style="animation-delay:.35s" id="fix"></div></section>
   <section id="later-sec"><h2 class="rv" style="animation-delay:.35s">When you have time</h2><div class="cards rv" style="animation-delay:.4s" id="later"></div></section>
@@ -286,7 +286,7 @@ var veridicModel = (D) => {
   function drawTable() {
     store.set("table:" + D.name, JSON.stringify(view));
     $("#thead").innerHTML = COLS.map(([k, label, kind]) => '<th class="' + kind + '" aria-sort="' + (view.sort === k ? (view.dir === "asc" ? "ascending" : "descending") : "none") + '"><button data-sort="' + k + '">' + label + '<span class="arrow">' + (view.sort === k ? (view.dir === "asc" ? "↑" : "↓") : "") + "</span></button></th>").join("");
-    $("#filters").innerHTML = FILTER.map(([k, label]) => { const n = M.rows({ filter: k }).length; return k === "nospec" && !n ? "" : '<button data-filter="' + k + '" aria-pressed="' + (view.filter === k) + '">' + label + '<span class="n">' + n + "</span></button>"; }).join("");
+    $("#filters").innerHTML = FILTER.map(([k, label]) => { const n = M.rows({ filter: k }).length; return k === "nospec" && !n ? "" : '<option value="' + k + '"' + (view.filter === k ? " selected" : "") + ">" + (k === "all" ? "All parts" : label) + " (" + n + ")</option>"; }).join("");
     const pg = M.page(M.rows(view), view);
     view.page = pg.page;
     $("#tbody").innerHTML = pg.items.map(rowHTML).join("");
@@ -301,6 +301,7 @@ var veridicModel = (D) => {
   }
   if (M.parts.length) {
     $("#q").value = view.q;
+    $("#filters").addEventListener("change", (ev) => { view.filter = ev.target.value; view.page = 1; drawTable(); });
     $("#q").addEventListener("input", () => { view.q = $("#q").value; view.page = 1; drawTable(); });
     $("#pager").addEventListener("change", (ev) => { if (ev.target.id === "psize") { view.size = +ev.target.value; view.page = 1; drawTable(); } });
     drawTable();

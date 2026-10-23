@@ -74,7 +74,7 @@ One page opens in your browser: your app's specs and nothing else.
 
 <img src="assets/dashboard.png" alt="The Veridic dashboard: the app's name, gauges for rules up to date, proven and covered, a sortable table of specs, and the broken rules to fix first" width="720">
 
-Three gauges show how many rules still match the code, how many a test proves, and how much of the app the specs cover. Every spec is a row you can search, filter (needs fixing, out of date, not tested, proven) and sort by any column; click one to read its user stories and scenarios and every rule, with where it lives in the code and which tests prove it. Below: what to fix first, and what can wait. It only shows: it never changes anything. It's one local file, `.veridic/report.html` (git-ignored): no server, no network, nothing uploaded.
+Three gauges show how many rules still match the code, how many a test proves, and how much of the app the specs cover. Every spec is a row you can search, filter from a dropdown (needs fixing, out of date, not tested, proven, no spec) and sort by any column; click one to read its user stories and scenarios and every rule, with where it lives in the code and which tests prove it. Below: what to fix first, and what can wait. It only shows: it never changes anything. It's one local file, `.veridic/report.html` (git-ignored): no server, no network, nothing uploaded.
 
 ## How it works
 
