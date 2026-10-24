@@ -358,7 +358,8 @@ var veridicModel = (D) => {
   }
 
   // ---- hero: the app's name and the gauges ----
-  $("#appname").textContent = M.title;
+  // A long name breaks after a slash or hyphen ("Node/Express/<wbr>Prisma"), not mid-word.
+  $("#appname").innerHTML = esc(M.title).replace(/([/-])/g, "$1<wbr>");
   const colorFor = (p) => (p >= 90 ? "var(--good)" : p >= 60 ? "var(--warn)" : "var(--bad)");
   const ring = (p, lbl, sub, color) => { const C = 2 * Math.PI * 33; return '<div class="ring" tabindex="0"><svg viewBox="0 0 78 78"><circle class="track" cx="39" cy="39" r="33" fill="none" stroke-width="7"/><circle class="arc" cx="39" cy="39" r="33" fill="none" stroke-width="7" stroke="' + (color || colorFor(p)) + '" stroke-dasharray="' + C + '" stroke-dashoffset="' + C * (1 - p / 100) + '"/></svg><div class="num">' + p + '%</div><div class="lbl">' + lbl + '</div><div class="sub">' + sub + "</div></div>"; };
   const pct = (a, b) => (b ? Math.round((100 * a) / b) : 0);

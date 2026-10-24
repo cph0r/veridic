@@ -26,7 +26,7 @@ Then tell Claude **"set up veridic"** in your repo.
 veridic report
 ```
 
-<img src="assets/dashboard-blueprint.png" alt="The Veridic dashboard, drawn as a blueprint" width="720">
+<img src="assets/dashboard-product.png" alt="The Veridic dashboard: an app's promises, the one that needs a look open beside them with the rules behind it" width="760">
 
 ## What to ask Claude
 
