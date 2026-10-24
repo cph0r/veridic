@@ -143,3 +143,12 @@ test("data: render writes the section, and check reports a schema change", async
   assert.deepEqual(JSON.parse(out.stdout).data_drift, [{ table: "User", problem: "columns changed: removed name" }]);
   assert.equal(out.status, 1);
 });
+
+test("data: comments with apostrophes don't hide a Drizzle table's columns", () => {
+  const r = repoOf({
+    "src/schema.ts": 'export const appsTable = pgTable(\n  "apps",\n  {\n    // the app\'s own id; it\'s never reused\n    id: uuid("id").primaryKey().defaultRandom(),\n    /* a name that isn\'t unique */\n    name: text("name").notNull(),\n  },\n);\n',
+  });
+  const s = shapeOf(r.repo, "apps");
+  r.done();
+  assert.deepEqual(s.columns.map((c) => c.name), ["id", "name"]);
+});

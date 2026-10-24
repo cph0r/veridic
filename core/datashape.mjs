@@ -94,13 +94,28 @@ function prismaShape(repo, file, text, line) {
 function drizzleTables(repo) {
   const out = new Map(); // const name -> { name, text, open }
   for (const f of files(repo).filter((x) => /\.[cm]?[jt]s$/.test(x))) {
-    const t = read(repo, f) ?? "";
+    const t = uncomment(read(repo, f) ?? "");
     if (!/Table\(/.test(t)) continue;
     for (const m of t.matchAll(/\b(?:const|let|var)\s+(\w+)\s*=\s*(?:pg|sqlite|mysql|singlestore)Table\(\s*["'`](\w+)["'`]\s*,\s*\{/g)) out.set(m[1], { name: m[2], text: t, open: m.index + m[0].length - 1 });
   }
   return out;
 }
-function drizzleShape(repo, file, text, line) {
+/** Comments blanked with spaces (lines and positions kept), so an apostrophe in one isn't a quote. */
+function uncomment(text) {
+  let out = "", quote = null;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (quote) { out += c; if (c === quote && text[i - 1] !== "\\") quote = null; continue; }
+    if (c === '"' || c === "'" || c === "`") { quote = c; out += c; continue; }
+    if (c === "/" && text[i + 1] === "/") { while (i < text.length && text[i] !== "\n") { out += " "; i++; } out += text[i] ?? ""; continue; }
+    if (c === "/" && text[i + 1] === "*") { const end = text.indexOf("*/", i + 2); const stop = end < 0 ? text.length : end + 2; out += text.slice(i, stop).replace(/[^\n]/g, " "); i = stop - 1; continue; }
+    out += c;
+  }
+  return out;
+}
+
+function drizzleShape(repo, file, raw, line) {
+  const text = uncomment(raw);
   const re = /\b(?:const|let|var)\s+(\w+)\s*=\s*(?:pg|sqlite|mysql|singlestore)Table\(\s*["'`](\w+)["'`]\s*,\s*\{/g;
   let m;
   while ((m = re.exec(text)) && lineAt(text, m.index) < line);
@@ -141,7 +156,8 @@ function drizzleShape(repo, file, text, line) {
 }
 
 // ---- SQL ----
-function sqlShape(text, line) {
+function sqlShape(raw, line) {
+  const text = raw.replace(/--[^\n]*/g, (m) => " ".repeat(m.length)); // a comment's apostrophe isn't a quote
   const re = /\bCREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:[`"\w]+\.)?[`"[]?(\w+)[`"\]]?\s*\(/gi;
   let m;
   while ((m = re.exec(text)) && lineAt(text, m.index) < line);
