@@ -65,3 +65,12 @@ test("ui: design tokens from the Tailwind theme and CSS custom properties", () =
   assert.deepEqual(t.spacing, { "--space-4": "16px" });
   assert.deepEqual(t.radii, { card: "12px", "--radius-lg": "10px" });
 });
+
+test("ui: a truncated or broken Tailwind config ends (no endless loop), keeping what it could read", { timeout: 5000 }, () => {
+  for (const cfg of ['module.exports = { theme: { extend: { colors: { brand: "#0e7490", ink: { soft', 'module.exports = { theme: { colors: { brand: "#0e7490", x: "unterminated', "module.exports = { theme: { spacing: [1, 2"]) {
+    const r = repoOf({ "tailwind.config.js": cfg });
+    const t = designTokens(r.repo);
+    r.done();
+    assert.ok(t && typeof t.colors === "object");
+  }
+});

@@ -198,19 +198,36 @@ function sqlShape(raw, line) {
 
 /** A migration that creates the same table, compared by column names (case and _ ignored). */
 function migrationDisagreement(repo, table, shape) {
-  const norm = (s) => s.toLowerCase().replace(/_/g, "");
-  for (const f of files(repo).filter((x) => x.endsWith(".sql"))) {
+  const norm = (s) => s.toLowerCase().replace(/[_"`[\]]/g, "");
+  const name = `(?:[\`"\\w]+\\.)?[\`"[]?${table}[\`"\\]]?`;
+  // The migrations in order (their folders and files are named by time or number): the table's
+  // CREATE, then each later ALTER that adds, drops or renames a column.
+  let cols = null, at = null;
+  for (const f of files(repo).filter((x) => x.endsWith(".sql")).sort()) {
     const t = read(repo, f) ?? "";
-    const m = new RegExp(`\\bCREATE\\s+TABLE\\s+(?:IF\\s+NOT\\s+EXISTS\\s+)?(?:[\`"\\w]+\\.)?[\`"[]?${table}[\`"\\]]?\\s*\\(`, "i").exec(t);
-    if (!m) continue;
-    const mig = sqlShape(t, lineAt(t, m.index));
-    if (!mig) continue;
-    const a = new Set(shape.columns.map((c) => norm(c.name))), b = new Set(mig.columns.map((c) => norm(c.name)));
-    const onlyInSchema = shape.columns.filter((c) => !b.has(norm(c.name))).map((c) => c.name);
-    const onlyInMigration = mig.columns.filter((c) => !a.has(norm(c.name))).map((c) => c.name);
-    if (onlyInSchema.length || onlyInMigration.length) return { at: `${f}:${lineAt(t, m.index)}`, onlyInSchema, onlyInMigration };
+    const create = new RegExp(`\\bCREATE\\s+TABLE\\s+(?:IF\\s+NOT\\s+EXISTS\\s+)?${name}\\s*\\(`, "i").exec(t);
+    let from = 0;
+    if (create && !cols) {
+      const mig = sqlShape(t, lineAt(t, create.index));
+      if (!mig) continue;
+      cols = mig.columns.map((c) => c.name);
+      at = `${f}:${lineAt(t, create.index)}`;
+      from = create.index + create[0].length;
+    }
+    if (!cols) continue;
+    for (const alt of t.slice(from).matchAll(new RegExp(`\\bALTER\\s+TABLE\\s+(?:ONLY\\s+)?(?:IF\\s+EXISTS\\s+)?${name}\\s+([^;]*)`, "gi")))
+      for (const action of alt[1].split(/,\s*(?=(?:ADD|DROP|RENAME|ALTER)\b)/i)) {
+        let m;
+        if ((m = action.match(/^\s*ADD\s+(?:COLUMN\s+)?(?:IF\s+NOT\s+EXISTS\s+)?[`"[]?(\w+)/i)) && !/^(?:CONSTRAINT|PRIMARY|UNIQUE|FOREIGN|CHECK|INDEX|KEY)$/i.test(m[1])) cols.push(m[1]);
+        else if ((m = action.match(/^\s*DROP\s+(?:COLUMN\s+)?(?:IF\s+EXISTS\s+)?[`"[]?(\w+)/i)) && !/^(?:CONSTRAINT|INDEX|KEY|PRIMARY|FOREIGN)$/i.test(m[1])) cols = cols.filter((c) => norm(c) !== norm(m[1]));
+        else if ((m = action.match(/^\s*RENAME\s+(?:COLUMN\s+)?[`"[]?(\w+)[`"\]]?\s+TO\s+[`"[]?(\w+)/i))) cols = cols.map((c) => (norm(c) === norm(m[1]) ? m[2] : c));
+      }
   }
-  return null;
+  if (!cols) return null;
+  const a = new Set(shape.columns.map((c) => norm(c.name))), b = new Set(cols.map(norm));
+  const onlyInSchema = shape.columns.filter((c) => !b.has(norm(c.name))).map((c) => c.name);
+  const onlyInMigration = cols.filter((c) => !a.has(norm(c)));
+  return onlyInSchema.length || onlyInMigration.length ? { at, onlyInSchema, onlyInMigration } : null;
 }
 
 /**

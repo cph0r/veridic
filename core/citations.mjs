@@ -24,7 +24,10 @@ export function parseSpec(spec) {
   const seams = []; // `[seam: path, path]`: files a requirement may touch, before it cites any code
   let section = null; // last FR label seen, for citations in continuation lines
   let heading = null;
+  let generatedData = false; // "## Data (generated)": checked against the schema by data_drift, not cited
   spec.split("\n").forEach((line, i) => {
+    if (/^##\s/.test(line)) generatedData = /^##\s+Data \(generated\)/.test(line);
+    if (generatedData) return;
     const l = line.match(LABEL);
     const label = l ? (l[1] ?? l[2] ?? l[3] ?? l[4]) : null;
     const h = line.match(/^#{1,6}\s+(.*)$/);

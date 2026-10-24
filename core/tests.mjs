@@ -13,6 +13,7 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import fs from "node:fs";
 import { importResolver } from "./resolve.mjs";
+import { literalJson } from "./literal.mjs";
 import { testRecipe } from "./recipe.mjs";
 import os from "node:os";
 import path from "node:path";
@@ -285,26 +286,52 @@ export function mineExamples(body) {
   const out = [];
   const LIT = /^(?:-?\d+(?:\.\d+)?|"[^"]*"|'[^']*'|true|false|null)$/;
   const reqs = [];
+  // The object literal starting at `i` ("{ a: { b: 1 } }"), braces balanced, strings skipped.
+  const objectAt = (s, i) => {
+    if (s[i] !== "{") return null;
+    let depth = 0, q = null;
+    for (let j = i; j < s.length; j++) {
+      const c = s[j];
+      if (q) { if (c === "\\") j++; else if (c === q) q = null; continue; }
+      if (c === '"' || c === "'" || c === "`") q = c;
+      else if (c === "{") depth++;
+      else if (c === "}" && --depth === 0) return s.slice(i, j + 1);
+    }
+    return null;
+  };
   for (const m of body.matchAll(/\brequest\(\s*[\w$.]+\s*\)\s*\.(get|post|put|patch|delete)\(\s*(["'`])([^"'`]*)\2\s*\)/g)) reqs.push({ i: m.index, end: m.index + m[0].length, method: m[1].toUpperCase(), path: m[3], quote: m[2], kind: "st" });
-  for (const m of body.matchAll(/\bfetch\(\s*(?:[\w$.]+\s*\+\s*)?(["'`])([^"'`]*)\1\s*(?:,\s*\{([^}]*)\})?/g)) reqs.push({ i: m.index, end: m.index + m[0].length, method: (m[3]?.match(/method:\s*["'](\w+)["']/)?.[1] ?? "GET").toUpperCase(), path: m[2], quote: m[1], opts: m[3] ?? "", kind: "fetch" });
+  // fetch("/x") or fetch(base + "/x"), the string closing the call or followed by its options.
+  for (const m of body.matchAll(/\bfetch\(\s*(?:[\w$.]+\s*\+\s*)?(["'`])([^"'`]*)\1\s*(\)|,\s*)/g)) {
+    const at = m.index + m[0].length;
+    const opts = m[3] === ")" ? "" : objectAt(body, at);
+    if (opts == null) continue;
+    reqs.push({ i: m.index, end: at + opts.length, method: (opts.match(/method:\s*["'](\w+)["']/)?.[1] ?? "GET").toUpperCase(), path: m[2], quote: m[1], opts, kind: "fetch" });
+  }
   reqs.sort((a, b) => a.i - b.i);
-  reqs.forEach((r, k) => {
+  reqs.forEach((r) => {
     if (!r.path.startsWith("/") || (r.quote === "`" && r.path.includes("${"))) return;
-    const rest = body.slice(r.end, reqs[k + 1]?.i ?? body.length);
+    // Up to the next request of any kind (one built from variables too).
+    const after = body.slice(r.end);
+    const next = after.search(/\b(?:request\(|fetch\()/);
+    const rest = next < 0 ? after : after.slice(0, next);
     const stmt = rest.split(";")[0];
+    // Its result's name (const res = await request(app)...): statuses and fields are read off it.
+    const name = body.slice(Math.max(0, r.i - 80), r.i).match(/\b(?:const|let|var)\s+([\w$]+)\s*=\s*(?:await\s+)?$/)?.[1] ?? null;
     let reqBody = null;
     if (r.kind === "st") {
-      const send = stmt.match(/^\s*(?:\.\w+\([^)]*\)\s*)*?\.send\(\s*([^)]*)\)/);
-      if (send) { if (!send[1].trim().startsWith("{")) return; reqBody = send[1].trim(); }
+      const send = stmt.match(/^\s*(?:\.\w+\([^)]*\)\s*)*?\.send\(\s*/);
+      if (send) { reqBody = objectAt(stmt, send.index + send[0].length); if (!reqBody) return; }
     } else {
-      const b = r.opts.match(/body:\s*JSON\.stringify\(\s*(\{[^)]*\})\s*\)/);
-      if (b) reqBody = b[1];
+      const b = r.opts.match(/body:\s*JSON\.stringify\(\s*/);
+      if (b) { reqBody = objectAt(r.opts, b.index + b[0].length); if (!reqBody) return; }
       else if (/body:/.test(r.opts)) return;
     }
-    const st = stmt.match(/\.expect\(\s*(\d{3})\s*\)/)?.[1] ?? rest.match(/expect\(\s*\w+\.status(?:Code)?\s*\)\s*\.(?:toBe|toEqual)\(\s*(\d{3})\s*\)/)?.[1];
+    if (reqBody != null && literalJson(reqBody) === undefined) return;
+    const esc = (n) => n.replace(/\$/g, "\\$");
+    const st = stmt.match(/\.expect\(\s*(\d{3})\s*\)/)?.[1] ?? (name ? rest.match(new RegExp(`expect\\(\\s*${esc(name)}\\.status(?:Code)?\\s*\\)\\s*\\.(?:toBe|toEqual)\\(\\s*(\\d{3})\\s*\\)`))?.[1] : null);
     if (!st) return;
     const fields = {};
-    for (const f of rest.matchAll(/expect\(\s*\w+\.body\.([\w.]+)\s*\)\s*\.(?:toBe|toEqual)\(\s*([^()]*?)\s*\)/g)) if (LIT.test(f[2])) fields[f[1]] = f[2].replace(/^'([^']*)'$/, '"$1"');
+    if (name) for (const f of rest.matchAll(new RegExp(`expect\\(\\s*${esc(name)}\\.body\\.([\\w.]+)\\s*\\)\\s*\\.(?:toBe|toEqual)\\(\\s*([^()]*?)\\s*\\)`, "g"))) if (LIT.test(f[2])) fields[f[1]] = f[2].replace(/^'([^']*)'$/, '"$1"');
     out.push({ given: { method: r.method, path: r.path, ...(reqBody ? { body: reqBody } : {}) }, then: { status: Number(st), ...(Object.keys(fields).length ? { fields } : {}) } });
   });
   return out;

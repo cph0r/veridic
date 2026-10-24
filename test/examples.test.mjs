@@ -60,3 +60,13 @@ test("examples: coverage lists the rows its linked tests give", async () => {
   fs.rmSync(repo, { recursive: true, force: true });
   assert.deepEqual(cov.requirements[0].examples, [{ given: { method: "POST", path: "/orders", body: "{ total: 120 }" }, then: { status: 201, fields: { discount: "12" } }, proven_by: "test/orders.test.ts:2" }]);
 });
+
+test("examples: nothing invented from requests built from variables (review: bodies, concatenated paths, someone else's status)", () => {
+  assert.deepEqual(mineExamples("const res = await request(app).post(\"/orders\").send({ items, total: price * 2 }).expect(201);"), [], "a body that isn't literal");
+  assert.deepEqual(mineExamples('const res = await fetch("/orders/" + id);\nexpect(res.status).toBe(200);'), [], "a path with a variable added");
+  assert.deepEqual(mineExamples('await request(app).get("/a");\nconst b = await request(app).get(path);\nexpect(b.status).toBe(404);'), [], "the 404 is the unnamed request's, not /a's");
+});
+
+test("examples: fetch options with nested objects keep their body", () => {
+  assert.deepEqual(mineExamples('const res = await fetch("/api/orders", { method: "POST", headers: { a: "1" }, body: JSON.stringify({ total: 120 }) });\nexpect(res.status).toBe(201);'), [{ given: { method: "POST", path: "/api/orders", body: "{ total: 120 }" }, then: { status: 201 } }]);
+});

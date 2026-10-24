@@ -191,3 +191,26 @@ test("data: a Prisma default with // inside a string (a URL) is kept; a real com
   r.done();
   assert.deepEqual(u.columns.map((c) => [c.name, c.default ?? null]), [["id", null], ["image", '"https://api.example.io/x.jpeg"'], ["bio", null]]);
 });
+
+test("data: the generated section's table headings aren't requirements or citations (metrics don't move on render)", async () => {
+  const { parseSpec } = await import("../core/citations.mjs");
+  const spec = "## Requirements\n\n- **FR-001**: x [evidence: src/a.ts:1-2#f@1]\n\n## Data (generated)\n\n### users [evidence: db/schema.prisma:1-7~abcdef12]\n\n| Column | Type |\n|---|---|\n\n### orders [evidence: db/schema.prisma:9-12~abcdef34]\n\n## Open Questions & Observed Risks\n\n- **RISK-1**: y [evidence: src/b.ts:3]\n";
+  assert.deepEqual(parseSpec(spec).citations.map((c) => [c.fr, c.cite]), [["FR-001", "src/a.ts:1-2#f@1"], ["Open Questions & Observed Risks (line 16)", "src/b.ts:3"]]);
+});
+
+test("data: migrations are replayed in order (ALTER ADD, DROP, RENAME) before comparing with the schema", () => {
+  const schema = 'model User {\n  id Int @id\n  email String\n  bio String?\n  handle String\n  @@map("users")\n}\n';
+  const migs = {
+    "prisma/migrations/001_init/migration.sql": 'CREATE TABLE "users" (\n  "id" INTEGER NOT NULL,\n  "email" TEXT NOT NULL,\n  "nick" TEXT,\n  "old" TEXT\n);\n',
+    "prisma/migrations/002_more/migration.sql": 'ALTER TABLE "users" ADD COLUMN "bio" TEXT,\nDROP COLUMN "old";\nALTER TABLE "users" RENAME COLUMN "nick" TO "handle";\n',
+  };
+  const r = repoOf({ "prisma/schema.prisma": schema, ...migs });
+  const u = shapeOf(r.repo, "users");
+  fs.mkdirSync(path.join(r.repo, "prisma/migrations/003_drop"));
+  r.w("prisma/migrations/003_drop/migration.sql", 'ALTER TABLE "users" DROP COLUMN "bio";\n');
+  execFileSync("git", ["add", "."], { cwd: r.repo });
+  const u2 = shapeOf(r.repo, "users");
+  r.done();
+  assert.equal(u.disagreement, undefined, JSON.stringify(u.disagreement));
+  assert.deepEqual([u2.disagreement?.onlyInSchema, u2.disagreement?.onlyInMigration], [["bio"], []]);
+});

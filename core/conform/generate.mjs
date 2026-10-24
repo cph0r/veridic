@@ -45,7 +45,9 @@ export function conformChecksFrom({ routes = [], specs = [], product = null }) {
       (req.examples ?? []).forEach((x, i) => {
         const request = parseGiven(x.given), expect = parseThen(x.then);
         if (!request || !expect) return;
-        const kind = expect.status === "denied" || (request.as === "other" && (expect.status === 403 || expect.status === 404)) ? "scope" : "example";
+        // Another user refused: 403 and 404 are the same answer (one hides that the record exists).
+        if (request.as === "other" && (expect.status === 403 || expect.status === 404)) expect.status = "denied";
+        const kind = expect.status === "denied" ? "scope" : "example";
         const c = { id: `${kind}:${s.folder}:${id}:${i + 1}`, rule: `${s.folder}:${id}`, kind, request: { ...request, as: request.as ?? "owner" }, expect, needs: params(request.path), ...(x.proven_by ? { proven_by: x.proven_by } : {}) };
         out.push(c);
         (byRule.get(c.rule) ?? byRule.set(c.rule, []).get(c.rule)).push(c);

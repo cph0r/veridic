@@ -65,7 +65,7 @@ export function validate(spec) {
     (r.examples ?? []).forEach((x, j) => {
       const w = `${at}.examples[${j}]`;
       if (!x?.given?.method || !x?.given?.path) bad(w, "given needs method and path");
-      if (!Number.isInteger(x?.then?.status)) bad(w, "then needs a status");
+      if (!Number.isInteger(x?.then?.status) && x?.then?.status !== "denied") bad(w, "then needs a status (a number, or denied: 403 or 404)");
     });
   });
   if (!spec.requirements?.length) bad("requirements", "at least one requirement");

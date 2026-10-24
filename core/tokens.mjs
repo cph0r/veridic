@@ -73,6 +73,7 @@ function parseLiteral(s, i = 0) {
       const o = {}; i++;
       for (;;) {
         ws();
+        if (i >= s.length) return o; // cut off: keep what was read
         if (s[i] === "}") { i++; return o; }
         const k = s.slice(i).match(/^(?:["'`]([^"'`]+)["'`]|([\w$-]+))\s*:/);
         if (!k) { while (i < s.length && s[i] !== "," && s[i] !== "}") i++; if (s[i] === ",") i++; continue; }
@@ -83,10 +84,10 @@ function parseLiteral(s, i = 0) {
     }
     if (s[i] === "[") {
       const a = []; i++;
-      for (;;) { ws(); if (s[i] === "]") { i++; return a; } a.push(value()); ws(); if (s[i] === ",") i++; else if (s[i] !== "]") { i++; } }
+      for (;;) { ws(); if (i >= s.length) return a; if (s[i] === "]") { i++; return a; } a.push(value()); ws(); if (s[i] === ",") i++; else if (s[i] !== "]") { i++; } }
     }
     const q = s[i];
-    if (q === '"' || q === "'" || q === "`") { const j = s.indexOf(q, i + 1); const v = s.slice(i + 1, j); i = j + 1; return v; }
+    if (q === '"' || q === "'" || q === "`") { const j = s.indexOf(q, i + 1); if (j < 0) { i = s.length; return { expr: "" }; } const v = s.slice(i + 1, j); i = j + 1; return v; }
     const raw = s.slice(i).match(/^[^,}\]]*/)[0]; i += raw.length; return { expr: raw.trim() };
   };
   return value();
@@ -109,7 +110,8 @@ export function designTokens(repo) {
     const src = read(repo, f);
     const theme = src.match(/\btheme\s*:\s*\{/);
     if (!theme) continue;
-    const t = parseLiteral(src, theme.index + theme[0].length - 1);
+    let t;
+    try { t = parseLiteral(src, theme.index + theme[0].length - 1); } catch { continue; }
     const scope = { ...(t.extend ?? {}), ...Object.fromEntries(Object.entries(t).filter(([k]) => k !== "extend")) };
     Object.assign(out.colors, flatten(scope.colors));
     Object.assign(out.fonts, flatten(scope.fontFamily));

@@ -137,7 +137,7 @@ test("conform run: refuses an address that isn't local unless allowed", async ()
 test("conform: an `as other` row refused with 403 or 404 is a scope check too", () => {
   const spec = "## Requirements\n\n- **FR-009**: Only the author MAY edit [evidence: src/a.ts:3]\n  - Examples:\n\n    | Given | Then | Proven by |\n    |---|---|---|\n    | PUT /api/articles/:slug { body: \"x\" } as other | 403 | not yet |\n";
   const c = conformChecksFrom({ routes: [], specs: [{ folder: "articles", text: spec }] });
-  assert.deepEqual(c.map((x) => [x.kind, x.expect.status]), [["scope", 403]]);
+  assert.deepEqual(c.map((x) => [x.kind, x.expect.status]), [["scope", "denied"]]);
 });
 
 test("conform run: {{unique}} is fresh for every request, {{name}} comes from the seed (paths, bodies and expected fields)", async () => {
@@ -161,4 +161,71 @@ test("conform run: {{unique}} is fresh for every request, {{name}} comes from th
   server.close();
   assert.equal(r.passed, 2, JSON.stringify(r.failed));
   assert.ok([...seen].every((t) => /^T \S+$/.test(t)) && seen.size === 3);
+});
+
+test("conform: an `as other` 403 row passes on a 404 too (denied either way), and the pass says what came back", async () => {
+  const { runChecks } = await import("../core/conform/run.mjs");
+  const spec = "## Requirements\n\n- **FR-009**: Only the author MAY edit [evidence: src/a.ts:3]\n  - Examples:\n\n    | Given | Then | Proven by |\n    |---|---|---|\n    | DELETE /api/articles/:slug as other | 403 | not yet |\n";
+  const [c] = conformChecksFrom({ routes: [], specs: [{ folder: "articles", text: spec }] });
+  assert.equal(c.expect.status, "denied");
+  const server = http.createServer((req, res) => { res.writeHead(404); res.end(); });
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  const r = await runChecks([c], { url: `http://127.0.0.1:${server.address().port}`, users: USERS, seeds: { slug: "mine" } });
+  server.close();
+  assert.equal(r.passed, 1);
+  assert.deepEqual(r.denied, [{ id: c.id, got: 404 }]);
+});
+
+test("conform: spec.json may write `denied` as an example's status", async () => {
+  const { validate } = await import("../core/specdata.mjs");
+  const spec = { feature: "A", seeds: ["DELETE /a/:id"], requirements: [{ id: "FR-001", rule: "Only the owner MAY delete", evidence: ["a.ts:1"], examples: [{ given: { method: "DELETE", path: "/a/:id", as: "other" }, then: { status: "denied" } }] }] };
+  assert.deepEqual(validate(spec), []);
+  assert.ok(validate({ ...spec, requirements: [{ ...spec.requirements[0], examples: [{ given: { method: "GET", path: "/a" }, then: { status: "nope" } }] }] }).length);
+});
+
+test("conform run: a row's path can't leave the app (//host, backslash, absolute URL): not run, no request sent", async () => {
+  const { runChecks } = await import("../core/conform/run.mjs");
+  let hits = 0;
+  const server = http.createServer((req, res) => { hits++; res.writeHead(200); res.end("{}"); });
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  const port = server.address().port;
+  const checks = ["//evil.example/steal", "/\\evil.example/steal", `http://127.0.0.1:${port}/x`, "x/relative"].map((p, i) => ({ id: `c${i}`, request: { method: "GET", path: p, as: "owner" }, expect: { status: 200 } }));
+  const r = await runChecks(checks, { url: `http://127.0.0.1:${port}`, users: USERS, seeds: {} });
+  server.close();
+  assert.equal(hits, 0);
+  assert.equal(r.passed, 0);
+  assert.deepEqual(r.not_run.map((n) => n.id), ["c0", "c1", "c2", "c3"]);
+  assert.match(r.not_run[0].why, /path/);
+});
+
+test("conform run: bodies are sent as written (strings holding `, y:` too), a body that isn't literal isn't run, seed values are escaped", async () => {
+  const { runChecks } = await import("../core/conform/run.mjs");
+  const got = [];
+  const server = http.createServer((req, res) => { let b = ""; req.on("data", (c) => (b += c)); req.on("end", () => { got.push(b); res.writeHead(200, { "content-type": "application/json" }); res.end(b || "{}"); }); });
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  const url = `http://127.0.0.1:${server.address().port}`;
+  const row = (id, body, fields) => ({ id, request: { method: "POST", path: "/a", as: "anon", body }, expect: { status: 200, ...(fields ? { fields } : {}) } });
+  const r = await runChecks([
+    row("strings", `{ bio: "x, y: z", note: 'it\\'s' }`, { bio: '"x, y: z"' }),
+    row("variables", "{ items, total: price * 2 }"),
+    row("seeded", '{ name: "{{name}}" }', { name: '"{{name}}"' }),
+  ], { url, seeds: { name: 'Ann "the" Admin' } });
+  server.close();
+  assert.deepEqual(JSON.parse(got[0]), { bio: "x, y: z", note: "it's" });
+  assert.equal(r.passed, 2, JSON.stringify(r.failed));
+  assert.deepEqual(r.not_run.map((n) => [n.id, n.why]), [["variables", "the body isn't literal JSON: { items, total: price * 2 }"]]);
+  assert.equal(got.length, 2, "nothing sent for the body that isn't literal");
+});
+
+test("conform: the repo's seed command runs only with --run-seed; without it, it's shown and nothing runs", async () => {
+  const { spawnSync } = await import("node:child_process");
+  const fs = await import("node:fs"), os = await import("node:os"), path = await import("node:path");
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), "veridic-seed-"));
+  fs.writeFileSync(path.join(repo, ".veridic.json"), JSON.stringify({ conform: { seed: "touch ran.txt" } }));
+  const out = spawnSync(process.execPath, [path.resolve("skill/scripts/conform.mjs"), "--repo", repo, "--url", "http://127.0.0.1:9"], { encoding: "utf8" });
+  const ran = fs.existsSync(path.join(repo, "ran.txt"));
+  fs.rmSync(repo, { recursive: true, force: true });
+  assert.equal(ran, false);
+  assert.notEqual(out.status, 0);
+  assert.match(out.stdout + out.stderr, /touch ran\.txt[\s\S]*--run-seed/);
 });
