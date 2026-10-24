@@ -97,6 +97,12 @@ export function specDoc(text) {
       for (const mm of l.matchAll(/\*\*([\w ]+)\*\*:\s*([^·]+)/g)) doc.meta[mm[1].trim().toLowerCase()] = mm[2].trim();
       continue;
     }
+    // A rule's worked examples: "  - Examples:" then an indented table under it.
+    if (cur && /^ {4}\|/.test(l)) {
+      const c = cells(l);
+      if (c.length === 3 && c[0] !== "Given" && !/^-+$/.test(c[0])) (doc.reqs[cur].examples ??= []).push({ given: c[0], then: c[1], proven_by: c[2] === "not yet" ? null : c[2].replace(/`/g, "") });
+      continue;
+    }
     if (/^\s*\|/.test(l) && /^\s*\|[\s:|-]+\|\s*$/.test(lines[i + 1] ?? "")) {
       const header = cells(l), rows = [];
       for (i += 2; i < lines.length && /^\s*\|/.test(lines[i]); i++) rows.push(cells(lines[i]));

@@ -274,6 +274,42 @@ function envGates(src, code, env) {
   return { gates, matchable };
 }
 
+/**
+ * Worked examples from one test's body, when the request and the checks are literal:
+ * supertest (`request(app).post("/orders").send({…}).expect(201)`) or fetch (a literal path,
+ * a method, `expect(res.status).toBe(403)`), with literal `expect(res.body.x).toBe(…)` fields.
+ * A request built from variables gives no row.
+ * -> [{ given: { method, path, body? }, then: { status, fields? } }]
+ */
+export function mineExamples(body) {
+  const out = [];
+  const LIT = /^(?:-?\d+(?:\.\d+)?|"[^"]*"|'[^']*'|true|false|null)$/;
+  const reqs = [];
+  for (const m of body.matchAll(/\brequest\(\s*[\w$.]+\s*\)\s*\.(get|post|put|patch|delete)\(\s*(["'`])([^"'`]*)\2\s*\)/g)) reqs.push({ i: m.index, end: m.index + m[0].length, method: m[1].toUpperCase(), path: m[3], quote: m[2], kind: "st" });
+  for (const m of body.matchAll(/\bfetch\(\s*(?:[\w$.]+\s*\+\s*)?(["'`])([^"'`]*)\1\s*(?:,\s*\{([^}]*)\})?/g)) reqs.push({ i: m.index, end: m.index + m[0].length, method: (m[3]?.match(/method:\s*["'](\w+)["']/)?.[1] ?? "GET").toUpperCase(), path: m[2], quote: m[1], opts: m[3] ?? "", kind: "fetch" });
+  reqs.sort((a, b) => a.i - b.i);
+  reqs.forEach((r, k) => {
+    if (!r.path.startsWith("/") || (r.quote === "`" && r.path.includes("${"))) return;
+    const rest = body.slice(r.end, reqs[k + 1]?.i ?? body.length);
+    const stmt = rest.split(";")[0];
+    let reqBody = null;
+    if (r.kind === "st") {
+      const send = stmt.match(/^\s*(?:\.\w+\([^)]*\)\s*)*?\.send\(\s*([^)]*)\)/);
+      if (send) { if (!send[1].trim().startsWith("{")) return; reqBody = send[1].trim(); }
+    } else {
+      const b = r.opts.match(/body:\s*JSON\.stringify\(\s*(\{[^)]*\})\s*\)/);
+      if (b) reqBody = b[1];
+      else if (/body:/.test(r.opts)) return;
+    }
+    const st = stmt.match(/\.expect\(\s*(\d{3})\s*\)/)?.[1] ?? rest.match(/expect\(\s*\w+\.status(?:Code)?\s*\)\s*\.(?:toBe|toEqual)\(\s*(\d{3})\s*\)/)?.[1];
+    if (!st) return;
+    const fields = {};
+    for (const f of rest.matchAll(/expect\(\s*\w+\.body\.([\w.]+)\s*\)\s*\.(?:toBe|toEqual)\(\s*([^()]*?)\s*\)/g)) if (LIT.test(f[2])) fields[f[1]] = f[2].replace(/^'([^']*)'$/, '"$1"');
+    out.push({ given: { method: r.method, path: r.path, ...(reqBody ? { body: reqBody } : {}) }, then: { status: Number(st), ...(Object.keys(fields).length ? { fields } : {}) } });
+  });
+  return out;
+}
+
 /** Every test title in the repo that names a requirement id. */
 export function findTaggedTests(repo, files) {
   const out = [];
@@ -306,7 +342,7 @@ export function findTaggedTests(repo, files) {
       for (const { id, vc } of ids) {
         // "FR-001 (orders): …": the rule belongs to module orders (ids repeat across specs).
         const qual = t[4].match(new RegExp(`\\b${id}\\s*\\(([\\w-]+)\\)`))?.[1] ?? null;
-        out.push({ id, vc, file, line: lineOf(t.index), title: t[4], todo: todo || !!needs, strength, spec: bound, expectFail, brokenSkip, qual, ...(needs ? { needs } : {}) });
+        out.push({ id, vc, file, line: lineOf(t.index), title: t[4], todo: todo || !!needs, strength, spec: bound, expectFail, brokenSkip, qual, ...(needs ? { needs } : {}), body: src.slice(t.index, Math.min(src.length, t.index + t[0].length + body.length + 1, t.index + 6000)) });
       }
     }
   }
@@ -813,7 +849,9 @@ export function testCoverage(repo, spec, opts = {}) {
       return { id: vc, covered: vt.length > 0, tests: vt.map((t) => ({ at: `${t.file}:${t.line}`, title: t.title, ...(run ? { result: run.results.get(`${t.file}\0${t.title}`) ?? "not run" } : {}) })) };
     });
     const needs = status === "skipped" ? [...new Set(tests.filter((t) => t.needs).map((t) => t.needs))] : null;
-    return { id, status, ...(needs ? { needs } : {}), ...(proven != null ? { proven } : {}), tests, ...(ambiguous.has(id) ? { ambiguous_tests: ambiguous.get(id) } : {}), related_tests, text: texts.get(id), cites: cites.get(id), ...(verification.length ? { verification, vc_covered: verification.filter((v) => v.covered).length } : {}) };
+    // Worked examples the rule's own tests give, each with the test that proves it.
+    const examples = tagged.filter((t) => t.id === id && !t.todo && t.body).flatMap((t) => mineExamples(t.body).map((x) => ({ ...x, proven_by: `${t.file}:${t.line}` })));
+    return { id, status, ...(needs ? { needs } : {}), ...(examples.length ? { examples } : {}), ...(proven != null ? { proven } : {}), tests, ...(ambiguous.has(id) ? { ambiguous_tests: ambiguous.get(id) } : {}), related_tests, text: texts.get(id), cites: cites.get(id), ...(verification.length ? { verification, vc_covered: verification.filter((v) => v.covered).length } : {}) };
   });
 
   const count = (s) => requirements.filter((r) => r.status === s).length;

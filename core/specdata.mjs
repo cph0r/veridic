@@ -61,6 +61,12 @@ export function validate(spec) {
       if (!v?.text) bad(`${at}.verification[${j}]`, "missing text");
       if (v?.evidence) checkEvidence(`${at}.verification[${j}]`, v.evidence, false);
     });
+    // Worked examples: a request and what it gets back.
+    (r.examples ?? []).forEach((x, j) => {
+      const w = `${at}.examples[${j}]`;
+      if (!x?.given?.method || !x?.given?.path) bad(w, "given needs method and path");
+      if (!Number.isInteger(x?.then?.status)) bad(w, "then needs a status");
+    });
   });
   if (!spec.requirements?.length) bad("requirements", "at least one requirement");
   list("invariants", ID.invariant, (r, at) => {
@@ -140,6 +146,10 @@ export function generatedSections(repo, seeds) {
   return { contract: contractMd, states: stateMachineMarkdown(stateMachine(g, sc)), data: dataMd };
 }
 
+// An example in words: "POST /orders { total: 120 } as anon" -> "201, discount: 12".
+const exampleGiven = (g) => `${g.method} ${g.path}${g.body ? ` ${g.body}` : ""}${g.as ? ` as ${g.as}` : ""}`;
+const exampleThen = (t) => [String(t.status), ...Object.entries(t.fields ?? {}).map(([k, v]) => `${k}: ${v}`), ...(t.effect ? [t.effect] : [])].join(", ");
+
 /** spec.json -> spec.md, in Spec Kit's section order. */
 export function renderMarkdown(spec, generated = {}) {
   const out = [`# Feature Specification: ${spec.feature}`, "", `**Status**: ${spec.status ?? "Recovered from code"} · **Seeds**: ${spec.seeds.map((s) => `\`${s}\``).join(", ")}`, "", "_Rendered by `veridic render` from spec.json; edit the JSON, not this file._", ""];
@@ -161,6 +171,11 @@ export function renderMarkdown(spec, generated = {}) {
   for (const r of spec.requirements) {
     out.push(`- **${r.id}**${r.status === "planned" ? " (planned)" : ""}: ${r.rule}${ev(r.evidence)}${r.seam?.length ? ` [seam: ${r.seam.join(", ")}]` : ""}${r.clarify ? ` [NEEDS CLARIFICATION: ${r.clarify}]` : ""}`);
     for (const v of r.verification ?? []) out.push(`  - ${v.id}. ${v.text}${ev(v.evidence)}`);
+    if (r.examples?.length) {
+      out.push("  - Examples:", "", "    | Given | Then | Proven by |", "    |---|---|---|");
+      for (const x of r.examples) out.push(`    | ${cell(exampleGiven(x.given))} | ${cell(exampleThen(x.then))} | ${x.proven_by ? `\`${x.proven_by}\`` : "not yet"} |`);
+      out.push("");
+    }
   }
   out.push("");
   if (spec.invariants?.length) {

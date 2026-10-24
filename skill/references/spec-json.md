@@ -35,6 +35,12 @@ them. Fix every problem `render` reports and run it again.
 }
 ```
 
+A rule may carry `examples`: worked inputs and outcomes, the way fine logic (a formula, an edge
+case) survives a rebuild. `{"given": {"method": "POST", "path": "/orders", "body": "{ total: 120 }", "as": "owner"}, "then": {"status": 201, "fields": {"discount": "12"}}, "proven_by": "test/orders.test.ts:14"}`.
+Take rows from `veridic tests --spec <spec.md>` (each rule's `examples`, mined from its linked
+tests, with `proven_by`); write rows yourself only for behaviour no test pins, without
+`proven_by` (they render as "not yet").
+
 Write evidence as `path:start-end`; `veridic render` adds a hash of the cited lines (`path:start-end~3f9a1c`) so the rule is judged by that text later. Don't write or edit hashes by hand.
 
 - Ids: `FR-001`, `INV-1`, `R1`, `US1`; unique. Evidence: `path:line` or `path:start-end`.
