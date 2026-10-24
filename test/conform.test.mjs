@@ -59,3 +59,63 @@ test("conform: every check has a unique id", () => {
   const all = conformChecksFrom({ routes: ROUTES, specs: [{ folder: "articles", text: SPEC }] });
   assert.equal(new Set(all.map((c) => c.id)).size, all.length);
 });
+
+// A tiny API in the test process: articles owned by a user, a token header for each user.
+const http = await import("node:http");
+const startApi = (behave = {}) => new Promise((resolve) => {
+  const articles = { mine: { owner: "u1", title: "Mine" } };
+  const server = http.createServer((req, res) => {
+    const user = { "Token t1": "u1", "Token t2": "u2" }[req.headers.authorization ?? ""] ?? null;
+    let body = "";
+    req.on("data", (c) => (body += c));
+    req.on("end", () => {
+      const send = (status, obj) => { res.writeHead(status, { "content-type": "application/json" }); res.end(obj ? JSON.stringify(obj) : ""); };
+      if (req.method === "POST" && req.url === "/api/articles") {
+        if (!user) return send(401, { error: "sign in" });
+        const b = JSON.parse(body || "{}");
+        if (!b.title) return send(422, { errors: { title: ["can't be blank"] } });
+        return send(201, { article: { title: b.title } });
+      }
+      const m = req.url.match(/^\/api\/articles\/(\w+)$/);
+      if (req.method === "DELETE" && m) {
+        if (!user) return send(401);
+        const a = articles[m[1]];
+        if (!a) return send(404);
+        if (a.owner !== user) return send(behave.leaky ? 204 : 403);
+        return send(204);
+      }
+      send(404);
+    });
+  });
+  server.listen(0, "127.0.0.1", () => resolve({ url: `http://127.0.0.1:${server.address().port}`, close: () => server.close() }));
+});
+const USERS = { owner: { headers: { authorization: "Token t1" } }, other: { headers: { authorization: "Token t2" } } };
+
+test("conform run: passing checks, a failing one says what it got, a check with no seed isn't run", async () => {
+  const { runChecks } = await import("../core/conform/run.mjs");
+  const api = await startApi({ leaky: true });
+  const checks = conformChecksFrom({ routes: ROUTES, specs: [{ folder: "articles", text: SPEC }] });
+  const r = await runChecks(checks, { url: api.url, users: USERS, seeds: { slug: "mine" } });
+  const r2 = await runChecks(checks, { url: api.url, users: USERS, seeds: {} });
+  api.close();
+  assert.deepEqual(r.failed.map((f) => [f.id, f.got]), [["scope:DELETE /api/articles/:slug:other", 204]], "the leaky API lets another user delete");
+  assert.equal(r.passed, 4);
+  assert.equal(r.fidelity_pct, 80);
+  assert.deepEqual(r2.not_run.map((n) => [n.id, n.why]), [["access:DELETE /api/articles/:slug:anon", "no seed for slug"], ["scope:DELETE /api/articles/:slug:other", "no seed for slug"]]);
+});
+
+test("conform run: 403 and 404 both count as denied", async () => {
+  const { runChecks } = await import("../core/conform/run.mjs");
+  const api = await startApi();
+  const scope = conformChecksFrom({ routes: ROUTES, specs: [] }).filter((c) => c.kind === "scope");
+  const r = await runChecks(scope, { url: api.url, users: USERS, seeds: { slug: "mine" } });
+  api.close();
+  assert.equal(r.passed, 1);
+});
+
+test("conform run: refuses an address that isn't local unless allowed", async () => {
+  const { checkUrl } = await import("../core/conform/run.mjs");
+  for (const u of ["http://localhost:3000", "http://127.0.0.1:8080", "http://[::1]:3000", "http://api.test", "http://app.localhost:5000"]) assert.equal(checkUrl(u), null, u);
+  assert.match(checkUrl("https://example.com"), /isn't local/);
+  assert.equal(checkUrl("https://example.com", { allowRemote: true }), null);
+});
