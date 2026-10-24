@@ -21,9 +21,11 @@ run(() => {
   const g = openGraph(a.repo);
   const inv = routeInventory(g);
   const routes = inv.routes;
-  // Which routes each UI file calls, as ui.mjs links them (clients, hooks, API_BASE URLs).
+  // Which routes each UI file calls, as ui.mjs links them (clients, hooks, API_BASE URLs), each
+  // with the method it's called with: an API address only shown as text is no call. API client
+  // files are left out: they hold every route, used by this screen or not.
   let linked = null;
-  try { linked = new Map(linkUi(a.repo, routes, findModules(g, inv)).files.map((u) => [u.file, u.routes ?? []])); } catch {}
+  try { linked = new Map(linkUi(a.repo, routes, findModules(g, inv), { methods: true }).files.filter((u) => u.kind !== "client").map((u) => [u.file, u.routes ?? []])); } catch {}
   const groups = screenGroups(a.repo, { all: repoFiles(a.repo), routes: routes.map((r) => ({ file: r.file })), specs: [], ui: [] }).filter((sg) => !a.group || sg.id === a.group);
   if (a.group && !groups.length) fail(`no screen group ${a.group}`, usage);
   const out = groups.map((sg) => ({ id: sg.id, name: sg.name, spec_path: sg.spec_path, pages: sg.pages.map((p) => screenFacts(a.repo, p, { routes, url: sg.urls?.[p] ?? null, linked })) }));

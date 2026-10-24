@@ -13,7 +13,8 @@ const filesOf = (repo) => { try { return execFileSync("git", ["ls-files", "--cac
 /** A path as written (`/api/orders/${id}`) against a route path (`/api/orders/:id`). */
 const sameRoute = (url, routePath) => {
   const a = url.replace(/\$\{[^}]*\}/g, ":p").replace(/[?#].*$/, "").split("/").filter(Boolean), b = String(routePath).split("/").filter(Boolean);
-  return a.length === b.length && a.every((x, i) => x === b[i] || x.startsWith(":") || b[i].startsWith(":"));
+  // A value filled in at runtime (`${id}`) stands for a route parameter, never a fixed word.
+  return a.length === b.length && a.every((x, i) => x === b[i] || b[i].startsWith(":"));
 };
 
 /**
@@ -44,8 +45,10 @@ export function screenFacts(repo, file, { routes = [], url = null, linked = null
     for (const m of src.matchAll(/\b[\w$]+\.(get|post|put|patch|delete)\(\s*(["'`])(\/[^"'`]*)\2/g))
       for (const r of routes) if (r.method === m[1].toUpperCase() && sameRoute(m[3], r.path)) calls.add(r.id);
   }
-  // And what core/ui.mjs linked these files to (API clients, generated hooks, API_BASE URLs).
-  // A file linked to many routes is a shared API client, not something this screen calls.
+  // And what core/ui.mjs linked these files to (through the clients, generated hooks and
+  // API_BASE URLs they use, each with the method it's called with): the screen's own link, and
+  // the components and hooks it imports that call a few routes. `linked` leaves out API client
+  // files, which hold every route whether this screen uses it or not.
   if (linked) for (const f of seen) { const ids = linked.get(f) ?? []; if (f === file || ids.length <= 6) for (const id of ids) calls.add(id); }
   // Form fields: react-hook-form's register("x") (required per its zod schema), and named inputs.
   const src = read(repo, file);

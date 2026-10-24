@@ -59,9 +59,69 @@ function urlLiterals(text) {
     const cmp = /\.(?:includes|startsWith|endsWith|indexOf|match|test|replace|split)\(\s*$|[=!]==?\s*$/.test(before);
     // A wrapper's base (`/api/owner${path}`): the prefix it adds to the paths passed to it.
     const base = open ? s.replace(/\u0001$/, "").split("/").filter(Boolean) : null;
-    out.push({ segs, based, call, callee, nav, cmp, open, rel, base, index: m.index, at: text.slice(0, m.index).split("\n").length });
+    out.push({ segs, based, call, callee, nav, cmp, open, rel, base, index: m.index, len: m[0].length, at: text.slice(0, m.index).split("\n").length });
   }
   return out;
+}
+
+// ---- the methods a URL is really called with (for `screens`): none when it's only shown ----
+// A call, with type arguments or not: `.delete(`, `customFetch<Me>(`.
+const TYPE_ARGS = "(?:<[^()]*?>)?";
+const VERB = new RegExp(`\\.(get|post|put|patch|delete|head)\\s*${TYPE_ARGS}\\s*\\(\\s*$`, "i");
+const CALLEE = new RegExp(`([\\w$]+)\\s*${TYPE_ARGS}\\s*\\(\\s*$`);
+const FETCHY = /fetch|request|axios|^ky$|http|api|client|swr|query/i;
+// The ")" closing the "(" at `open`, strings skipped.
+function closeOf(text, open) {
+  let depth = 0, q = null;
+  for (let i = open; i < text.length && i < open + 4000; i++) {
+    const c = text[i];
+    if (q) { if (c === "\\") i++; else if (c === q) q = null; continue; }
+    if (c === '"' || c === "'" || c === "`") q = c;
+    else if (c === "(") depth++;
+    else if (c === ")" && --depth === 0) return i;
+  }
+  return Math.min(text.length, open + 4000);
+}
+// The method of a call whose first argument starts at `at`: `.delete(`, `{ method: "DELETE" }`,
+// or GET from a fetch-like callee; null when it isn't a call that sends a request.
+// A link into the API (`href={url}`, `location.assign(url)`, `window.location = url`) is a GET.
+const NAV_TO = /(?:\bhref\s*=\s*\{?\s*|\blocation(?:\.href)?\s*=\s*|\blocation\.(?:assign|replace)\(\s*|\bwindow\.open\(\s*)$/;
+function callAt(text, at) {
+  const before = text.slice(Math.max(0, at - 80), at);
+  if (NAV_TO.test(before)) return "GET";
+  const verb = before.match(VERB);
+  if (verb) return verb[1].toUpperCase();
+  const callee = before.match(CALLEE)?.[1];
+  if (!callee) return null;
+  const open = at - (before.length - before.lastIndexOf("("));
+  const m = text.slice(open, closeOf(text, open)).match(/\bmethod\s*:\s*["'`](\w+)["'`]/);
+  if (m) return m[1].toUpperCase();
+  return FETCHY.test(callee) ? "GET" : null;
+}
+// Every place `name` is passed as a request's URL (`fetch(url, …)`, `customFetch(getXUrl(), …)`).
+function usesOf(text, name, from = 0, to = text.length) {
+  const out = new Set();
+  const re = new RegExp(`(?<![\\w$.])${name.replace(/\$/g, "\\$")}\\b`, "g");
+  re.lastIndex = from;
+  let m;
+  while ((m = re.exec(text)) && m.index < to) { const v = callAt(text, m.index); if (v) out.add(v); }
+  return out;
+}
+/** A literal's request methods: passed into a call, held in a variable a call uses, or built by
+ * a function a call uses. Empty when the URL is only shown, copied or compared. */
+function litMethods(text, l, cs) {
+  const at = l.index;
+  const direct = callAt(text, at);
+  if (direct) return new Set([direct]);
+  const ci = cs.findLastIndex((c) => c.start <= at);
+  const c = ci >= 0 ? cs[ci] : null;
+  const end = c ? c.start + c.text.length : text.length;
+  // Held in a variable (`const url = …`, `const href = next ? a : b`): the calls that use it.
+  const v = text.slice(Math.max(0, at - 160), at).match(/(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*=[^;\n=]*$/)?.[1];
+  if (v) { const u = usesOf(text, v, at + l.len, end); if (u.size) return u; }
+  // A URL builder (`getGetMeUrl = () => \`/api/me\``): the methods of the calls that use it.
+  if (c && c.name && (!v || v === c.name)) return usesOf(text, c.name, end);
+  return new Set();
 }
 
 /** Match a literal's segments to routes: exact length, or (from a base URL) the route's tail. */
@@ -159,7 +219,7 @@ function workspaceResolver(repo, files) {
  * Link the UI to routes and modules.
  * @returns {{ files: [{ file, kind, routes, modules, module }], unlinked: number }}
  */
-export function linkUi(repo, routes, modules) {
+export function linkUi(repo, routes, modules, { methods = false } = {}) {
   let all = [];
   try {
     all = execFileSync("git", ["ls-files", "--cached", "--others", "--exclude-standard"], { cwd: repo, encoding: "utf8", maxBuffer: 64 << 20 }).split("\n").filter(Boolean);
@@ -235,21 +295,22 @@ export function linkUi(repo, routes, modules) {
     const cs = chunks(text);
     const direct = new Set();
     const chunkRoutes = cs.map(() => new Set());
+    // With `methods`, a URL links only to the routes of the methods it's really called with.
+    const called = (l, t, chunksOf) => { const ids = matchAll(l); if (!methods || !ids.length) return ids; const ms = litMethods(t, l, chunksOf); return ids.filter((id) => ms.has(id.split(" ")[0]) || id.startsWith("ALL ")); };
     for (const l of lits) {
-      const ids = matchAll(l);
+      const ids = called(l, text, cs);
       if (!ids.length) {
         if (looksApi(l) && !NOT_APP.test(f)) broken.push({ file: f, line: l.at, url: "/" + l.segs.map((x) => (x === ":p" ? "…" : x)).join("/") });
         continue;
       }
-      const pos = text.split("\n").slice(0, l.at - 1).join("\n").length;
-      const ci = cs.findLastIndex((c) => c.start <= pos);
+      const ci = cs.findLastIndex((c) => c.start <= l.index);
       for (const id of ids) (ci >= 0 ? chunkRoutes[ci] : direct).add(id), direct.add(id);
     }
     const propRoutes = cs.map((c) => {
       const pr = new Map();
       for (const [name, p] of c.props) {
         const set = new Set();
-        for (const l of urlLiterals(p.text)) for (const id of matchAll(l)) set.add(id);
+        for (const l of urlLiterals(p.text)) for (const id of called({ ...l, index: p.start + l.index }, text, cs)) set.add(id);
         pr.set(name, set);
       }
       return pr;
