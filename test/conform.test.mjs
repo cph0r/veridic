@@ -9,6 +9,7 @@ const ROUTES = [
   { id: "POST /api/articles", method: "POST", path: "/api/articles", access: "auth", scoped: "no" },
   { id: "DELETE /api/articles/:slug", method: "DELETE", path: "/api/articles/:slug", access: "auth", scoped: "yes" },
   { id: "POST /api/webhooks/stripe", method: "POST", path: "/api/webhooks/stripe", access: "public", scoped: "no" },
+  { id: "GET /api/tags", method: "GET", path: "/api/tags", access: "auth", scoped: "yes", guards: ["auth.optional"] },
 ];
 const SPEC = [
   "## Requirements",
@@ -20,6 +21,13 @@ const SPEC = [
   "    |---|---|---|",
   "    | POST /api/articles { title: \"Hi\", body: \"x\" } as owner | 201, article.title: \"Hi\" | `t.test.ts:4` |",
   "    | POST /api/articles { title: \"\" } as owner | 422 | not yet |",
+  "",
+  "- **FR-005**: Only the author MAY delete an article [evidence: src/a.ts:2]",
+  "  - Examples:",
+  "",
+  "    | Given | Then | Proven by |",
+  "    |---|---|---|",
+  "    | DELETE /api/articles/:slug as other | denied | not yet |",
   "",
 ].join("\n");
 
@@ -33,9 +41,15 @@ test("conform: signed-out checks for routes that need sign-in", () => {
   assert.deepEqual(access[1].needs, ["seed:slug"]);
 });
 
-test("conform: another user's record is denied, 403 or 404 both counting (Review Focus 5)", () => {
-  const scope = conformChecksFrom({ routes: ROUTES, specs: [] }).filter((c) => c.kind === "scope");
-  assert.deepEqual(scope.map((c) => [c.request.method, c.request.path, c.request.as, c.expect.status]), [["DELETE", "/api/articles/:slug", "other", "denied"]]);
+test("conform: a route whose only guard is optional is open signed out: no 401 check", () => {
+  const access = conformChecksFrom({ routes: ROUTES, specs: [] }).filter((c) => c.kind === "access");
+  assert.ok(!access.some((c) => c.request.path === "/api/tags"));
+});
+
+test("conform: another user's record is denied only where the spec says so (403 or 404 both counting)", () => {
+  assert.deepEqual(conformChecksFrom({ routes: ROUTES, specs: [] }).filter((c) => c.kind === "scope"), [], "using the caller's id isn't refusing others");
+  const scope = conformChecksFrom({ routes: ROUTES, specs: [{ folder: "articles", text: SPEC }] }).filter((c) => c.kind === "scope");
+  assert.deepEqual(scope.map((c) => [c.request.method, c.request.path, c.request.as, c.expect.status, c.rule]), [["DELETE", "/api/articles/:slug", "other", "denied", "articles:FR-005"]]);
   assert.deepEqual(scope[0].needs, ["seed:slug"]);
 });
 
@@ -98,16 +112,16 @@ test("conform run: passing checks, a failing one says what it got, a check with 
   const r = await runChecks(checks, { url: api.url, users: USERS, seeds: { slug: "mine" } });
   const r2 = await runChecks(checks, { url: api.url, users: USERS, seeds: {} });
   api.close();
-  assert.deepEqual(r.failed.map((f) => [f.id, f.got]), [["scope:DELETE /api/articles/:slug:other", 204]], "the leaky API lets another user delete");
+  assert.deepEqual(r.failed.map((f) => [f.id, f.got]), [["scope:articles:FR-005:1", 204]], "the leaky API lets another user delete");
   assert.equal(r.passed, 4);
   assert.equal(r.fidelity_pct, 80);
-  assert.deepEqual(r2.not_run.map((n) => [n.id, n.why]), [["access:DELETE /api/articles/:slug:anon", "no seed for slug"], ["scope:DELETE /api/articles/:slug:other", "no seed for slug"]]);
+  assert.deepEqual(r2.not_run.map((n) => [n.id, n.why]), [["access:DELETE /api/articles/:slug:anon", "no seed for slug"], ["scope:articles:FR-005:1", "no seed for slug"]]);
 });
 
 test("conform run: 403 and 404 both count as denied", async () => {
   const { runChecks } = await import("../core/conform/run.mjs");
   const api = await startApi();
-  const scope = conformChecksFrom({ routes: ROUTES, specs: [] }).filter((c) => c.kind === "scope");
+  const scope = conformChecksFrom({ routes: ROUTES, specs: [{ folder: "articles", text: SPEC }] }).filter((c) => c.kind === "scope");
   const r = await runChecks(scope, { url: api.url, users: USERS, seeds: { slug: "mine" } });
   api.close();
   assert.equal(r.passed, 1);
@@ -118,4 +132,33 @@ test("conform run: refuses an address that isn't local unless allowed", async ()
   for (const u of ["http://localhost:3000", "http://127.0.0.1:8080", "http://[::1]:3000", "http://api.test", "http://app.localhost:5000"]) assert.equal(checkUrl(u), null, u);
   assert.match(checkUrl("https://example.com"), /isn't local/);
   assert.equal(checkUrl("https://example.com", { allowRemote: true }), null);
+});
+
+test("conform: an `as other` row refused with 403 or 404 is a scope check too", () => {
+  const spec = "## Requirements\n\n- **FR-009**: Only the author MAY edit [evidence: src/a.ts:3]\n  - Examples:\n\n    | Given | Then | Proven by |\n    |---|---|---|\n    | PUT /api/articles/:slug { body: \"x\" } as other | 403 | not yet |\n";
+  const c = conformChecksFrom({ routes: [], specs: [{ folder: "articles", text: spec }] });
+  assert.deepEqual(c.map((x) => [x.kind, x.expect.status]), [["scope", 403]]);
+});
+
+test("conform run: {{unique}} is fresh for every request, {{name}} comes from the seed (bodies and expected fields)", async () => {
+  const { runChecks } = await import("../core/conform/run.mjs");
+  const seen = new Set();
+  const server = http.createServer((req, res) => {
+    let body = "";
+    req.on("data", (c) => (body += c));
+    req.on("end", () => {
+      const b = JSON.parse(body || "{}");
+      const dup = seen.has(b.title);
+      seen.add(b.title);
+      res.writeHead(dup ? 422 : 201, { "content-type": "application/json" });
+      res.end(JSON.stringify({ title: b.title, by: b.by }));
+    });
+  });
+  await new Promise((r) => server.listen(0, "127.0.0.1", r));
+  const url = `http://127.0.0.1:${server.address().port}`;
+  const step = { request: { method: "POST", path: "/x", as: "anon", body: '{ title: "T {{unique}}", by: "{{username}}" }' }, expect: { status: 201, fields: { by: '"{{username}}"' } } };
+  const r = await runChecks([{ id: "a", ...step }, { id: "b", steps: [step, step] }], { url, seeds: { username: "ann" } });
+  server.close();
+  assert.equal(r.passed, 2, JSON.stringify(r.failed));
+  assert.ok([...seen].every((t) => /^T \S+$/.test(t)) && seen.size === 3);
 });

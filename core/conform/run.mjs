@@ -25,13 +25,25 @@ function toJson(body) {
 const literal = (s) => { try { return JSON.parse(String(s).replace(/^'([^']*)'$/, '"$1"')); } catch { return String(s); } };
 const at = (obj, dotted) => String(dotted).split(".").reduce((o, k) => (o == null ? undefined : o[k]), obj);
 
+// In a body or an expected value: {{unique}} is fresh for every request (so a journey can
+// create a record a check already made), {{name}} is the seed's value.
+let counter = 0;
+const RUN = Date.now().toString(36);
+function fill(s, seeds, unique) {
+  if (s == null) return s;
+  return String(s).replace(/\{\{(\w+)\}\}/g, (m, k) => (k === "unique" ? unique : seeds[k] != null ? String(seeds[k]) : m));
+}
+
 async function one(step, { url, users, seeds }) {
+  const unique = `${RUN}${(++counter).toString(36)}`;
+  const named = [...`${step.request.body ?? ""} ${JSON.stringify(step.expect.fields ?? {})}`.matchAll(/\{\{(\w+)\}\}/g)].map((m) => m[1]).filter((k) => k !== "unique" && seeds[k] == null);
+  if (named.length) return { notRun: `no seed for ${[...new Set(named)].join(", ")}` };
   const missing = (step.request.path.match(/:(\w+)/g) ?? []).map((p) => p.slice(1)).filter((p) => seeds[p] == null);
   if (missing.length) return { notRun: `no seed for ${missing.join(", ")}` };
   const path = step.request.path.replace(/:(\w+)/g, (m, k) => encodeURIComponent(seeds[k]));
   const as = step.request.as ?? "owner";
   if (as !== "anon" && !users[as]) return { notRun: `no "${as}" user from the seed` };
-  const body = toJson(step.request.body);
+  const body = toJson(fill(step.request.body, seeds, unique));
   const headers = { ...(as === "anon" ? {} : users[as].headers ?? {}), ...(body ? { "content-type": "application/json" } : {}) };
   let res;
   try { res = await fetch(new URL(path, url), { method: step.request.method, headers, body, redirect: "manual" }); } catch (e) { return { notRun: `request failed: ${e.message}` }; }
@@ -42,7 +54,7 @@ async function one(step, { url, users, seeds }) {
     let json = null;
     try { json = await res.json(); } catch {}
     gotFields = {};
-    for (const [k, v] of Object.entries(step.expect.fields)) { gotFields[k] = at(json, k); if (JSON.stringify(gotFields[k]) !== JSON.stringify(literal(v))) fieldsOk = false; }
+    for (const [k, v] of Object.entries(step.expect.fields)) { gotFields[k] = at(json, k); if (JSON.stringify(gotFields[k]) !== JSON.stringify(literal(fill(v, seeds, unique)))) fieldsOk = false; }
   }
   return statusOk && fieldsOk ? { pass: true } : { pass: false, got: statusOk ? gotFields : res.status };
 }
