@@ -22,6 +22,7 @@ const COMMANDS = {
   modules: ["skill/scripts/modules.mjs", "the app's parts as Veridic found them: routes, state, each part's spec and where to write it (--md for a table)"],
   prepare: ["skill/scripts/prepare.mjs", "scope + contract + code for a feature as one document (to start a session with); --module <id> for a whole part with its full context"],
   conform: ["skill/scripts/conform.mjs", "run the conformance suite from the specs against a running app (--url, local only unless --allow-remote): access, scope, examples, journeys; a fidelity %"],
+  screens: ["skill/scripts/screens.mjs", "per screen group: each page's URL, the API routes it calls, its form fields; and the design tokens (--group <id>, --md)"],
   environment: ["skill/scripts/environment.mjs", "the environment the app needs: env vars (required, defaults), services, schedules, deployment; names only (--write: specs/environment/spec.md, --md)"],
   drift: ["skill/scripts/drift.mjs", "where the OpenAPI contract and the code disagree"],
   states: ["skill/scripts/states.mjs", "the feature's state machine and bug-shaped patterns in it"],

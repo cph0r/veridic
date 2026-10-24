@@ -52,8 +52,11 @@ frontend, its screens grouped by who uses them (`guest-app`, `admin-app`, …). 
    > `**FR-001**:` (invariants `**INV-1**:`) ending in its
    > `[evidence: path:line-line]` citations, and each story headed
    > `### User Story 1 - Title (Priority: P1)`. If a spec already covers this
-   > part, extend it instead of writing a second one. For screens, describe
-   > what someone using them sees and can do, and link a server rule in one
+   > part, extend it instead of writing a second one. For screens, run
+   > `veridic screens --group <id> --md` first (each page's URL, the routes it
+   > calls, its form fields, the design tokens) and describe
+   > what someone using them sees and can do, each screen's states (loading,
+   > empty, error, success), and link a server rule in one
    > line (`Server rules: specs/orders FR-016`) instead of restating it. Verify
    > with `veridic cite` and `veridic claims` until both are clean. Then run
    > `veridic coverage --module <id>`: cite each file it lists in a rule, or
