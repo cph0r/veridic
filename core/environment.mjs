@@ -11,7 +11,7 @@ import path from "node:path";
 const read = (repo, f) => { try { return fs.readFileSync(path.join(repo, f), "utf8"); } catch { return null; } };
 const filesOf = (repo) => { try { return execFileSync("git", ["ls-files", "--cached", "--others", "--exclude-standard"], { cwd: repo, encoding: "utf8", maxBuffer: 64 << 20 }).split("\n").filter(Boolean); } catch { return []; } };
 const SKIP = /(?:^|\/)(?:node_modules|dist|build|coverage|\.next|vendor)\//;
-const TEST = /(?:^|\/)(?:__tests__|tests?)\/|\.(?:test|spec)\.[cm]?[jt]sx?$/;
+const TEST = /(?:^|\/)(?:__tests__|tests?|e2e)\/|\.(?:test|spec)\.[cm]?[jt]sx?$/;
 const CODE = /\.[cm]?[jt]sx?$/;
 const TEMPLATE = /(?:^|\/)\.env\.(?:example|sample|template|defaults)$/;
 const lineAt = (text, i) => text.slice(0, i).split("\n").length;
@@ -40,6 +40,15 @@ export function environment(repo) {
     if (required) v.required = true;
     if (def != null && v.default == null) v.default = def;
   };
+  // A Prisma datasource: env("X") is read at connect time, so the app can't start without it.
+  const PROVIDERS = { postgresql: "Postgres", postgres: "Postgres", mysql: "MySQL", mongodb: "MongoDB", sqlserver: "SQL Server", cockroachdb: "CockroachDB" };
+  const prismaServices = [];
+  for (const f of files.filter((x) => /\.prisma$/.test(x))) {
+    const text = read(repo, f) ?? "";
+    for (const m of text.matchAll(/\benv\(\s*["']([A-Z][A-Z0-9_]*)["']\s*\)/g)) note(m[1], `${f}:${lineAt(text, m.index)}`, { required: true });
+    for (const m of text.matchAll(/^\s*provider\s*=\s*["'](\w+)["']/gm))
+      if (PROVIDERS[m[1]]) prismaServices.push({ name: PROVIDERS[m[1]], via: "prisma datasource", at: `${f}:${lineAt(text, m.index + m[0].search(/provider/))}` });
+  }
   for (const f of files) {
     if (TEMPLATE.test(f)) {
       (read(repo, f) ?? "").split("\n").forEach((l, i) => { const m = l.match(/^\s*(?:export\s+)?([A-Z][A-Z0-9_]*)\s*=/); if (m) note(m[1], `${f}:${i + 1}`); });
@@ -66,7 +75,7 @@ export function environment(repo) {
   }
 
   // Services, from every package.json's runtime dependencies.
-  const services = new Map();
+  const services = new Map(prismaServices.map((x) => [x.name, x]));
   for (const f of files.filter((x) => /(?:^|\/)package\.json$/.test(x))) {
     let pkg;
     try { pkg = JSON.parse(read(repo, f) ?? "{}"); } catch { continue; }

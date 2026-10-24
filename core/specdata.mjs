@@ -139,7 +139,9 @@ export function generatedSections(repo, seeds) {
   let dataMd = "";
   try {
     const tables = findTables(repo, g);
-    const uses = routeData(g, [...(sc.routes ?? []), ...(sc.webhooks ?? [])], tables);
+    // scope() lists routes by id; the walk needs the inventory's (file and lines).
+    const ids = new Set([...(sc.routes ?? []), ...(sc.webhooks ?? [])].map((r) => r.id));
+    const uses = routeData(g, inv.routes.filter((r) => ids.has(r.id)), tables);
     const names = [...new Set([...uses.values()].flat().map((u) => u.table))].sort();
     if (names.length) dataMd = dataMarkdown(names.map((n) => tableShape(repo, tables.find((t) => t.name === n))));
   } catch {}

@@ -83,3 +83,16 @@ test("environment: no value from an env file ever reaches the output", () => {
   assert.match(md, /^# Environment/);
   assert.match(md, /\| DATABASE_URL \| yes \| \|/);
 });
+
+test("environment: a Prisma schema's env() is required, its datasource is a service; e2e setup isn't the app's", () => {
+  const r = repoOf({
+    "src/prisma/schema.prisma": 'datasource db {\n  provider = "postgresql"\n  url      = env("DATABASE_URL")\n  directUrl = env("DIRECT_URL")\n}\n',
+    "e2e/src/support/test-setup.ts": "const host = process.env.HOST ?? 'localhost';\n",
+    "src/main.ts": "const port = process.env.PORT || 3000;\n",
+  });
+  const e = environment(r.repo);
+  r.done();
+  assert.deepEqual(e.vars.map((v) => [v.name, v.required]), [["DATABASE_URL", true], ["DIRECT_URL", true], ["PORT", false]]);
+  assert.deepEqual(e.vars[0].at, ["src/prisma/schema.prisma:3"]);
+  assert.deepEqual(e.services, [{ name: "Postgres", via: "prisma datasource", at: "src/prisma/schema.prisma:2" }]);
+});

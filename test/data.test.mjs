@@ -152,3 +152,18 @@ test("data: comments with apostrophes don't hide a Drizzle table's columns", () 
   r.done();
   assert.deepEqual(s.columns.map((c) => c.name), ["id", "name"]);
 });
+
+test("data: the generated sections carry the tables the spec's routes use", async (t) => {
+  const { generatedSections } = await import("../core/specdata.mjs");
+  const { ensureIndex, findCodegraph } = await import("../core/indexer.mjs");
+  if (!findCodegraph()) return t.skip("no CodeGraph");
+  const r = repoOf({
+    "prisma/schema.prisma": PRISMA,
+    "package.json": '{ "name": "x", "dependencies": { "express": "4" } }\n',
+    "src/app.js": 'const express = require("express");\nconst prisma = require("./prisma");\nconst app = express();\napp.get("/users", async (req, res) => {\n  res.json(await prisma.user.findMany());\n});\napp.listen(3000);\n',
+  });
+  ensureIndex(r.repo, { build: true, log: () => {} });
+  const g = generatedSections(r.repo, ["GET /users"]);
+  r.done();
+  assert.match(g.data, /## Data \(generated\)[\s\S]*### User/);
+});
