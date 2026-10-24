@@ -45,11 +45,11 @@ const col = (name, type, nullable, extra = {}) => ({ name, type, nullable, ...(e
 
 // ---- Prisma ----
 function prismaShape(repo, file, text, line) {
-  const enums = new Map(), models = new Map();
+  const enums = new Map(), models = new Map(), bodies = new Map();
   for (const f of files(repo).filter((x) => x.endsWith(".prisma"))) {
     const t = f === file ? text : read(repo, f) ?? "";
     for (const m of t.matchAll(/^\s*enum\s+(\w+)\s*\{([\s\S]*?)^\s*\}/gm)) enums.set(m[1], m[2].split("\n").map((l) => l.trim().split(/\s/)[0]).filter((v) => v && !v.startsWith("//") && !v.startsWith("@")));
-    for (const m of t.matchAll(/^\s*model\s+(\w+)\s*\{([\s\S]*?)^\s*\}/gm)) models.set(m[1], m[2].match(/@@map\(\s*(?:name:\s*)?["'](\w+)["']/)?.[1] ?? m[1]);
+    for (const m of t.matchAll(/^\s*model\s+(\w+)\s*\{([\s\S]*?)^\s*\}/gm)) models.set(m[1], m[2].match(/@@map\(\s*(?:name:\s*)?["'](\w+)["']/)?.[1] ?? m[1]), bodies.set(m[1], m[2]);
   }
   const re = /^\s*model\s+(\w+)\s*\{([\s\S]*?)^\s*\}/gm;
   let m;
@@ -57,8 +57,14 @@ function prismaShape(repo, file, text, line) {
   while ((m = re.exec(text)) && lineAt(text, at(m)) < line);
   if (!m) return null;
   const start = lineAt(text, at(m)), end = lineAt(text, m.index + m[0].length);
-  const columns = [], primaryKey = [], unique = [], foreignKeys = [];
+  const columns = [], primaryKey = [], unique = [], foreignKeys = [], manyToMany = [];
   const later = [];
+  const relName = (attrs) => attrs.match(/@relation\(\s*(?:name:\s*)?["'](\w+)["']/)?.[1] ?? null;
+  // Lists on both sides with no key column: Prisma's implicit join table.
+  const listsBack = (field, type, name) => (bodies.get(type) ?? "").split("\n").some((raw) => {
+    const f = raw.replace(/\/\/.*$/, "").trim().match(/^(\w+)\s+(\w+)\[\]\s*(.*)$/);
+    return f && f[2] === m[1] && relName(f[3]) === name && !(type === m[1] && f[1] === field);
+  });
   for (const raw of m[2].split("\n")) {
     const l = raw.replace(/\/\/.*$/, "").trim();
     if (!l) continue;
@@ -68,6 +74,7 @@ function prismaShape(repo, file, text, line) {
     const [, field, type, list, opt, attrs] = f;
     const rel = attrs.match(/@relation\(([^)]*)\)/);
     if (models.has(type) || list) {
+      if (list && models.has(type) && listsBack(field, type, relName(attrs))) manyToMany.push({ field, table: models.get(type), ...(relName(attrs) ? { via: relName(attrs) } : {}) });
       if (rel) {
         const fields = rel[1].match(/fields:\s*\[([^\]]*)\]/)?.[1], refs = rel[1].match(/references:\s*\[([^\]]*)\]/)?.[1];
         if (fields) foreignKeys.push({ columns: fields.split(",").map((x) => x.trim()), table: models.get(type) ?? type, references: (refs ?? "").split(",").map((x) => x.trim()).filter(Boolean) });
@@ -87,7 +94,7 @@ function prismaShape(repo, file, text, line) {
     const un = l.match(/^@@unique\(\s*\[([^\]]*)\]/)?.[1];
     if (un) unique.push(un.split(",").map((x) => x.trim()));
   }
-  return { start, end, columns, primaryKey, unique, foreignKeys };
+  return { start, end, columns, primaryKey, unique, foreignKeys, ...(manyToMany.length ? { manyToMany } : {}) };
 }
 
 // ---- Drizzle ----
@@ -208,7 +215,8 @@ function migrationDisagreement(repo, table, shape) {
 
 /**
  * A table's shape: { name, kind, at: "file:start-end", hash, columns, primaryKey, unique,
- * foreignKeys, disagreement? } (disagreement: a migration for the same table with other columns).
+ * foreignKeys, manyToMany?, disagreement? } (manyToMany: Prisma lists on both sides; disagreement: a
+ * migration for the same table with other columns).
  */
 export function tableShape(repo, table) {
   if (!table) return null;
@@ -217,7 +225,7 @@ export function tableShape(repo, table) {
   const s = table.kind === "prisma" ? prismaShape(repo, table.file, text, line) : table.kind === "drizzle" ? drizzleShape(repo, table.file, text, line) : table.kind === "sql" ? sqlShape(text, line) : null;
   if (!s) return { name: table.name, kind: table.kind, at: table.at, columns: [], primaryKey: [], unique: [], foreignKeys: [], note: `columns aren't read for ${table.kind} yet` };
   const lines = text.split("\n").slice(s.start - 1, s.end);
-  const shape = { name: table.name, kind: table.kind, at: `${table.file}:${s.start}-${s.end}`, hash: citeHash(lines), columns: s.columns, primaryKey: s.primaryKey, unique: s.unique, foreignKeys: s.foreignKeys };
+  const shape = { name: table.name, kind: table.kind, at: `${table.file}:${s.start}-${s.end}`, hash: citeHash(lines), columns: s.columns, primaryKey: s.primaryKey, unique: s.unique, foreignKeys: s.foreignKeys, ...(s.manyToMany ? { manyToMany: s.manyToMany } : {}) };
   const dis = table.kind !== "sql" ? migrationDisagreement(repo, table.name, shape) : null;
   return dis ? { ...shape, disagreement: dis } : shape;
 }
@@ -236,6 +244,7 @@ export function dataMarkdown(shapes) {
       out.push(row([c.name, c.enum ? `${c.type} (${c.enum.join(", ")})` : c.type, c.nullable ? "yes" : "no", c.default ?? "", key]));
     }
     const multi = [...t.unique.filter((u) => u.length > 1).map((u) => `Unique together: ${u.join(", ")}.`), ...t.foreignKeys.filter((f) => f.columns.length > 1 || !t.columns.some((c) => c.name === f.columns[0])).map((f) => `${f.columns.join(", ")} → ${f.table}.${f.references.join(", ")}.`)];
+    if (t.manyToMany) multi.push(`Many-to-many: ${t.manyToMany.map((x) => `${x.field} ↔ ${x.table}${x.via ? ` (${x.via})` : ""}`).join("; ")}.`);
     if (t.disagreement) multi.push(`The migration at \`${t.disagreement.at}\` disagrees: only in the schema: ${t.disagreement.onlyInSchema.join(", ") || "none"}; only in the migration: ${t.disagreement.onlyInMigration.join(", ") || "none"}.`);
     out.push("", ...multi, ...(multi.length ? [""] : []));
   }

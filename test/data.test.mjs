@@ -167,3 +167,20 @@ test("data: the generated sections carry the tables the spec's routes use", asyn
   r.done();
   assert.match(g.data, /## Data \(generated\)[\s\S]*### User/);
 });
+
+test("data: Prisma's implicit many-to-many links (both sides lists), named and self ones too", () => {
+  const schema = [
+    "model Article {", "  id Int @id", "  tagList Tag[]", "  author User @relation(\"UserArticles\", fields: [authorId], references: [id])", "  authorId Int",
+    "  favoritedBy User[] @relation(\"UserFavorites\")", "  comments Comment[]", "}", "",
+    "model Comment {", "  id Int @id", "  article Article @relation(fields: [articleId], references: [id])", "  articleId Int", "}", "",
+    "model Tag {", "  id Int @id", "  articles Article[]", "}", "",
+    "model User {", "  id Int @id", "  articles Article[] @relation(\"UserArticles\")", "  favorites Article[] @relation(\"UserFavorites\")",
+    "  followedBy User[] @relation(\"UserFollows\")", "  following User[] @relation(\"UserFollows\")", "}", "",
+  ].join("\n");
+  const r = repoOf({ "prisma/schema.prisma": schema });
+  const [a, u] = [shapeOf(r.repo, "Article"), shapeOf(r.repo, "User")];
+  r.done();
+  assert.deepEqual(a.manyToMany, [{ field: "tagList", table: "Tag" }, { field: "favoritedBy", table: "User", via: "UserFavorites" }], "comments is one-to-many: Comment holds the key");
+  assert.deepEqual(u.manyToMany, [{ field: "favorites", table: "Article", via: "UserFavorites" }, { field: "followedBy", table: "User", via: "UserFollows" }, { field: "following", table: "User", via: "UserFollows" }]);
+  assert.match(dataMarkdown([a]), /Many-to-many: tagList ↔ Tag; favoritedBy ↔ User \(UserFavorites\)\./);
+});
