@@ -69,17 +69,21 @@ frontend, its screens grouped by who uses them (`guest-app`, `admin-app`, …). 
    rule id), and each guarantee with `[rules: apps:FR-003, apps-host:FR-002]`.
    Run `veridic check --spec specs/product/spec.md` until it's clean. A step or
    guarantee no rule makes true is a gap: say so in the report.
-6. **Measure again.** Run `veridic coverage` and report coverage before and
+6. **The environment spec.** Run `veridic environment --write`: it writes
+   `specs/environment/spec.md` from the code (env vars and whether startup needs
+   them, services, schedules, deployment; names only, never values). Read it,
+   and add a line under any service whose purpose the code doesn't make clear.
+7. **Measure again.** Run `veridic coverage` and report coverage before and
    after, and what's left: each part or folder still not described, with the
    reason its agent gave. If parts from step 1 remain and the user agreed to
    all of them, continue with the next four; else stop, and say which are left.
-7. **Link the tests you already have.** For each part a spec was written or
+8. **Link the tests you already have.** For each part a spec was written or
    extended for, run `veridic tests --module <id>`. For the parts with link
    candidates, run the `veridic-test-writer` agent with the part id and "link
    only: steps 1, 2 and 5", at most four at a time, in the foreground, and
    wait for every one. Report rules proven before and after, per part. The
    yes from step 2 covers this; skip it if the user said not to touch tests.
-8. **Report.** Show `veridic modules --md`. Then list the specs a person
+9. **Report.** Show `veridic modules --md`. Then list the specs a person
    should read before trusting them: parts that move money, have high issues,
    or handle sign-in and roles. These specs were recovered from the code as it
    is, so someone has to confirm that each MUST is what the app should do.
