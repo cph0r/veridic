@@ -162,3 +162,12 @@ paths too); rendered specs never got their data tables; the environment spec mis
 `DATABASE_URL` from Prisma's `env()`; Prisma's many-to-many links weren't read. RealWorld's
 specs gained examples and two parts (profiles, tags). CloudCrane gate: unchanged throughout.
 
+**Phase 4 (2026-10-24).** The rebuild benchmark (veridic-bench `REBUILD.md`): a fresh agent with
+only RealWorld's `specs/` rebuilt the API in Fastify and plain SQL (586 lines, 3 minutes).
+The original and the rebuild both pass 48/48 visible checks and 22/22 held-out rows written
+from the rules' text alone. 3 of 20 edge requests answer the same. The 17 that don't: error
+bodies no spec gives (4), the original's own crashes, which the specs flag as risks and the
+rebuild didn't copy (8), and a lost schema default (5: Veridic cut Prisma comments at `//`
+inside a string; fixed). Next gaps: a generated errors section, and a per-bug "rebuilds
+copy this or not".
+
