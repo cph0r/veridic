@@ -273,3 +273,8 @@ export function dataByModule(modules, uses, tables) {
 }
 
 export { RANK };
+
+// Table shapes for the spec's data section (core/datashape.mjs), with this file's table finder.
+import { tableShape, dataMarkdown, dataDrift as driftWith } from "./datashape.mjs";
+export { tableShape, dataMarkdown };
+export const dataDrift = (spec, repo) => driftWith(spec, repo, { findTables });

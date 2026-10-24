@@ -10,6 +10,7 @@ import { checkCitations } from "../../core/citations.mjs";
 import { storyHeadingProblems } from "../../core/report.mjs";
 import { execFileSync } from "node:child_process";
 import { PRODUCT_SPEC, parseProduct, productProblems } from "../../core/product.mjs";
+import { dataDrift } from "../../core/data.mjs";
 import { parseArgs, emit, fail, run } from "./_cli.mjs";
 
 const usage = "cite.mjs --repo <path> --spec <spec.md> [--base <dir>] [--fr FR-001,FR-002] [--text]";
@@ -41,11 +42,13 @@ run(() => {
     }
     product = productProblems(parseProduct(text), specs);
   }
+  // A data section that no longer matches the schema (a column added, removed or renamed).
+  const dataProblems = /^## Data \(generated\)/m.test(text) ? dataDrift(text, a.repo) : [];
   const wanted = a.fr ? new Set(String(a.fr).split(",").map((x) => x.trim())) : null;
   const problem = (c) => !c.resolves || c.warnings;
   const citations = a.text ? result.citations : result.citations.filter((c) => problem(c) || wanted?.has(c.fr));
   emit(
-    { repo: a.repo, spec: specPath, summary: result.summary, citations, ...(stories.length ? { story_warnings: stories } : {}), ...(product.length ? { product_problems: product } : {}), ...(a.text || wanted ? {} : { note: "only citations with a problem are listed; --fr <ids> shows cited text" }) },
-    result.summary.unresolved || result.summary.with_warnings || product.length,
+    { repo: a.repo, spec: specPath, summary: result.summary, citations, ...(stories.length ? { story_warnings: stories } : {}), ...(product.length ? { product_problems: product } : {}), ...(dataProblems.length ? { data_drift: dataProblems } : {}), ...(a.text || wanted ? {} : { note: "only citations with a problem are listed; --fr <ids> shows cited text" }) },
+    result.summary.unresolved || result.summary.with_warnings || product.length || dataProblems.length,
   );
 }, usage);

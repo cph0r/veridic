@@ -9,6 +9,7 @@ import { routeInventory, normRoute } from "./routes.mjs";
 import { scope } from "./scope.mjs";
 import { findOpenapi, loadContract, drift } from "./contract.mjs";
 import { stateMachine, stateMachineMarkdown } from "./states.mjs";
+import { findTables, routeData, tableShape, dataMarkdown } from "./data.mjs";
 
 const EVIDENCE = /^[^\s:]+:\d+(?:-\d+)?(?:#[^@]+@\d+)?$/;
 const ID = { requirement: /^FR-\d{3}$/, invariant: /^INV-\d+$/, risk: /^R-?\d+$/, story: /^US\d+$/, decision: /^D-\d{3}$/ };
@@ -128,7 +129,15 @@ export function generatedSections(repo, seeds) {
     }
     contractMd = lines.join("\n") + "\n";
   }
-  return { contract: contractMd, states: stateMachineMarkdown(stateMachine(g, sc)) };
+  // The tables the feature's routes use: their columns, keys and enums, from the schema.
+  let dataMd = "";
+  try {
+    const tables = findTables(repo, g);
+    const uses = routeData(g, [...(sc.routes ?? []), ...(sc.webhooks ?? [])], tables);
+    const names = [...new Set([...uses.values()].flat().map((u) => u.table))].sort();
+    if (names.length) dataMd = dataMarkdown(names.map((n) => tableShape(repo, tables.find((t) => t.name === n))));
+  } catch {}
+  return { contract: contractMd, states: stateMachineMarkdown(stateMachine(g, sc)), data: dataMd };
 }
 
 /** spec.json -> spec.md, in Spec Kit's section order. */
@@ -178,6 +187,7 @@ export function renderMarkdown(spec, generated = {}) {
 
   if (generated.contract) out.push(generated.contract);
   if (generated.states) out.push(generated.states);
+  if (generated.data) out.push(generated.data);
 
   if (spec.success_criteria?.length) out.push("## Success Criteria", "", ...spec.success_criteria.map((c, i) => `- **SC-${String(i + 1).padStart(3, "0")}**: ${c.text ?? c}${ev(c.evidence)}`), "");
   if (spec.assumptions?.length) out.push("## Assumptions", "", ...spec.assumptions.map((a) => `- ${a}`), "");
