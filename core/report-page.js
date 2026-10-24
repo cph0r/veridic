@@ -62,7 +62,7 @@ var veridicModel = (D) => {
   const specs = (D.specs || []).map((s) => {
     const rules = (s.requirements || []).filter((r) => r.requirement !== false);
     const by = (k) => rules.filter((r) => stateOf(r).key === k);
-    const sp = { path: s.path, name: nameOf(s), rules, stories: (s.doc && s.doc.stories) || [], criteria: (s.doc && s.doc.criteria) || [], meta: (s.doc && s.doc.meta) || {},
+    const sp = { path: s.path, name: nameOf(s), rules, data: s.data || [], stories: (s.doc && s.doc.stories) || [], criteria: (s.doc && s.doc.criteria) || [], meta: (s.doc && s.doc.meta) || {},
       broken: by("broken"), lost: by("lost"), stale: by("stale"), proven: by("proven"), weak: by("weak"),
       untested: rules.filter((r) => statusOf(r).tone === "none") };
     sp.tone = !rules.length ? "none" : sp.broken.length ? "bad" : sp.lost.length || sp.stale.length || sp.weak.length ? "warn" : sp.untested.length ? "todo" : "good";
@@ -219,6 +219,46 @@ var veridicModel = (D) => {
       .sort((a, b) => RANK[stateOf(a.rule).key] - RANK[stateOf(b.rule).key]);
   };
   const ruleCounts = (p) => Object.fromEntries(Object.keys(RULE_STATES).map((k) => [k, partRules(p, { state: k }).length]));
+  // ---- what the specs carry beyond rules: worked examples, data tables, the last conform run ----
+  const RUN = new Map(((D.conform && D.conform.results) || []).map((x) => [x.id, x]));
+  const ran = !!D.conform;
+  const gotText = (g) => (g == null ? "" : typeof g === "object" ? JSON.stringify(g) : String(g));
+  // A check's outcome as a dot and a word: Passed (404), Failed (got 200), Not run.
+  const runWord = (x) => !x ? ["none", "Not checked"] : x.outcome === "passed" ? ["good", "Passed" + (typeof x.got === "number" ? " (" + x.got + ")" : "")] : x.outcome === "failed" ? ["bad", "Failed (got " + gotText(x.got) + ")"] : ["none", "Not run"];
+  const pst = ([tone, word], title) => '<span class="pst ' + tone + '"' + (title ? ' title="' + esc(title) + '"' : "") + ">" + esc(word) + "</span>";
+  // A rule's worked examples, one short line each: a dot and a word (worst first: Failed in the
+  // last conform run, Proven by a test, Passed in the last run, Not yet), the request and the
+  // status it gets. The body, expected fields, test and run are in the hover bubble.
+  const shortGiven = (g) => { const m = String(g).match(/^([A-Z]+)\s+(\S+)/); return m ? m[1] + " " + m[2] : String(g); };
+  const shortThen = (t) => String(t).split(",")[0].trim();
+  const plain = (s) => String(s).replace(/\{\{unique\}\}/g, "…").replace(/\{\{(\w+)\}\}/g, "<$1>");
+  function examplesHTML(r, specPath) {
+    const ex = r.examples || [];
+    if (!ex.length) return "";
+    const folder = String(specPath || "").split("/").slice(-2)[0];
+    const lines = ex.map((x, i) => {
+      const k = folder + ":" + r.id + ":" + (i + 1), res = RUN.get("example:" + k) || RUN.get("scope:" + k);
+      const word = res && res.outcome === "failed" ? ["bad", "Failed"] : x.proven_by ? ["good", "Proven"] : res && res.outcome === "passed" ? ["good", "Passed"] : ["none", "Not yet"];
+      const tip = ["Given: " + plain(x.given), "Then: " + plain(x.then), "Test: " + (x.proven_by || "none yet"), ...(res ? ["Last run: " + runWord(res)[1].toLowerCase()] : [])].join("\n");
+      return '<div class="exl" title="' + esc(tip) + '">' + pst(word) + "<code>" + esc(shortGiven(x.given)) + " → " + esc(shortThen(x.then)) + "</code></div>";
+    }).join("");
+    return '<div class="mh">Examples</div><div class="exls">' + lines + "</div>";
+  }
+  // A part's sheet tabs: Data only when its specs have a data section.
+  const BASE_TABS = [["overview", "Overview"], ["stories", "Stories"], ["rules", "Rules"]];
+  const tablesOf = (p) => { const seen = new Set(); return p.specs.flatMap((sp) => sp.data || []).filter((t) => !seen.has(t.name) && seen.add(t.name)); };
+  const partTabs = (p) => (tablesOf(p).length ? [...BASE_TABS, ["data", "Data"]] : BASE_TABS);
+  // A part's tables as drawn in its spec; one the schema changed under is outlined with a Δ.
+  function dataHTML(p) {
+    const ts = tablesOf(p);
+    if (!ts.length) return '<div class="empty-req">No data section in this part\'s spec.</div>';
+    return ts.map((t) => '<div class="dtab' + (t.changed ? " changed" : "") + '"><div class="dh">' + (t.changed ? '<span class="rev">Δ</span>' : "") + "<b>" + esc(t.name) + "</b>" + (t.at ? '<span class="loc">' + esc(t.at) + "</span>" : "") + "</div>" +
+      (t.changed ? '<div class="why">The schema changed: ' + esc(t.changed) + "</div>" : "") +
+      (t.columns.length ? '<div class="exwrap"><table class="ex"><thead><tr><th>Column</th><th>Type</th><th>Null</th><th>Default</th><th>Key</th></tr></thead><tbody>' + t.columns.map((c) => "<tr><td><code>" + esc(c.name) + "</code></td><td>" + esc(c.type) + "</td><td>" + (c.nullable ? "yes" : "") + "</td><td>" + esc(c.default) + "</td><td>" + esc(c.key) + "</td></tr>").join("") + "</tbody></table></div>" : "") +
+      t.notes.map((n) => '<p class="dnote">' + esc(n) + "</p>").join("") + "</div>").join("");
+  }
+  const journeyRun = (j) => (ran ? runWord(RUN.get("journey:" + j.id)) : null);
+
   // ---- the product spec: what the app does end to end, in the state of the part rules it names ----
   // A dot per state (colour and a word, never a checkbox), the id last and muted, the rule ids
   // behind "Rules (n)", and why a step isn't proven in one line.
@@ -264,7 +304,8 @@ var veridicModel = (D) => {
     const row = (id, cells) => '<tr class="prow" data-pt="' + esc(id) + '" tabindex="0">' + cells + "</tr>";
     const journeys = pr.journeys.map((j) => {
       const [tone, word] = journeyWord(j);
-      return row(j.id, '<td><span class="ptl">' + esc(j.title) + '</span></td><td class="c-dots"><span class="dots">' + j.steps.map((st) => dot(st.state)).join("") + '</span></td><td><span class="pst ' + tone + '">' + esc(word) + '</span></td><td class="c-id"><span class="pid">' + esc(j.id) + "</span></td>");
+      const jr = journeyRun(j);
+      return row(j.id, '<td><span class="ptl">' + esc(j.title) + '</span></td><td class="c-dots"><span class="dots">' + j.steps.map((st) => dot(st.state)).join("") + '</span></td><td><span class="pst ' + tone + '">' + esc(word) + "</span>" + (jr ? '<span class="prun">Last run: ' + esc(jr[1].toLowerCase()) + "</span>" : "") + '</td><td class="c-id"><span class="pid">' + esc(j.id) + "</span></td>");
     }).join("");
     const promise = (g) => {
       const [tone, word] = promiseWord(g), [t, rest] = titled(g.text), w = g.state === "proven" ? "" : why(g.refs);
@@ -295,12 +336,13 @@ var veridicModel = (D) => {
     const head = '<div class="part-head"><div><h3' + (t.length > 40 ? ' class="long"' : "") + ">" + esc(t) + '</h3><div class="pitem-sub"><span class="pst ' + tone + '">' + esc(word) + '</span><span class="pid">' + esc(id) + '</span></div></div><button class="close" aria-label="Close">✕</button></div>';
     const list = (refs) => rulesHTML(refs).replace(/^<details class="rl"><summary>Rules \(\d+\)<\/summary>/, '<div class="rlist">').replace(/<\/details>$/, "</div>");
     let body;
-    if (j) body = '<div class="sub-h">' + plural(j.steps.length, "step") + '</div><ol class="psteps">' + j.steps.map((st) => { const w = st.state === "proven" ? "" : why(st.refs); return "<li>" + dot(st.state) + '<div class="stx"><span>' + esc(st.text) + "</span>" + (w ? '<span class="why">' + esc(w) + "</span>" : "") + list(st.refs) + "</div></li>"; }).join("") + "</ol>";
+    const jr = j && journeyRun(j);
+    if (j) body = (jr ? '<p class="prun">Last run' + (D.conform.at ? " (" + esc(String(D.conform.at).slice(0, 16).replace("T", " ")) + ")" : "") + ": " + pst([jr[0], jr[1].toLowerCase()]) + "</p>" : "") + '<div class="sub-h">' + plural(j.steps.length, "step") + '</div><ol class="psteps">' + j.steps.map((st) => { const w = st.state === "proven" ? "" : why(st.refs); return "<li>" + dot(st.state) + '<div class="stx"><span>' + esc(st.text) + "</span>" + (w ? '<span class="why">' + esc(w) + "</span>" : "") + list(st.refs) + "</div></li>"; }).join("") + "</ol>";
     else { const w = g.state === "proven" ? "" : why(g.refs); body = (rest ? '<p class="psent">' + esc(rest) + "</p>" : "") + (w ? '<p class="why">' + esc(w) + "</p>" : "") + '<div class="sub-h">' + plural(g.refs.length, "rule") + " that make it true</div>" + list(g.refs); }
     return head + '<div class="ptab pitem">' + body + "</div>";
   }
 
-  return { productHTML, productParts, productItemHTML, storiesOf, rulesInNoStory, partRules, ruleCounts, rows, page, parts, partOf, P, ruleHome, cleanView, specs, S, counts, fix, later, verdict, title: app.title || D.name, stateOf, statusOf, ruleText, RANK, plural, esc, cap, REQ };
+  return { examplesHTML, dataHTML, partTabs, productHTML, productParts, productItemHTML, storiesOf, rulesInNoStory, partRules, ruleCounts, rows, page, parts, partOf, P, ruleHome, cleanView, specs, S, counts, fix, later, verdict, title: app.title || D.name, stateOf, statusOf, ruleText, RANK, plural, esc, cap, REQ };
 };
 
 (() => {
@@ -420,7 +462,7 @@ var veridicModel = (D) => {
 
   // ---- a spec, in a sheet: what needs attention, its stories, its rules ----
   const fold = (g, items, render, n, label) => items.slice(0, n).map((x) => render(x)).join("") + items.slice(n).map((x) => render(x, g)).join("") + (items.length > n ? '<button class="showall" data-unfold="' + g + '">' + label(items.length - n) + " →</button>" : "");
-  function ruleHTML(r, g) {
+  function ruleHTML(r, g, inSpec) {
     const t = M.ruleText(r), st = M.stateOf(r);
     const where = (r.cites || []).map((c) => '<span class="loc' + (c.resolves === false ? " gone" : "") + '">' + esc(c.cite) + "</span>").join("");
     const tests = (r.tests || []).map((x) => '<span class="loc">' + esc(x) + "</span>").join("");
@@ -428,15 +470,15 @@ var veridicModel = (D) => {
     // A rule the code changed under (or whose code is gone) gets a straight amber outline and a Δ, as on a drawing.
     const rev = st.key === "stale" || st.key === "lost";
     return '<button class="req' + (rev ? " rev-cloud" : "") + (g ? " x" : "") + '"' + hid(g) + ' data-rule="' + esc(r.id) + '"><span class="mark ' + st.tone + '">' + (rev ? "Δ" : st.mark) + '</span><span class="tx"><span><span class="rid">' + esc(r.id) + "</span> " + t.head + '</span><div class="why">' + esc(st.label) + "</div>" +
-      '<div class="more">' + (t.rest ? "<p>" + t.rest + "</p>" : "") + (checks ? '<div class="mh">Checks</div><ul>' + checks + "</ul>" : "") + (where ? '<div class="mh">In the code</div>' + where : "") + (tests ? '<div class="mh">Proven by</div>' + tests : "") + "</div></span></button>";
+      '<div class="more">' + (t.rest ? "<p>" + t.rest + "</p>" : "") + (checks ? '<div class="mh">Checks</div><ul>' + checks + "</ul>" : "") + M.examplesHTML(r, inSpec) + (where ? '<div class="mh">In the code</div>' + where : "") + (tests ? '<div class="mh">Proven by</div>' + tests : "") + "</div></span></button>";
   }
   // ---- a part's sheet, in three tabs: Overview, Stories, Rules ----
-  const TABS = [["overview", "Overview"], ["stories", "Stories"], ["rules", "Rules"]];
+  const TABS = [["overview", "Overview"], ["stories", "Stories"], ["rules", "Rules"], ["data", "Data"]];
   const RSTATES = [["all", "All"], ["attention", "Attention"], ["weak", "Weak test"], ["untested", "Not tested"], ["proven", "Proven"]];
   const tabOf = (k) => (TABS.some(([t]) => t === k) ? k : "overview");
   let sheet = { tab: tabOf(store.get("sheet-tab")), rstate: "all", q: "", by: "state" };
   const tag = (h, inn) => h.replace(/data-rule="/g, 'data-in="' + esc(inn) + '" data-rule="');
-  const ruleRow = (x, g) => tag(ruleHTML(x.rule, g), x.spec);
+  const ruleRow = (x, g) => tag(ruleHTML(x.rule, g, x.spec), x.spec);
   // one line per rule a story names: its state, id and first words; a tap opens it in Rules
   const ruleLine = (r, inn) => { const st = M.stateOf(r); return '<span class="rl" data-ref="' + esc(r.id) + '" data-in="' + esc(inn) + '"><span class="mark ' + st.tone + '">' + st.mark + '</span><span><span class="rid">' + esc(r.id) + "</span> " + M.ruleText(r).head + "</span></span>"; };
   function storyHTML(x, g) {
@@ -490,9 +532,10 @@ var veridicModel = (D) => {
   function partHTML(p) {
     const head = '<div class="part-head"><div><h3' + (p.name.length > 40 ? ' class="long"' : "") + ">" + esc(p.name) + '</h3></div><button class="close" aria-label="Close">✕</button></div>';
     if (!p.specs.length) return head + '<div class="cols"><div><div class="empty-req">Nothing describes ' + esc(p.name) + ' yet. Ask Claude to <b>write a spec for ' + esc(p.name) + "</b> (<code>/veridic:specs</code> does every part that has none).</div></div></div>";
-    const rc = M.ruleCounts(p), n = { overview: null, stories: p.stories.length, rules: rc.all };
-    const tabs = '<div class="tabs" role="tablist">' + TABS.map(([k, label]) => '<button role="tab" data-tab="' + k + '" aria-selected="' + (sheet.tab === k) + '">' + label + (n[k] != null ? '<span class="n">' + n[k] + "</span>" : "") + "</button>").join("") + "</div>";
-    const body = sheet.tab === "stories" ? storiesHTML(p) : sheet.tab === "rules" ? rulesTabHTML(p, rc) : overviewHTML(p, rc);
+    const pt = M.partTabs(p), cur = pt.some(([k]) => k === sheet.tab) ? sheet.tab : "overview";
+    const rc = M.ruleCounts(p), n = { overview: null, stories: p.stories.length, rules: rc.all, data: new Set(p.specs.flatMap((sp) => (sp.data || []).map((t) => t.name))).size };
+    const tabs = '<div class="tabs" role="tablist">' + pt.map(([k, label]) => '<button role="tab" data-tab="' + k + '" aria-selected="' + (cur === k) + '">' + label + (n[k] != null ? '<span class="n">' + n[k] + "</span>" : "") + "</button>").join("") + "</div>";
+    const body = cur === "stories" ? storiesHTML(p) : cur === "rules" ? rulesTabHTML(p, rc) : cur === "data" ? M.dataHTML(p) : overviewHTML(p, rc);
     return head + tabs + '<div class="tabbody" role="tabpanel">' + body + "</div>";
   }
   const drawSheet = () => { const p = M.P.get(open); if (p) $("#part").innerHTML = partHTML(p); };

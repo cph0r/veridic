@@ -17,7 +17,7 @@ import { specCoverage } from "./coverage.mjs";
 import { staleness } from "./staleness.mjs";
 import { findModules } from "./modules.mjs";
 import { linkUi } from "./ui.mjs";
-import { findTables, routeData, dataByModule } from "./data.mjs";
+import { findTables, routeData, dataByModule, dataDrift } from "./data.mjs";
 import { modularity, duplication } from "./structure.mjs";
 import { testsReaching } from "./tests.mjs";
 
@@ -161,6 +161,25 @@ export function areaOf(p) {
   return SCOPE.has(segs[0]) && segs[1] ? `${segs[0]}/${segs[1]}` : segs[0];
 }
 
+/** A spec's generated data section as tables: [{ name, at, columns: [{ name, type, nullable, default, key }], notes }]. */
+export function dataTablesOf(text) {
+  const i = String(text).search(/^## Data \(generated\)/m);
+  if (i < 0) return [];
+  const section = String(text).slice(i).split(/\n## /)[0];
+  return section.split(/\n### /).slice(1).map((block) => {
+    const [head, ...lines] = block.split("\n");
+    const t = { name: head.match(/^(\S+)/)?.[1] ?? head, at: head.match(/\[evidence:\s*([^\]~]+)/)?.[1]?.trim() ?? null, columns: [], notes: [] };
+    for (const l of lines) {
+      if (/^\|/.test(l)) {
+        const c = l.replace(/^\||\|$/g, "").split("|").map((x) => x.trim());
+        if (c.length >= 5 && c[0] !== "Column" && !/^-+$/.test(c[0])) t.columns.push({ name: c[0], type: c[1], nullable: c[2] === "yes", default: c[3], key: c[4] });
+      } else if (l.trim() && !/^_.*_$/.test(l.trim())) t.notes.push(l.trim());
+      else if (/^_.*_$/.test(l.trim())) t.notes.push(l.trim().replace(/^_|_$/g, ""));
+    }
+    return t;
+  });
+}
+
 function specSection(repo, file, m) {
   const text = fs.readFileSync(file, "utf8");
   const doc = specDoc(text);
@@ -198,10 +217,17 @@ function specSection(repo, file, m) {
     const requirement = /^(?:FR|NFR|R|AC|INV|D)-?\d+[a-z]?$/.test(id); // success criteria are listed apart
     const text = (r.text ?? "").replace(/^\*\*[\w-]+\*\*\s*(?:\([^)]*\))?\s*:?\s*/, "").replace(/^#{1,6}\s+[\w-]+\s*[:.\-–—]\s*/, "");
     const extra = doc.reqs[id] ?? {};
-    return { id, requirement, text, section: extra.section ?? null, holds: extra.holds ?? null, checks: extra.vcs ?? [], status: r.status ?? "none", ...(r.needs ? { needs: r.needs } : {}), tests: (r.tests ?? []).map((t) => (typeof t === "string" ? t : t.at ?? `${t.file}:${t.line}`)), stale: stale.has(id), cites };
+    return { id, requirement, text, section: extra.section ?? null, holds: extra.holds ?? null, checks: extra.vcs ?? [], ...(extra.examples?.length ? { examples: extra.examples } : {}), status: r.status ?? "none", ...(r.needs ? { needs: r.needs } : {}), tests: (r.tests ?? []).map((t) => (typeof t === "string" ? t : t.at ?? `${t.file}:${t.line}`)), stale: stale.has(id), cites };
   });
   const { reqs: _, ...rest } = doc;
-  return { spec: m.spec, path: path.relative(repo, file), numbers: m, doc: rest, requirements: reqs };
+  // The tables its data section lists; one the schema changed under says how.
+  let data = dataTablesOf(text);
+  if (data.length) {
+    let drift = [];
+    try { drift = dataDrift(text, repo); } catch {}
+    data = data.map((t) => { const d = drift.find((x) => x.table === t.name); return d ? { ...t, changed: d.problem } : t; });
+  }
+  return { spec: m.spec, path: path.relative(repo, file), numbers: m, doc: rest, requirements: reqs, ...(data.length ? { data } : {}) };
 }
 
 function untrackedSpecs(repo) {
@@ -261,6 +287,8 @@ export async function collectReport(repo, { specs: specFiles } = {}) {
         }
       });
       out.coverage = m.coverage;
+      // The last conform run (`veridic conform` saves it), when there is one.
+      try { out.conform = JSON.parse(fs.readFileSync(path.join(repo, ".veridic", "conform", "last.json"), "utf8")); } catch {}
       // The product spec: journeys and guarantees, each in the state of the part rules it names.
       const pf = path.join(repo, "specs/product/spec.md");
       if (fs.existsSync(pf)) {

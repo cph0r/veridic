@@ -112,3 +112,7 @@ body::before { content: ""; position: fixed; inset: 10px; border: 1.5px solid rg
 .legend button { font-family: var(--mono); font-size: 13px; }
 .legend i { border-radius: 0; }
 .empty-req { background: rgba(255,255,255,.04); border: 1px solid var(--line2); border-radius: 3px; }
+/* A data table the schema changed under: a straight amber outline, as on a drawing. */
+.dtab.changed { border: 1.5px solid var(--warn); border-radius: 3px; padding: 10px 12px; }
+table.ex th { color: #d6e6ff; border-bottom: 1.5px solid var(--line2); }
+table.ex td { border-bottom: 1px dashed var(--line); }

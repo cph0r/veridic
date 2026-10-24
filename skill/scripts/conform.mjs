@@ -34,5 +34,7 @@ run(async () => {
     try { seed = JSON.parse(execSync(cfg.seed, { cwd: a.repo, encoding: "utf8", env: { ...process.env, VERIDIC_CONFORM_URL: a.url }, timeout: 300_000 })); } catch (e) { fail(`the seed command failed or didn't print JSON: ${e.message.slice(0, 300)}`); }
   }
   const r = await runChecks(checks, { url: a.url, users: seed.users ?? {}, seeds: seed.seeds ?? {} });
+  // The last run, for the report: each check's outcome beside its example or journey.
+  fs.writeFileSync(path.join(a.repo, ".veridic", "conform", "last.json"), JSON.stringify({ at: new Date().toISOString(), url: a.url, checks: r.checks, passed: r.passed, fidelity_pct: r.fidelity_pct, results: r.results }, null, 1));
   emit({ repo: a.repo, url: a.url, ...(cfg.seed ? {} : { note: "no conform.seed in .veridic.json: checks that need a user or a record aren't run" }), ...r }, r.failed.length ? 1 : 0);
 }, usage);

@@ -59,10 +59,11 @@ async function one(step, { url, users, seeds }) {
 
 /**
  * Run the checks. `users`: { owner: { headers }, other: { headers } }; `seeds`: { param: value }.
- * -> { checks, passed, failed: [{ id, rule, got }], not_run: [{ id, why }], denied: [{ id, got: 403|404 }], fidelity_pct }
+ * -> { checks, passed, failed: [{ id, rule, got }], not_run: [{ id, why }], denied: [{ id, got: 403|404 }],
+ *    results: [{ id, outcome: "passed"|"failed"|"not_run", got?, why? }], fidelity_pct }
  */
 export async function runChecks(checks, { url, users = {}, seeds = {} }) {
-  const out = { checks: checks.length, passed: 0, failed: [], not_run: [], denied: [] };
+  const out = { checks: checks.length, passed: 0, failed: [], not_run: [], denied: [], results: [] };
   for (const c of checks) {
     const steps = c.steps ?? [c];
     let result = { pass: true };
@@ -77,6 +78,8 @@ export async function runChecks(checks, { url, users = {}, seeds = {} }) {
     if (result.notRun) out.not_run.push({ id: c.id, why: result.notRun });
     else if (result.pass) out.passed++;
     else out.failed.push({ id: c.id, rule: c.rule, got: result.got });
+    // One outcome per check, in order (what the report shows beside each example and journey).
+    out.results.push(result.notRun ? { id: c.id, outcome: "not_run", why: result.notRun } : result.pass ? { id: c.id, outcome: "passed", ...(denied.length === 1 ? { got: denied[0] } : {}) } : { id: c.id, outcome: "failed", got: result.got });
   }
   const ran = out.passed + out.failed.length;
   out.fidelity_pct = ran ? Math.round((out.passed / ran) * 1000) / 10 : null;

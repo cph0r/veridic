@@ -330,3 +330,24 @@ table.specs { width: 100%; border-collapse: collapse; font-size: 14px; }
 .pitem .rlist { margin-top: 4px; }
 @media (max-width: 700px) { .product .intro { flex-direction: column; } }
 #key[hidden], #specs-sec[hidden], #v-journeys[hidden], #v-promises[hidden] { display: none !important; }
+/* What the specs carry beyond rules: a rule's worked examples, a part's data tables. */
+.exwrap { overflow-x: auto; margin: 2px 0 6px; }
+table.ex { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+table.ex th { text-align: left; font: 600 11px var(--mono); letter-spacing: .06em; text-transform: uppercase; color: var(--ink3); padding: 4px 8px 4px 0; border-bottom: 1px solid var(--line2); }
+table.ex td { padding: 5px 8px 5px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+.req table.ex code, table.ex code { font: 12px/1.45 var(--mono); overflow-wrap: anywhere; background: none; border: 0; padding: 0; color: var(--ink); }
+table.ex .loc { display: block; margin-top: 2px; }
+.ex .pst, .exl .pst, .prun .pst, .dtab .pst { font-size: 12.5px; white-space: nowrap; }
+.ex .pst.good, .exl .pst.good, .prun .pst.good { color: var(--good); } .ex .pst.bad, .exl .pst.bad, .prun .pst.bad { color: var(--bad); } .ex .pst.none, .exl .pst.none, .prun .pst.none { color: var(--ink2); }
+.ex .pst::before, .exl .pst::before, .prun .pst::before { content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: currentColor; margin-right: 6px; vertical-align: 1px; }
+.ptab .prun { display: block; font-size: 12px; color: var(--ink2); margin-top: 2px; }
+.pitem p.prun { margin: 0 0 12px; }
+.dtab { margin: 14px 0 18px; }
+.dtab .dh { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 4px; }
+.dtab .dh .loc { display: inline; }
+.dtab .why { font-size: 13px; color: var(--warn); margin: 2px 0 6px; }
+.dnote { font-size: 12.5px; color: var(--ink2); margin: 4px 0 0; }
+.exls { margin: 2px 0 6px; }
+.exl { display: flex; gap: 10px; align-items: baseline; padding: 3px 0; cursor: help; }
+.exl .pst { min-width: 72px; }
+.req .exl code { font: 12.5px var(--mono); background: none; padding: 0; color: var(--ink); overflow-wrap: anywhere; }
