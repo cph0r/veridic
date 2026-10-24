@@ -62,11 +62,11 @@ function prismaShape(repo, file, text, line) {
   const relName = (attrs) => attrs.match(/@relation\(\s*(?:name:\s*)?["'](\w+)["']/)?.[1] ?? null;
   // Lists on both sides with no key column: Prisma's implicit join table.
   const listsBack = (field, type, name) => (bodies.get(type) ?? "").split("\n").some((raw) => {
-    const f = raw.replace(/\/\/.*$/, "").trim().match(/^(\w+)\s+(\w+)\[\]\s*(.*)$/);
+    const f = uncomment(raw).trim().match(/^(\w+)\s+(\w+)\[\]\s*(.*)$/);
     return f && f[2] === m[1] && relName(f[3]) === name && !(type === m[1] && f[1] === field);
   });
   for (const raw of m[2].split("\n")) {
-    const l = raw.replace(/\/\/.*$/, "").trim();
+    const l = uncomment(raw).trim();
     if (!l) continue;
     if (l.startsWith("@@")) { later.push(l); continue; }
     const f = l.match(/^(\w+)\s+(\w+)(\[\])?(\?)?\s*(.*)$/);

@@ -184,3 +184,10 @@ test("data: Prisma's implicit many-to-many links (both sides lists), named and s
   assert.deepEqual(u.manyToMany, [{ field: "favorites", table: "Article", via: "UserFavorites" }, { field: "followedBy", table: "User", via: "UserFollows" }, { field: "following", table: "User", via: "UserFollows" }]);
   assert.match(dataMarkdown([a]), /Many-to-many: tagList ↔ Tag; favoritedBy ↔ User \(UserFavorites\)\./);
 });
+
+test("data: a Prisma default with // inside a string (a URL) is kept; a real comment still isn't read", () => {
+  const r = repoOf({ "prisma/schema.prisma": 'model User {\n  id Int @id\n  image String? @default("https://api.example.io/x.jpeg") // the avatar\n  bio String? // @default("not this")\n}\n' });
+  const u = shapeOf(r.repo, "User");
+  r.done();
+  assert.deepEqual(u.columns.map((c) => [c.name, c.default ?? null]), [["id", null], ["image", '"https://api.example.io/x.jpeg"'], ["bio", null]]);
+});
