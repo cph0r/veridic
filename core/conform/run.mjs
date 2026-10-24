@@ -25,7 +25,7 @@ function toJson(body) {
 const literal = (s) => { try { return JSON.parse(String(s).replace(/^'([^']*)'$/, '"$1"')); } catch { return String(s); } };
 const at = (obj, dotted) => String(dotted).split(".").reduce((o, k) => (o == null ? undefined : o[k]), obj);
 
-// In a body or an expected value: {{unique}} is fresh for every request (so a journey can
+// In a path, a body or an expected value: {{unique}} is fresh for every request (so a journey can
 // create a record a check already made), {{name}} is the seed's value.
 let counter = 0;
 const RUN = Date.now().toString(36);
@@ -36,11 +36,11 @@ function fill(s, seeds, unique) {
 
 async function one(step, { url, users, seeds }) {
   const unique = `${RUN}${(++counter).toString(36)}`;
-  const named = [...`${step.request.body ?? ""} ${JSON.stringify(step.expect.fields ?? {})}`.matchAll(/\{\{(\w+)\}\}/g)].map((m) => m[1]).filter((k) => k !== "unique" && seeds[k] == null);
+  const named = [...`${step.request.path} ${step.request.body ?? ""} ${JSON.stringify(step.expect.fields ?? {})}`.matchAll(/\{\{(\w+)\}\}/g)].map((m) => m[1]).filter((k) => k !== "unique" && seeds[k] == null);
   if (named.length) return { notRun: `no seed for ${[...new Set(named)].join(", ")}` };
   const missing = (step.request.path.match(/:(\w+)/g) ?? []).map((p) => p.slice(1)).filter((p) => seeds[p] == null);
   if (missing.length) return { notRun: `no seed for ${missing.join(", ")}` };
-  const path = step.request.path.replace(/:(\w+)/g, (m, k) => encodeURIComponent(seeds[k]));
+  const path = step.request.path.replace(/:(\w+)/g, (m, k) => encodeURIComponent(seeds[k])).replace(/\{\{(\w+)\}\}/g, (m) => encodeURIComponent(fill(m, seeds, unique)));
   const as = step.request.as ?? "owner";
   if (as !== "anon" && !users[as]) return { notRun: `no "${as}" user from the seed` };
   const body = toJson(fill(step.request.body, seeds, unique));

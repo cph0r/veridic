@@ -140,7 +140,7 @@ test("conform: an `as other` row refused with 403 or 404 is a scope check too", 
   assert.deepEqual(c.map((x) => [x.kind, x.expect.status]), [["scope", 403]]);
 });
 
-test("conform run: {{unique}} is fresh for every request, {{name}} comes from the seed (bodies and expected fields)", async () => {
+test("conform run: {{unique}} is fresh for every request, {{name}} comes from the seed (paths, bodies and expected fields)", async () => {
   const { runChecks } = await import("../core/conform/run.mjs");
   const seen = new Set();
   const server = http.createServer((req, res) => {
@@ -151,12 +151,12 @@ test("conform run: {{unique}} is fresh for every request, {{name}} comes from th
       const dup = seen.has(b.title);
       seen.add(b.title);
       res.writeHead(dup ? 422 : 201, { "content-type": "application/json" });
-      res.end(JSON.stringify({ title: b.title, by: b.by }));
+      res.end(JSON.stringify({ title: b.title, by: b.by, q: req.url.split("?")[1] }));
     });
   });
   await new Promise((r) => server.listen(0, "127.0.0.1", r));
   const url = `http://127.0.0.1:${server.address().port}`;
-  const step = { request: { method: "POST", path: "/x", as: "anon", body: '{ title: "T {{unique}}", by: "{{username}}" }' }, expect: { status: 201, fields: { by: '"{{username}}"' } } };
+  const step = { request: { method: "POST", path: "/x?by={{username}}", as: "anon", body: '{ title: "T {{unique}}", by: "{{username}}" }' }, expect: { status: 201, fields: { by: '"{{username}}"', q: '"by=ann"' } } };
   const r = await runChecks([{ id: "a", ...step }, { id: "b", steps: [step, step] }], { url, seeds: { username: "ann" } });
   server.close();
   assert.equal(r.passed, 2, JSON.stringify(r.failed));
