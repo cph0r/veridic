@@ -138,4 +138,14 @@ package.json.
 
 ## Results
 
-(filled in at each checkpoint)
+**Phase 1 (2026-10-24).** Data and environment specs:
+
+| App | Tables (columns read) | Columns | Foreign keys | Env vars (required) | Services |
+|---|---|---|---|---|---|
+| RealWorld (Prisma) | 8 (8) | 31 | 3 | 4 (0) | none |
+| saas-starter (Next.js, Drizzle) | 5 (5) | 35 | 6 | 5 (1) | Postgres, Stripe |
+| CloudCrane copy (Drizzle) | 19 (19) | 154 | 28 | 38 (1) | Postgres |
+
+Found on CloudCrane and fixed with a test: an apostrophe in a schema comment hid a table's
+columns (13 -> 19 of 19). Vite and system built-ins (DEV, PROD, BASE_URL, HOME, PATH) are left
+out of the env vars. CloudCrane gate: every number unchanged; Express unchanged.
