@@ -150,12 +150,12 @@ export function rangeWarnings(lines) {
 }
 
 /**
- * A citation's text, hashed: the first 6 hex of SHA-256 over the cited lines, each trimmed,
+ * A citation's text, hashed: the first 8 hex of SHA-256 (6 in specs stamped by 0.12.0-0.12.2, still read) over the cited lines, each trimmed,
  * joined with newlines. Written after the range (`a.ts:2-3~3f9a1c`), it records what the
  * citation pointed at, so it can be checked against the code without asking git.
  */
 export function citeHash(lines) {
-  return createHash("sha256").update(lines.map((l) => l.trim()).join("\n")).digest("hex").slice(0, 6);
+  return createHash("sha256").update(lines.map((l) => l.trim()).join("\n")).digest("hex").slice(0, 8);
 }
 
 /** Where a file was renamed to since the last commit (git's rename detection), or null. */
@@ -195,9 +195,10 @@ export function textCheck(repo, c, resolve, { base = "HEAD" } = {}) {
     if (!src) return { state: "stale", deleted: true };
   }
   const len = c.end - c.start + 1;
-  if (!renamed && citeHash(src.slice(c.start - 1, c.end)) === c.hash && c.end <= src.length) return { state: "fresh" };
+  const same = (lines) => citeHash(lines).startsWith(c.hash);
+  if (!renamed && same(src.slice(c.start - 1, c.end)) && c.end <= src.length) return { state: "fresh" };
   const found = [];
-  for (let s = 1; s + len - 1 <= src.length; s++) if (citeHash(src.slice(s - 1, s - 1 + len)) === c.hash) found.push(s);
+  for (let s = 1; s + len - 1 <= src.length; s++) if (same(src.slice(s - 1, s - 1 + len))) found.push(s);
   if (!found.length) return { state: "stale" };
   // Common text (`return next();`) can be anywhere: one copy is where it went; several are
   // trusted only for a citation of 2+ lines with one copy strictly nearest. Else it's for a person.

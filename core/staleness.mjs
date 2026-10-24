@@ -152,7 +152,7 @@ export function staleness(repo, spec, opts = {}) {
       if (t.state === "fresh") untouched++;
       else if (t.state === "stale") stale.push({ ...at, file: now, change: t.deleted ? "deleted" : t.ambiguous ? `edited (the cited text changed; the same text is in ${t.ambiguous} other places)` : "edited (the cited text changed)", hunk: null });
       else if (t.state === "moved") {
-        shifted.push({ ...at, file: now, now: `${t.file ?? now}:${t.start}-${t.end}`, ...(t.file ? { renamed_to: t.file } : {}) });
+        shifted.push({ ...at, file: now, now: `${t.file ?? now}:${t.start}${t.end !== t.start ? `-${t.end}` : ""}`, ...(t.file ? { renamed_to: t.file } : {}) });
         const anchor = c.anchor ? { name: c.anchor.name, line: c.anchor.line + t.start - c.start } : null;
         fixes.push({ ...at, replacement: formatCite(t.file ?? c.file, t.start, t.end, anchor, c.hash), method: "text" });
       }

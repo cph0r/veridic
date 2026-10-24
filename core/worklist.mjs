@@ -12,8 +12,8 @@ import { testCoverage, testsIn, specQual } from "./tests.mjs";
 import { testRecipe, exampleTest } from "./recipe.mjs";
 
 // Coverage statuses, in the work list's words.
-const STATUS = { covered: "tested", passing: "tested", broken: "broken", failing: "failing", marker_stale: "failing", unasserted: "weak", tagged_only: "weak", ambiguous: "weak", todo: "untested", none: "untested" };
-const REASON = { marker_stale: "its expected-failure test now fails: the code satisfies the rule, so make it a normal test", ambiguous: "a test names this id, but it also runs another spec's rule with the same id: write the id with its spec, e.g. `FR-008 (auth-2)`" };
+export const STATUS = { covered: "tested", passing: "tested", broken: "broken", failing: "failing", marker_stale: "failing", unasserted: "weak", tagged_only: "weak", ambiguous: "weak", skipped: "skipped", todo: "untested", none: "untested" };
+const REASON = { skipped: "its tests run only with an env flag set (add it to .veridic.json \"testEnv\" to run them)", marker_stale: "its expected-failure test now fails: the code satisfies the rule, so make it a normal test", ambiguous: "a test names this id, but it also runs another spec's rule with the same id: write the id with its spec, e.g. `FR-008 (auth-2)`" };
 // Rules, not success criteria (SC-…): those describe outcomes and cite no code to test.
 const RULE = /^\s*(?:-\s*\*\*|#{1,6}\s+)((?:FR|NFR|AC|INV)-\d+[a-z]?)\b/;
 

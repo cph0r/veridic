@@ -26,11 +26,18 @@ run(() => {
   let product = [];
   if (PRODUCT_SPEC.test(path.resolve(specPath))) {
     const specs = {};
-    const files = execFileSync("git", ["ls-files", "--cached", "--others", "--exclude-standard", "--", "specs/*/spec.md"], { cwd: a.repo, encoding: "utf8" }).split("\n").filter(Boolean);
+    // Every specs/<folder>/spec.md (from git, or the folder itself outside git), and its rule ids
+    // however they're written: **FR-001**, a heading, a list item, a table row.
+    let files = [];
+    try {
+      files = execFileSync("git", ["ls-files", "--cached", "--others", "--exclude-standard", "--", "specs/*/spec.md"], { cwd: a.repo, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).split("\n").filter(Boolean);
+    } catch {
+      try { files = fs.readdirSync(path.join(a.repo, "specs")).map((d) => `specs/${d}/spec.md`).filter((f) => fs.existsSync(path.join(a.repo, f))); } catch {}
+    }
     for (const f of files) {
       const folder = f.split("/").slice(-2)[0];
       if (folder === "product") continue;
-      specs[folder] = [...fs.readFileSync(path.join(a.repo, f), "utf8").matchAll(/^\s*(?:[-*]\s*\*\*|#{1,6}\s+)((?:FR|NFR|AC|INV)-?\d+[a-z]?)\b/gm)].map((m) => m[1]);
+      specs[folder] = [...fs.readFileSync(path.join(a.repo, f), "utf8").matchAll(/^\s*(?:[-*]\s*\*\*|#{1,6}\s+|\|\s*|[-*]\s+|\d+\.\s+)((?:FR|NFR|AC|INV)-?\d+[a-z]?)\b/gm)].map((m) => m[1]);
     }
     product = productProblems(parseProduct(text), specs);
   }

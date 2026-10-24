@@ -153,7 +153,7 @@ test("citations: checked by their text", async () => {
   const body = ["export function pay(order) {", "  if (order.paid) throw new Error('paid');", "  order.paid = true;", "}"];
   write(body.join("\n") + "\n");
   const hash = citeHash(body.slice(1, 3));
-  assert.match(hash, /^[0-9a-f]{6}$/);
+  assert.match(hash, /^[0-9a-f]{8}$/);
   assert.equal(citeHash(["  " + body[1].trim() + "   ", body[2]]), hash, "whitespace around a line doesn't matter");
   const parsed = parseSpec(`- **FR-001**: pays once [evidence: a.ts:2-3#pay@1~${hash}]\n- **FR-002**: old [evidence: a.ts:2-3]\n`);
   assert.deepEqual(parsed.citations[0], { fr: "FR-001", spec_line: 1, cite: `a.ts:2-3#pay@1~${hash}`, file: "a.ts", start: 2, end: 3, anchor: { name: "pay", line: 1 }, hash });

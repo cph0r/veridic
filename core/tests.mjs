@@ -59,7 +59,7 @@ const relImports = (repo, file, files) => {
     for (const a of m[1].matchAll(/["'`](\.{0,2}\/?[\w@.\/-]+\.(?:[cm]?[jt]s|sh|py))["'`]/g)) {
       const rel = a[1].replace(/^\.\//, "");
       const near = path.posix.dirname(file);
-      for (const c of [rel, path.posix.normalize(path.posix.join(near, a[1])), ...pkgDirsOf(file).map((d) => path.posix.join(d, rel))]) if (files.has(c)) { out.push(c); break; }
+      for (const c of [path.posix.normalize(path.posix.join(near, a[1])), ...pkgDirsOf(file).map((d) => path.posix.join(d, rel)), rel]) if (files.has(c)) { out.push(c); break; }
     }
   return out;
 };
@@ -607,6 +607,8 @@ export function fileCoverage(repo, framework, testFile) {
       if (d === repo || d === path.dirname(d)) return false;
     }
   };
+  if (framework === "vitest" && !installed("@vitest/coverage-v8")) return { unavailable: "@vitest/coverage-v8 not installed" };
+  if (!["node:test", "vitest", "jest"].includes(framework)) return { unavailable: framework ? `no coverage for ${framework}` : "no test framework found" };
   const out = fs.mkdtempSync(path.join(os.tmpdir(), "veridic-cov-"));
   const lcov = path.join(out, "lcov.info");
   const rel = path.relative(pkg, abs);
@@ -619,7 +621,10 @@ export function fileCoverage(repo, framework, testFile) {
     spawnSync("npx", ["--no-install", "vitest", "run", rel, "--coverage.enabled", "--coverage.provider=v8", "--coverage.reporter=lcov", `--coverage.reportsDirectory=${out}`, "--coverage.all=false"], opts);
   } else if (framework === "jest") spawnSync("npx", ["--no-install", "jest", rel, "--coverage", "--coverageReporters=lcov", `--coverageDirectory=${out}`], opts);
   else return { unavailable: framework ? `no coverage for ${framework}` : "no test framework found" };
-  if (!fs.existsSync(lcov)) return { unavailable: `${framework} wrote no coverage report` };
+  if (!fs.existsSync(lcov)) {
+    fs.rmSync(out, { recursive: true, force: true });
+    return { unavailable: `${framework} wrote no coverage report` };
+  }
   const hits = new Map();
   let file = null;
   for (const l of fs.readFileSync(lcov, "utf8").split("\n")) {
@@ -827,6 +832,7 @@ export function testCoverage(repo, spec, opts = {}) {
       })(),
       tagged_only: count("tagged_only"),
       unasserted: count("unasserted"),
+      skipped: count("skipped"),
       ...(() => {
         const live = tagged.filter((t) => !t.todo);
         const by = (s) => live.filter((t) => t.strength === s).map((t) => `${t.file}:${t.line}`);
