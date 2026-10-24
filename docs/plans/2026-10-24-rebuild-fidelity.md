@@ -149,3 +149,16 @@ package.json.
 Found on CloudCrane and fixed with a test: an apostrophe in a schema comment hid a table's
 columns (13 -> 19 of 19). Vite and system built-ins (DEV, PROD, BASE_URL, HOME, PATH) are left
 out of the env vars. CloudCrane gate: every number unchanged; Express unchanged.
+
+**Phase 3 (2026-10-24).** The conformance suite against the original RealWorld, run locally
+(Postgres in Docker, a seed script that registers two users and makes an article and a
+comment through the API): 48 of 48 checks pass (12 signed out, 3 another user refused, 29
+worked examples, 4 journeys), and 22 of 22 held-out rows written from the rules' text alone.
+What the first run found, each fixed with a test: optional guards were sent 401 checks;
+"another user is refused" was guessed from the caller's id being used (anyone may favourite
+an article), so those checks now come only from spec rows; rows that create records need
+fresh values when a journey replays them (`{{unique}}`) and seeded ones (`{{name}}`, in
+paths too); rendered specs never got their data tables; the environment spec missed
+`DATABASE_URL` from Prisma's `env()`; Prisma's many-to-many links weren't read. RealWorld's
+specs gained examples and two parts (profiles, tags). CloudCrane gate: unchanged throughout.
+
