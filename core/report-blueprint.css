@@ -72,10 +72,10 @@ body::before { content: ""; position: fixed; inset: 10px; border: 1.5px solid rg
 .rbar b.good { background: var(--good); } .rbar b.warn { background: var(--warn); } .rbar b.bad { background: var(--bad); }
 .rbar b.weak { background: rgba(255,213,122,.45); } .rbar b.none { background: var(--hatch); }
 
-/* Revision marks: Δ for a rule the code changed under, and a cloud around it in the sheet. */
+/* Revision marks: Δ for a rule the code changed under, and a straight amber outline around it in the sheet. */
 .rev { font: 700 12px/1 var(--mono); color: var(--warn); border: 1.2px solid var(--warn); padding: 1px 4px; border-radius: 2px; margin-right: 6px; vertical-align: 1px; }
 .snm .rev { margin: 0 0 0 8px; }
-.req.rev-cloud { border: 9px solid transparent; border-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='36' height='36'%3E%3Cpath d='M0 6A4.5 4.5 0 0 1 9 6A4.5 4.5 0 0 1 18 6A4.5 4.5 0 0 1 27 6A4.5 4.5 0 0 1 36 6M30 0A4.5 4.5 0 0 1 30 9A4.5 4.5 0 0 1 30 18A4.5 4.5 0 0 1 30 27A4.5 4.5 0 0 1 30 36M36 30A4.5 4.5 0 0 1 27 30A4.5 4.5 0 0 1 18 30A4.5 4.5 0 0 1 9 30A4.5 4.5 0 0 1 0 30M6 36A4.5 4.5 0 0 1 6 27A4.5 4.5 0 0 1 6 18A4.5 4.5 0 0 1 6 9A4.5 4.5 0 0 1 6 0' fill='none' stroke='%23ffd57a' stroke-width='1.4'/%3E%3C/svg%3E") 9 round; padding: 6px 8px; margin: 10px 0; }
+.req.rev-cloud { border: 1.5px solid var(--warn); border-radius: 3px; padding: 10px 12px; margin: 10px 0; }
 
 /* The key, once, like the legend on every drawing. */
 .key { display: flex; flex-wrap: wrap; gap: 10px 22px; align-items: center; margin-top: 28px; padding: 12px 16px; border: 1px solid var(--line2); border-radius: 3px; background: var(--panel); font-family: var(--mono); font-size: 12.5px; color: var(--ink2); }

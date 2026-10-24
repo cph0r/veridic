@@ -424,7 +424,7 @@ var veridicModel = (D) => {
     const where = (r.cites || []).map((c) => '<span class="loc' + (c.resolves === false ? " gone" : "") + '">' + esc(c.cite) + "</span>").join("");
     const tests = (r.tests || []).map((x) => '<span class="loc">' + esc(x) + "</span>").join("");
     const checks = (r.checks || []).map((c) => "<li>" + esc(c.text || "") + "</li>").join("");
-    // A rule the code changed under (or whose code is gone) gets a revision cloud and a Δ, as on a drawing.
+    // A rule the code changed under (or whose code is gone) gets a straight amber outline and a Δ, as on a drawing.
     const rev = st.key === "stale" || st.key === "lost";
     return '<button class="req' + (rev ? " rev-cloud" : "") + (g ? " x" : "") + '"' + hid(g) + ' data-rule="' + esc(r.id) + '"><span class="mark ' + st.tone + '">' + (rev ? "Δ" : st.mark) + '</span><span class="tx"><span><span class="rid">' + esc(r.id) + "</span> " + t.head + '</span><div class="why">' + esc(st.label) + "</div>" +
       '<div class="more">' + (t.rest ? "<p>" + t.rest + "</p>" : "") + (checks ? '<div class="mh">Checks</div><ul>' + checks + "</ul>" : "") + (where ? '<div class="mh">In the code</div>' + where : "") + (tests ? '<div class="mh">Proven by</div>' + tests : "") + "</div></span></button>";
