@@ -6,6 +6,41 @@
   "bin": {
     "veridic": "bin/veridic"
   },
+  "exports": {
+    "./package.json": "./package.json",
+    "./graph": {
+      "types": "./types/graph.d.ts",
+      "default": "./core/graph.mjs"
+    },
+    "./indexer": {
+      "types": "./types/indexer.d.ts",
+      "default": "./core/indexer.mjs"
+    },
+    "./staleness": {
+      "types": "./types/staleness.d.ts",
+      "default": "./core/staleness.mjs"
+    },
+    "./citations": {
+      "types": "./types/citations.d.ts",
+      "default": "./core/citations.mjs"
+    },
+    "./basis": {
+      "types": "./types/basis.d.ts",
+      "default": "./core/basis.mjs"
+    },
+    "./anchors": {
+      "types": "./types/anchors.d.ts",
+      "default": "./core/anchors.mjs"
+    },
+    "./tokens": {
+      "types": "./types/tokens.d.ts",
+      "default": "./core/tokens.mjs"
+    },
+    "./product": {
+      "types": "./types/product.d.ts",
+      "default": "./core/product.mjs"
+    }
+  },
   "files": [
     "bin/",
     "core/",
@@ -17,7 +52,8 @@
     "README.md",
     "LICENSE",
     "NOTICE",
-    "PRIVACY.md"
+    "PRIVACY.md",
+    "types/"
   ],
   "engines": {
     "node": ">=22.5"
